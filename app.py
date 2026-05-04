@@ -81,4 +81,92 @@ if mode == "📍 1. Installation":
         total = len(st.session_state.optimized_route)
         completed = sum(1 for data in st.session_state.site_data.values() if data["INSTALLED"] == "x")
         
-        st.metric("Installation Progress",
+        st.metric("Installation Progress", f"{completed} / {total} Sites")
+        st.progress(completed / total if total > 0 else 0)
+        
+        for i, site in enumerate(st.session_state.optimized_route):
+            sid = site['id']
+            s_data = st.session_state.site_data[sid]
+            is_done = s_data["INSTALLED"] == "x"
+            
+            icon = "✅" if is_done else "📝"
+            
+            with st.expander(f"{icon} Stop {i+1}: Site {sid}"):
+                if not is_done:
+                    maps_url = f"https://www.google.com/maps/dir/?api=1&destination={site['lat']},{site['lon']}"
+                    st.link_button("🚗 Start Drive", maps_url)
+                    
+                    st.markdown("### Log Installation")
+                    with st.form(key=f"install_form_{sid}"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            direction = st.selectbox("Direction", ["N", "E", "S", "W"], index=0 if s_data["DIR"] == "N" else 1)
+                        with col2:
+                            lanes = st.number_input("Lanes", min_value=1, step=1, value=int(s_data["LANES"]))
+                        
+                        notes = st.text_input("Install Notes", value=s_data["NOTES"])
+                        
+                        if st.form_submit_button("Save & Mark Installed"):
+                            mil_time, current_date = get_california_time()
+                            
+                            st.session_state.site_data[sid].update({
+                                "DATE": current_date,
+                                "TIME": mil_time,
+                                "DIR": direction,
+                                "LANES": lanes,
+                                "NOTES": notes,
+                                "INSTALLED": "x"
+                            })
+                            st.rerun()
+                else:
+                    st.success(f"Installed at {s_data['TIME']} on {s_data['DATE']}.")
+                    st.write(f"**Lanes:** {s_data['LANES']} | **Dir:** {s_data['DIR']} | **Counter:** {s_data['COUNTER']}")
+
+        st.divider()
+        if st.button("Reset Day / Start Over"):
+            st.session_state.optimized_route = []
+            st.session_state.site_data = {}
+            st.rerun()
+
+elif mode == "♻️ 2. Pick-Up & Export":
+    st.subheader("Pick-Up Itinerary")
+    
+    installed_sites = [data for sid, data in st.session_state.site_data.items() if data["INSTALLED"] == "x"]
+    
+    if not installed_sites:
+        st.info("No sites have been marked as installed yet.")
+    else:
+        for s_data in installed_sites:
+            sid = s_data["SITE"]
+            is_picked = s_data["PICKED UP"] == "x"
+            
+            icon = "✅" if is_picked else "📦"
+            with st.expander(f"{icon} Pick Up: Site {sid}"):
+                if not is_picked:
+                    maps_url = f"https://www.google.com/maps/dir/?api=1&destination={s_data['LAT']},{s_data['LON']}"
+                    st.link_button("🚗 Drive to Pick-Up", maps_url)
+                    
+                    with st.form(key=f"pickup_form_{sid}"):
+                        pickup_notes = st.text_input("Pick-Up Notes", value=s_data["NOTES"], placeholder="Any damage or issues?")
+                        if st.form_submit_button("Mark Picked Up"):
+                            st.session_state.site_data[sid]["PICKED UP"] = "x"
+                            st.session_state.site_data[sid]["NOTES"] = pickup_notes
+                            st.rerun()
+                else:
+                    st.success("Equipment secured.")
+                    st.write(f"Final Notes: {s_data['NOTES']}")
+        
+        st.divider()
+        st.subheader("Export Excel Data")
+        
+        export_df = pd.DataFrame(installed_sites)
+        export_df = export_df[["DATE", "TIME", "SITE", "DIR", "LANES", "COUNTER", "NOTES", "INSTALLED", "PICKED UP"]]
+        
+        csv_data = export_df.to_csv(index=False).encode('utf-8')
+        
+        st.download_button(
+            label="📊 Download Final Data Sheet",
+            data=csv_data,
+            file_name=f"Traffic_Data_{datetime.now(ZoneInfo('America/Los_Angeles')).strftime('%Y_%m_%d')}.csv",
+            mime="text/csv"
+        )

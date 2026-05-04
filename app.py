@@ -11,32 +11,29 @@ if "installed_sites" not in st.session_state:
 uploaded_file = st.file_uploader("Upload Today's .est Map", type="est")
 
 if uploaded_file:
-    # Read as raw bytes first since it's an OLE binary file
-    raw_bytes = uploaded_file.read()
+    # Read the binary data 
+    raw_data = uploaded_file.read()
     
-    # Convert to string while ignoring binary errors
-    content = raw_bytes.decode("latin-1", errors="ignore")
+    # Extract only readable strings (3+ characters) from the binary container 
+    readable_text = "".join([chr(b) if 32 <= b < 127 else " " for b in raw_data])
     
-    # This pattern is specifically tuned for the Streets & Trips data dump format
-    # It looks for: [4-digit ID] [Address/City] [5-digit Zip] [Lat] [Lon]
-    pattern = r'(\d{4})\s+([\w\s]+?)\s+\d{5}\s+(-?\d{2,3}\.\d+)\s+(-?\d{2,3}\.\d+)'
-    matches = re.findall(pattern, content)
+    # Pattern tuned for Streets & Trips: [SiteID] [Address/City] [Zip] [Lat] [Lon] [cite: 10, 11]
+    # We look for a 4-digit ID followed by a zip code and then two decimal numbers
+    pattern = r'(\d{4})\s+(.*?)\s+(\d{5})\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)'
+    matches = re.findall(pattern, readable_text)
     
     if matches:
         data = []
         for m in matches:
             sid = m[0]
-            # Coordinates in Streets & Trips are sometimes flipped or duplicated
-            # We ensure we capture them correctly as floats
             data.append({
                 "Site ID": sid,
                 "Location": m[1].strip(),
-                "Lat": float(m[2]),
-                "Lon": float(m[3]),
-                "Maps": f"https://www.google.com/maps/dir/?api=1&destination={m[2]},{m[3]}"
+                "Lat": float(m[3]),
+                "Lon": float(m[4]),
+                "Maps": f"https://www.google.com/maps/dir/?api=1&destination={m[3]},{m[4]}"
             })
             
-        # Clean up duplicates (common in .est binary exports)
         df = pd.DataFrame(data).drop_duplicates(subset=["Site ID", "Lat"])
         
         # Dashboard
@@ -48,7 +45,7 @@ if uploaded_file:
         st.subheader("Installation Route")
         for i, row in df.iterrows():
             sid = row['Site ID']
-            needs_photo = i < 5 #
+            needs_photo = i < 5 # Requirement: First 5 installs need photos
             
             if sid not in st.session_state.installed_sites:
                 st.session_state.installed_sites[sid] = False
@@ -59,16 +56,16 @@ if uploaded_file:
                 if needs_photo and not st.session_state.installed_sites[sid]:
                     st.warning("📸 PHOTO REQUIRED: This is one of your first 5 installs.")
                 
-                st.write(f"**GPS:** {row['Lat']}, {row['Lon']}")
-                
                 col1, col2 = st.columns(2)
                 with col1:
-                    # Direct Directions Link
                     st.link_button("🚗 Start Drive", row['Maps'])
                 with col2:
-                    if st.button("Complete", key=f"btn_{sid}"):
+                    if st.button("Mark Complete", key=f"btn_{sid}"):
                         st.session_state.installed_sites[sid] = True
                         st.rerun()
     else:
-        st.error("Still no data detected.")
-        st.info("The file is encrypted or uses a different binary structure. Try opening the .est file in Notepad on your PC and paste a small piece of the actual 'readable' text here.")
+        st.error("No data found in binary stream.")
+        st.info("The coordinates might be stored as raw doubles (not text).")
+        # Fallback: Show a snippet of the 'cleaned' text to help us debug
+        with st.expander("Debug: Cleaned Text Snippet"):
+            st.text(readable_text[2000:5000])

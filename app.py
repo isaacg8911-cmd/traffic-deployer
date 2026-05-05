@@ -17,7 +17,6 @@ BACKUP_FILE = "field_backup.json"
 
 # --- AUTO-SAVE LOGIC ---
 def save_state():
-    """Saves your daily route to a background file to prevent mobile browser refresh data loss."""
     backup_data = {
         "active_file_name": st.session_state.active_file_name,
         "optimized_route": st.session_state.optimized_route,
@@ -27,7 +26,6 @@ def save_state():
         json.dump(backup_data, f)
 
 def load_state():
-    """Loads the route if you accidentally close your phone browser."""
     if os.path.exists(BACKUP_FILE):
         with open(BACKUP_FILE, "r") as f:
             backup_data = json.load(f)
@@ -39,14 +37,12 @@ def load_state():
 
 # --- SESSION STATES ---
 if "initialized" not in st.session_state:
-    loaded = load_state()
-    if not loaded:
+    if not load_state():
         st.session_state.active_file_name = None
         st.session_state.optimized_route = []
         st.session_state.site_data = {} 
     st.session_state.initialized = True
 
-# --- HELPER FUNCTIONS ---
 def get_california_time():
     now = datetime.now(ZoneInfo("America/Los_Angeles"))
     if now.minute > 0 or now.second > 0:
@@ -60,21 +56,20 @@ def calculate_distance(p1, p2):
 tab1, tab2, tab3, tab4 = st.tabs(["📁 Vault", "📍 Install", "♻️ Pick-Up", "📊 Data"])
 
 # ==========================================
-# TAB 1: FILE VAULT & PROCESSING
+# TAB 1: FILE VAULT & VISUAL GRID
 # ==========================================
 with tab1:
     st.subheader("Map Management")
     
     if not st.session_state.active_file_name:
-        uploaded_file = st.file_uploader("Upload .est Map to begin your route", type=["est", "txt"])
+        uploaded_file = st.file_uploader("Upload .est Map to begin", type=["est", "txt"])
         
         if uploaded_file:
-            with st.spinner("Analyzing map and calculating optimal route..."):
+            with st.spinner("Calculating route and generating visual grid..."):
                 time.sleep(1) 
                 try:
                     raw_data = uploaded_file.read()
                     readable_text = "".join([chr(b) if 32 <= b < 127 else " " for b in raw_data])
-                    
                     site_pattern = r'(\d{4})\s+.*?\s+(\d{5})\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)'
                     matches = re.findall(site_pattern, readable_text)
                     
@@ -82,12 +77,10 @@ with tab1:
                         raw_sites = []
                         for m in matches:
                             sid = m[0]
-                            if sid == "3333": # Block internal Microsoft glitch
-                                continue 
+                            if sid == "3333": continue 
                             raw_sites.append({"id": sid, "lat": float(m[2]), "lon": float(m[3])})
                             
                         midpoint_data = pd.DataFrame(raw_sites).groupby("id").mean().reset_index()
-                        
                         temp_route = []
                         current_pos = HOME_COORDS
                         remaining = midpoint_data.to_dict('records')
@@ -98,7 +91,6 @@ with tab1:
                             current_pos = (next_stop['lat'], next_stop['lon'])
                             remaining.remove(next_stop)
                         
-                        # Save to memory
                         st.session_state.optimized_route = temp_route
                         st.session_state.active_file_name = uploaded_file.name
                         
@@ -110,27 +102,30 @@ with tab1:
                                     "Lanes": 1, "Notes": "", "Installed": "", "Picked up": "",
                                     "LAT": site['lat'], "LON": site['lon'] 
                                 }
-                        
-                        save_state() # Trigger auto-save
+                        save_state()
                         st.rerun()
-                    else:
-                        st.error("No valid sites found in the file.")
                 except Exception as e:
-                    st.error(f"Error processing file: {e}")
+                    st.error(f"Error: {e}")
             
     else:
-        st.success(f"🔒 Securely Loaded: {st.session_state.active_file_name}")
-        st.info("You do not need to upload this file again. Your progress is auto-saving.")
+        st.success(f"🔒 Active Map: {st.session_state.active_file_name}")
         
-        st.divider()
-        st.markdown("### Job Completion")
-        st.write("Only delete the file when the entire route (including pick-up) is fully complete and exported.")
-        if st.button("🗑️ Delete Current Job & Start Fresh", type="primary", use_container_width=True):
+        # --- THE VISUAL GRID RENDER ---
+        st.markdown("### 🗺️ Route Overview")
+        map_df = pd.DataFrame(st.session_state.optimized_route)
+        # Add Home Base to the visual for context
+        home_df = pd.DataFrame([{"id": "HOME", "lat": HOME_COORDS[0], "lon": HOME_COORDS[1]}])
+        full_map_view = pd.concat([home_df, map_df], ignore_index=True)
+        
+        st.map(full_map_view, zoom=9, use_container_width=True)
+        
+        st.info("The map above shows your optimized sequence starting from Garden Grove.")
+        
+        if st.button("🗑️ Delete Job & Start Fresh", type="primary", use_container_width=True):
             st.session_state.active_file_name = None
             st.session_state.optimized_route = []
             st.session_state.site_data = {}
-            if os.path.exists(BACKUP_FILE):
-                os.remove(BACKUP_FILE)
+            if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.rerun()
 
 # ==========================================
@@ -138,139 +133,76 @@ with tab1:
 # ==========================================
 with tab2:
     if not st.session_state.optimized_route:
-        st.info("👈 Please load a map in the Vault first.")
+        st.info("👈 Load a map in the Vault first.")
     else:
         total = len(st.session_state.optimized_route)
         completed = sum(1 for data in st.session_state.site_data.values() if data["Installed"] == "x")
-        
-        st.metric("Installation Progress", f"{completed} / {total} Sites")
+        st.metric("Daily Progress", f"{completed} / {total} Sites")
         st.progress(completed / total if total > 0 else 0)
         
         for i, site in enumerate(st.session_state.optimized_route):
             sid = site['id']
             s_data = st.session_state.site_data[sid]
             is_done = s_data["Installed"] == "x"
-            
             icon = "✅" if is_done else "📝"
             
             with st.expander(f"{icon} Stop {i+1}: Site {sid}"):
                 if not is_done:
-                    maps_url = f"https://www.google.com/maps/dir/?api=1&destination={site['lat']},{site['lon']}"
-                    st.link_button("🚗 Start Drive", maps_url)
-                    
-                    st.markdown("### Log Installation")
-                    with st.form(key=f"install_form_{sid}"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            dir_options = ["n", "e", "s", "w"]
-                            current_dir = s_data.get("Directions", "n")
-                            safe_index = dir_options.index(current_dir) if current_dir in dir_options else 0
-                            direction = st.selectbox("Direction", dir_options, index=safe_index)
-                            
-                        with col2:
+                    st.link_button("🚗 Start GPS", f"https://www.google.com/maps/dir/?api=1&destination={site['lat']},{site['lon']}")
+                    with st.form(key=f"ins_{sid}"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            direction = st.selectbox("Direction", ["n", "e", "s", "w"], index=["n", "e", "s", "w"].index(s_data["Directions"]))
+                        with c2:
                             lanes = st.number_input("Lanes", min_value=0, step=1, value=int(s_data["Lanes"]))
-                        
                         serial = st.text_input("Serial Number", value=s_data["Serial"])
-                        notes = st.text_input("Install Notes", value=s_data["Notes"])
-                        
+                        notes = st.text_input("Notes", value=s_data["Notes"])
                         if st.form_submit_button("Save & Mark Installed"):
-                            if lanes < 1:
-                                st.error("⚠️ Error: Lanes must be 1 or greater.")
+                            if lanes < 1: st.error("Lanes required.")
                             else:
-                                mil_time, current_date = get_california_time()
-                                mapped_direction = "n" if direction in ["n", "s"] else "e"
-                                
+                                t, d = get_california_time()
                                 st.session_state.site_data[sid].update({
-                                    "Date": current_date,
-                                    "Time": mil_time,
-                                    "Directions": mapped_direction, 
-                                    "Serial": serial.strip(),
-                                    "Lanes": lanes,
-                                    "Notes": notes.strip(),
-                                    "Installed": "x"
+                                    "Date": d, "Time": t, "Directions": "n" if direction in ["n", "s"] else "e", 
+                                    "Serial": serial.strip(), "Lanes": lanes, "Notes": notes.strip(), "Installed": "x"
                                 })
-                                save_state() # Auto-save progress
-                                st.rerun()
+                                save_state(); st.rerun()
                 else:
-                    st.success(f"Installed at {s_data['Time']} on {s_data['Date']}.")
-                    st.write(f"**Lanes:** {s_data['Lanes']} | **Dir:** {s_data['Directions']} | **Counter:** {s_data['Counter']} | **Serial:** {s_data['Serial']}")
-                    st.write(f"**Notes:** {s_data['Notes']}")
-                    
-                    if st.button("✏️ Edit Entry", key=f"edit_install_{sid}"):
-                        st.session_state.site_data[sid]["Installed"] = ""
-                        save_state()
-                        st.rerun()
+                    st.write(f"Done at {s_data['Time']} | Lanes: {s_data['Lanes']} | Dir: {s_data['Directions']}")
+                    if st.button("✏️ Edit", key=f"ed_ins_{sid}"):
+                        st.session_state.site_data[sid]["Installed"] = ""; save_state(); st.rerun()
 
 # ==========================================
 # TAB 3: PICK-UP
 # ==========================================
 with tab3:
-    installed_sites = [data for sid, data in st.session_state.site_data.items() if data["Installed"] == "x"]
-    
-    if st.session_state.optimized_route:
-        missing_sites = [s['id'] for s in st.session_state.optimized_route if st.session_state.site_data[s['id']]["Installed"] != "x"]
-        if missing_sites:
-            st.error(f"🛑 SYSTEM AUDIT: {len(missing_sites)} sites not marked installed!")
-            st.write(f"**Missing:** {', '.join(missing_sites)}")
-        elif installed_sites:
-            st.success("✅ SYSTEM AUDIT: 100% of map sites accounted for.")
-    
-    if not installed_sites:
-        st.info("No sites have been marked as installed yet.")
+    installed = [d for sid, d in st.session_state.site_data.items() if d["Installed"] == "x"]
+    if not installed: st.info("No sites installed yet.")
     else:
-        st.subheader("Pick-Up Itinerary")
-        for s_data in installed_sites:
-            sid = s_data["Site"]
-            is_picked = s_data["Picked up"] == "x"
-            
+        for s in installed:
+            sid = s["Site"]; is_picked = s["Picked up"] == "x"
             icon = "✅" if is_picked else "📦"
             with st.expander(f"{icon} Pick Up: Site {sid}"):
                 if not is_picked:
-                    maps_url = f"https://www.google.com/maps/dir/?api=1&destination={s_data['LAT']},{s_data['LON']}"
-                    st.link_button("🚗 Drive to Pick-Up", maps_url)
-                    
-                    with st.form(key=f"pickup_form_{sid}"):
-                        pickup_notes = st.text_input("Pick-Up Notes", value=s_data["Notes"])
+                    st.link_button("🚗 GPS", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}")
+                    with st.form(key=f"pu_{sid}"):
+                        p_notes = st.text_input("Notes", value=s["Notes"])
                         if st.form_submit_button("Mark Picked Up"):
                             st.session_state.site_data[sid]["Picked up"] = "x"
-                            st.session_state.site_data[sid]["Notes"] = pickup_notes.strip()
-                            save_state() # Auto-save progress
-                            st.rerun()
+                            st.session_state.site_data[sid]["Notes"] = p_notes.strip()
+                            save_state(); st.rerun()
                 else:
-                    st.success("Equipment secured.")
-                    st.write(f"Final Notes: {s_data['Notes']}")
-                    
-                    if st.button("✏️ Edit Entry", key=f"edit_pickup_{sid}"):
-                        st.session_state.site_data[sid]["Picked up"] = ""
-                        save_state()
-                        st.rerun()
+                    st.write(f"Picked up. Notes: {s['Notes']}")
+                    if st.button("✏️ Edit", key=f"ed_pu_{sid}"):
+                        st.session_state.site_data[sid]["Picked up"] = ""; save_state(); st.rerun()
 
 # ==========================================
-# TAB 4: DATA SPREADSHEET & EXPORT
+# TAB 4: DATA SPREADSHEET
 # ==========================================
 with tab4:
-    st.subheader("Live Excel Sheet")
-    
-    installed_sites = [data for sid, data in st.session_state.site_data.items() if data["Installed"] == "x"]
-    
-    if not installed_sites:
-        st.info("Your spreadsheet is empty. Start logging installations to see data here.")
+    installed = [d for sid, d in st.session_state.site_data.items() if d["Installed"] == "x"]
+    if not installed: st.info("Spreadsheet is empty.")
     else:
-        # Build the exact column structure
-        export_df = pd.DataFrame(installed_sites)
-        export_df = export_df[["Date", "Time", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]]
-        
-        # Display the interactive grid view on the phone
+        export_df = pd.DataFrame(installed)[["Date", "Time", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]]
         st.dataframe(export_df, use_container_width=True)
-        
-        st.divider()
-        csv_data = export_df.to_csv(index=False).encode('utf-8')
-        
-        st.download_button(
-            label="📊 Download Final .CSV",
-            data=csv_data,
-            file_name=f"Traffic_Data_{datetime.now(ZoneInfo('America/Los_Angeles')).strftime('%Y_%m_%d')}.csv",
-            mime="text/csv",
-            type="primary",
-            use_container_width=True
-        )
+        csv = export_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📊 Download .CSV", csv, f"Traffic_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv", type="primary", use_container_width=True)

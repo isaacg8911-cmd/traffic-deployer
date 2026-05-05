@@ -19,16 +19,15 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { color: #FFD700 !important; border-bottom-color: #FFD700 !important; }
     div.stButton > button:first-child { background-color: #444444; color: #FFD700; border: 2px solid #FFD700; border-radius: 10px; font-weight: bold; }
     .stProgress > div > div > div > div { background-color: #FFD700; }
-    [data-testid="stMetricValue"] { color: #FFD700 !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🚦 Field Data Collector")
 
 HOME_COORDS = (33.7715, -117.9431) 
-BACKUP_FILE = "field_backup_standard.json"
+BACKUP_FILE = "final_field_backup.json"
 
-# --- PERSISTENCE ENGINE ---
+# --- PERSISTENCE ---
 def save_state():
     try:
         backup_data = {
@@ -67,12 +66,9 @@ def get_california_time():
     if now.minute > 0 or now.second > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- NAVIGATION TABS ---
+# --- NAVIGATION ---
 tab1, tab2, tab3, tab4 = st.tabs(["📁 VAULT", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
 
-# ==========================================
-# TAB 1: VAULT
-# ==========================================
 with tab1:
     if not st.session_state.optimized_route:
         st.subheader("Load Route Files")
@@ -80,9 +76,8 @@ with tab1:
         if files:
             configs = []
             for i, f in enumerate(files):
-                lbl = st.text_input(f"Sheet Name for {f.name}:", value=f"Day {i+1}", key=f"lbl_{i}")
+                lbl = st.text_input(f"Sheet Name for {f.name}:", value=f"Day {i+1}", key=f"v_lbl_{i}")
                 configs.append({"file": f, "label": lbl})
-            
             if st.button("🚀 Calculate & Sync Route", use_container_width=True):
                 all_raw = []
                 for c in configs:
@@ -91,7 +86,6 @@ with tab1:
                     for m in matches:
                         if m[0] == "3333": continue
                         all_raw.append({"id": m[0], "lat": float(m[2]), "lon": float(m[3]), "sheet": c["label"]})
-                
                 if all_raw:
                     df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
                     route, curr, rem = [], HOME_COORDS, df.to_dict('records')
@@ -106,48 +100,34 @@ with tab1:
     else:
         st.success(f"Route Active: {len(st.session_state.optimized_route)} Stops")
         st.map(pd.DataFrame(st.session_state.optimized_route))
-        with st.expander("⚠️ Danger Zone"):
-            if st.checkbox("Confirm: Wipe all progress"):
-                if st.button("🗑️ Reset Application", type="primary", use_container_width=True):
-                    if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
-                    st.session_state.active_files, st.session_state.optimized_route, st.session_state.site_data, st.session_state.current_index = [], [], {}, 0
-                    st.rerun()
+        if st.button("🗑️ Reset Application", type="primary", use_container_width=True):
+            if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
+            st.session_state.active_files, st.session_state.optimized_route, st.session_state.site_data, st.session_state.current_index = [], [], {}, 0
+            st.rerun()
 
-# ==========================================
-# TAB 2: INSTALL
-# ==========================================
 with tab2:
     if not st.session_state.optimized_route: st.info("Load maps in Vault.")
     else:
         view = st.radio("Display View:", ["🎯 Focus Mode", "📜 List Mode"], horizontal=True)
-        
         def run_install(sid, coords, i):
             sd = st.session_state.site_data[sid]
             st.markdown(f"### Stop #{i+1}: Site {sid} ({sd.get('Sheet','Day')})")
             st.link_button("🚗 Open GPS", f"https://www.google.com/maps/dir/?api=1&destination={coords[0]},{coords[1]}", use_container_width=True)
-            
-            with st.form(key=f"form_{sid}"):
+            with st.form(key=f"ins_v3_{sid}"):
                 c1, c2 = st.columns(2)
-                with c1: d_opt = ["n","e","s","w"]; direction = st.selectbox("Direction", d_opt, index=d_opt.index(sd["Directions"]))
+                with c1: d_opt = ["n","e","s","w"]; direction = st.selectbox("Dir", d_opt, index=d_opt.index(sd["Directions"]))
                 with c2: lanes = st.number_input("Lanes", min_value=1, value=int(sd["Lanes"]))
-                serial = st.text_input("Serial Number", value=sd["Serial"])
+                serial = st.text_input("Serial", value=sd["Serial"])
                 notes = st.text_input("Notes", value=sd["Notes"])
-                
                 ca, cb = st.columns(2)
-                if ca.form_submit_button("✅ COMPLETE ➡️"):
+                if ca.form_submit_button("✅ COMPLETE"):
                     t, d = get_california_time()
-                    st.session_state.site_data[sid].update({
-                        "Date":d,"Time":t,"Directions":"n" if direction in ["n","s"] else "e",
-                        "Serial":serial,"Lanes":lanes,"Notes":notes.upper(),"Installed":"x"
-                    })
+                    st.session_state.site_data[sid].update({"Date":d,"Time":t,"Directions":"n" if direction in ["n","s"] else "e","Serial":serial,"Lanes":lanes,"Notes":notes.upper(),"Installed":"x"})
                     if view == "🎯 Focus Mode": st.session_state.current_index += 1
                     save_state(); st.rerun()
-                
                 if cb.form_submit_button("🚨 UNABLE"):
                     t, d = get_california_time()
-                    st.session_state.site_data[sid].update({
-                        "Date":d,"Time":t,"Notes":f"SKIPPED: {notes.upper()}","Skipped":True
-                    })
+                    st.session_state.site_data[sid].update({"Date":d,"Time":t,"Notes":f"SKIPPED: {notes.upper()}","Skipped":True})
                     if view == "🎯 Focus Mode": st.session_state.current_index += 1
                     save_state(); st.rerun()
 
@@ -155,50 +135,31 @@ with tab2:
             idx = st.session_state.current_index
             if idx < len(st.session_state.optimized_route):
                 s = st.session_state.optimized_route[idx]
-                st.progress(idx / len(st.session_state.optimized_route))
                 run_install(s['id'], (s['lat'], s['lon']), idx)
                 if idx > 0 and st.button("⬅️ Back"): st.session_state.current_index -= 1; st.rerun()
-            else: st.success("🏁 All installations complete.")
+            else: st.success("🏁 Day Finished.")
         else:
             for i, s in enumerate(st.session_state.optimized_route):
                 sd = st.session_state.site_data[s['id']]
-                is_done = sd["Installed"] == "x" or sd.get("Skipped")
                 icon = "✅" if sd["Installed"] == "x" else ("🚫" if sd.get("Skipped") else "📝")
-                with st.expander(f"{icon} Stop #{i+1} - Site {s['id']}"):
-                    if not is_done: run_install(s['id'], (s['lat'], s['lon']), i)
-                    else:
-                        if st.button("✏️ Edit Entry", key=f"ed_{s['id']}"):
-                            st.session_state.site_data[s['id']]["Installed"] = ""; st.session_state.site_data[s['id']]["Skipped"] = False; save_state(); st.rerun()
+                with st.expander(f"{icon} #{i+1} - Site {s['id']}"):
+                    if sd["Installed"] != "x" and not sd.get("Skipped"): run_install(s['id'], (s['lat'], s['lon']), i)
+                    else: st.write("Logged.")
 
-# ==========================================
-# TAB 3: PICK-UP
-# ==========================================
 with tab3:
     installed = [d for d in st.session_state.site_data.values() if d["Installed"] == "x"]
-    if not installed: st.info("No sites to pick up.")
-    else:
-        if st.button("🔄 Optimize Pick-Up Sequence", use_container_width=True):
-            curr, itin, rem = HOME_COORDS, [], installed.copy()
-            while rem:
-                nxt = min(rem, key=lambda x: math.sqrt((curr[0]-x['LAT'])**2 + (curr[1]-x['LON'])**2))
-                itin.append(nxt); curr = (nxt['LAT'], nxt['LON']); rem.remove(nxt)
-            st.session_state.pickup_itinerary = itin; st.success("Sequence Updated.")
-
+    if installed:
         itin = st.session_state.get("pickup_itinerary", installed)
         for i, s in enumerate(itin):
             sid, done = s["Site"], s["Picked up"] == "x"
-            status = "✅" if done else "📦"
-            with st.expander(f"{status} #{i+1} - Site {sid}"):
+            with st.expander(f"{'✅' if done else '📦'} #{i+1} - Site {sid}"):
                 if not done:
-                    st.link_button("🚗 GPS to Site", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}")
-                    with st.form(key=f"pu_{sid}"):
-                        p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
+                    st.link_button("🚗 GPS", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}")
+                    with st.form(key=f"pu_v3_{sid}"):
+                        p_notes = st.text_input("Notes", value=s["Notes"])
                         if st.form_submit_button("MARK SECURED"):
                             st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip().upper(); save_state(); st.rerun()
 
-# ==========================================
-# TAB 4: EXCEL
-# ==========================================
 with tab4:
     all_d = [d for d in st.session_state.site_data.values() if d["Installed"] == "x" or d.get("Skipped")]
     if all_d:
@@ -211,9 +172,6 @@ with tab4:
                 if not df.empty:
                     df[cols].to_excel(writer, index=False, sheet_name=name)
                     st.write(f"**Day: {name}**"); st.dataframe(df[cols], use_container_width=True)
-        st.divider()
-        st.download_button("📊 DOWNLOAD MASTER WORKBOOK", out.getvalue(), f"Traffic_Work.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+        st.download_button("📊 DOWNLOAD", out.getvalue(), f"Traffic_Work.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
 
-# --- SIDEBAR SYNC STATUS ---
-st.sidebar.markdown(f"**Sync Status:** ✅ ACTIVE")
-st.sidebar.markdown(f"**Last Backup:** {st.session_state.get('last_sync', 'N/A')}")
+st.sidebar.markdown(f"**Last Sync:** {st.session_state.get('last_sync', 'N/A')}")

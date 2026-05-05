@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V10", layout="centered")
+st.set_page_config(page_title="Live Wire V11", layout="centered")
 
 st.markdown("""
     <style>
@@ -60,14 +60,30 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-def process_raw_text(text_blocks, labels):
+# --- THE SHREDDER (Indestructible File Parser) ---
+def shred_and_process(configs):
     all_raw = []
-    for idx, text in enumerate(text_blocks):
-        if not text.strip(): continue
-        matches = re.findall(r'(\d{4})\s+.*?\s+(\d{5})\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)', text)
-        for m in matches:
-            if m[0] == "3333": continue
-            all_raw.append({"id": str(m[0]), "lat": float(m[2]), "lon": float(m[3]), "sheet": labels[idx]})
+    for cfg in configs:
+        content = cfg['file'].getvalue().decode('latin-1', errors='ignore')
+        lines = content.splitlines()
+        
+        for line in lines:
+            # 1. Look for ANY isolated 4-digit number
+            id_match = re.search(r'\b(\d{4})\b', line)
+            if id_match:
+                sid = id_match.group(1)
+                if sid == "3333": continue # Skip Microsoft internal codes
+                
+                # 2. Look for ANY two numbers with decimals
+                coords = re.findall(r'-?\d{1,3}\.\d{3,}', line)
+                if len(coords) >= 2:
+                    c1, c2 = float(coords[0]), float(coords[1])
+                    
+                    # Auto-Sort California Coords (Lat is ~33, Lon is ~-117)
+                    lat = max(c1, c2) 
+                    lon = min(c1, c2)
+                    
+                    all_raw.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']})
     
     if all_raw:
         df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
@@ -77,35 +93,34 @@ def process_raw_text(text_blocks, labels):
             route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
         
         st.session_state.optimized_route = route
-        st.session_state.active_files = [l for l in labels if l]
+        st.session_state.active_files = [c['label'] for c in configs]
         st.session_state.site_data = {s['id']: {"Date":"","Time":"","Site":s['id'],"Counter":"c1b","Serial":"","Directions":"n","Lanes":1,"Notes":"","Installed":"","Picked up":"","LAT":s['lat'],"LON":s['lon'],"Skipped":False,"Sheet":s['sheet']} for s in route}
         auto_save()
-        return True
-    return False
+        return True, len(all_raw)
+    return False, 0
 
 # ==========================================
-# STAGE 1: TERMINAL INPUT
+# STAGE 1: THE VAULT UPLOADER
 # ==========================================
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 TERMINAL GATEWAY")
-    st.warning("Uploader bypassed for Pixel 9 stability. Open your .est files, copy all text, and paste below.")
+    st.title("🚦 UPLOAD GATEWAY")
     
-    col1, col2 = st.columns(2)
-    with col1: lbl_1 = st.text_input("Label 1:", value="Day 1")
-    with col2: lbl_2 = st.text_input("Label 2:", value="Day 2")
+    up_files = st.file_uploader("DROP .EST MAPS HERE", type=["est", "txt"], accept_multiple_files=True)
     
-    text_1 = st.text_area(f"PASTE {lbl_1} DATA HERE:", height=150)
-    text_2 = st.text_area(f"PASTE {lbl_2} DATA HERE (Optional):", height=150)
-    
-    if st.button("🚀 PROCESS ROUTE DATA", use_container_width=True):
-        if text_1.strip() or text_2.strip():
-            with st.spinner("CRUNCHING COORDINATES..."):
-                if process_raw_text([text_1, text_2], [lbl_1, lbl_2]):
-                    st.success("SYNC COMPLETE!")
+    if up_files:
+        st.success(f"✅ {len(up_files)} FILES SECURED IN MEMORY.")
+        configs = [{"file": f, "label": st.text_input(f"Work Order {i+1} Label:", value=f"Day {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
+        
+        if st.button("🚀 CALCULATE & SYNC", use_container_width=True):
+            with st.spinner("SHREDDING FILE DATA..."):
+                success, count = shred_and_process(configs)
+                
+                if success:
+                    st.success(f"SYNC COMPLETE! Found {count} sites.")
+                    time.sleep(1)
                     st.rerun()
-                else: st.error("No valid site data found in pasted text.")
-        else:
-            st.error("Text boxes are empty.")
+                else:
+                    st.error("❌ ERROR: App could not find any 4-digit IDs with GPS coordinates in this file.")
 
 # ==========================================
 # STAGE 2: MAIN DASHBOARD
@@ -134,7 +149,7 @@ else:
             st.progress(cur_idx / len(st.session_state.optimized_route))
             st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
             
-            with st.form(key=f"f_v10_{sid}"):
+            with st.form(key=f"f_v11_{sid}"):
                 c1, c2 = st.columns(2)
                 with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                 with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
@@ -174,7 +189,7 @@ else:
                 with st.expander(f"{status} #{i+1} - Site {sid}"):
                     if not is_picked:
                         st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
-                        with st.form(key=f"pu_v10_{sid}"):
+                        with st.form(key=f"pu_v11_{sid}"):
                             p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                             if st.form_submit_button("MARK SECURED"):
                                 st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()

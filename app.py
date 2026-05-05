@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V16 Pro", layout="centered")
+st.set_page_config(page_title="Live Wire V17 LED", layout="centered")
 
 st.markdown("""
     <style>
@@ -63,7 +63,7 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- HIGH-SPEED DATA SHREDDER ---
+# --- HIGH-SPEED DATA SHREDDER (AGGRESSIVE STREET EXTRACTION) ---
 def process_upload(configs):
     all_raw = []
     coord_pattern = re.compile(r'-?\d{1,3}\.\d{3,}')
@@ -78,16 +78,19 @@ def process_upload(configs):
                 if len(coords) >= 2:
                     id_match = id_pattern.search(line)
                     if id_match:
+                        sid = id_match.group(1)
                         c1, c2 = float(coords[0]), float(coords[1])
                         lat, lon = max(c1, c2), min(c1, c2)
                         
-                        # Isolate Street Name
-                        clean_line = re.sub(r'-?\d{1,3}\.\d{3,}', '', line)
-                        clean_line = re.sub(r'\b\d{4,5}\b', '', clean_line)
-                        street_name = " ".join(clean_line.replace(',', '').split()).strip()
-                        street_name = street_name[:35] if street_name else "LOCATION UNKNOWN"
+                        # Aggressively isolate the street name
+                        clean_line = line.replace(sid, '') # Remove the Site ID
+                        clean_line = re.sub(r'-?\d{1,3}\.\d{3,}', '', clean_line) # Remove GPS Coords
+                        clean_line = re.sub(r'\b\d{5}\b', '', clean_line) # Remove Zip Codes
+                        clean_line = re.sub(r'[^a-zA-Z0-9\s]', '', clean_line) # Remove weird symbols
+                        street_name = " ".join(clean_line.split()).strip()
+                        street_name = street_name[:40] if street_name else "NO STREET DATA"
                         
-                        all_raw.append({"id": id_match.group(1), "lat": lat, "lon": lon, "sheet": cfg['label'], "street": street_name.upper()})
+                        all_raw.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label'], "street": street_name.upper()})
     
     if all_raw:
         df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first','street':'first'}).reset_index()
@@ -165,37 +168,40 @@ else:
         if cur_idx < total_sites:
             s = st.session_state.optimized_route[cur_idx]; sid = s['id']; sd = st.session_state.site_data[sid]
             
-            # --- THE LED BILLBOARD ---
+            # 1. The Standard Header
+            st.subheader(f"STOP #{cur_idx+1}: SITE {sid}")
+            
+            # 2. The LED Neon Billboard (Placed directly beneath the header)
             st.markdown(f"""
             <div style="
                 background-color: #000000; 
-                border: 2px solid #222; 
+                border: 3px solid #111111; 
                 border-radius: 8px; 
-                padding: 15px; 
+                padding: 20px 10px; 
+                margin-top: 5px;
                 margin-bottom: 15px; 
                 text-align: center; 
-                box-shadow: inset 0 0 15px #000;
+                box-shadow: 0 0 15px rgba(57, 255, 20, 0.2);
             ">
                 <span style="
-                    color: #00FF00; 
+                    color: #39FF14; 
                     font-family: 'Courier New', Courier, monospace; 
-                    font-size: 1.6rem; 
+                    font-size: 1.8rem; 
                     font-weight: 900; 
-                    text-shadow: 0 0 8px #00FF00, 0 0 15px #00FF00; 
-                    letter-spacing: 2px;
+                    text-shadow: 0 0 5px #39FF14, 0 0 10px #39FF14, 0 0 20px #39FF14; 
+                    letter-spacing: 1px;
                 ">
-                    {sd.get('Street', 'UNKNOWN')}
+                    {sd.get('Street', 'NO STREET DETECTED')}
                 </span>
             </div>
             """, unsafe_allow_html=True)
             
-            st.subheader(f"STOP #{cur_idx+1}: SITE {sid}")
             st.caption(f"Sheet: {sd.get('Sheet')} | Raw GPS: `{s['lat']}, {s['lon']}`") 
             
             st.progress(cur_idx / total_sites)
             st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
             
-            with st.form(key=f"f_v16_{sid}"):
+            with st.form(key=f"f_v17_{sid}"):
                 c1, c2 = st.columns(2)
                 with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                 with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
@@ -237,7 +243,7 @@ else:
                         st.markdown(f"**📍 {s.get('Street')}**")
                         st.caption(f"Raw GPS: `{s['LAT']}, {s['LON']}`")
                         st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
-                        with st.form(key=f"pu_v16_{sid}"):
+                        with st.form(key=f"pu_v17_{sid}"):
                             p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                             if st.form_submit_button("MARK SECURED"):
                                 st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()

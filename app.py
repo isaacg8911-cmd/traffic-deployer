@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V20 Core", layout="centered")
+st.set_page_config(page_title="Live Wire V21 Core", layout="centered")
 
 st.markdown("""
     <style>
@@ -62,21 +62,26 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V20 BLOCK SPLITTER (Indestructible Extraction) ---
+# --- V21 JET DB SANITIZER & EXTRACTOR ---
 def process_upload(configs):
     all_raw = []
     
     for cfg in configs:
-        content = cfg['file'].getvalue().decode('latin-1', errors='ignore')
+        raw_bytes = cfg['file'].getvalue()
+        text = raw_bytes.decode('latin-1', errors='ignore')
         
-        # Flatten the file into a single line to prevent breaks
-        flat_content = content.replace('\n', ' ')
+        # 1. THE SANITIZER: Destroy invisible binary nulls and line breaks
+        clean_text = text.replace('\x00', ' ').replace('\n', ' ').replace('\r', ' ')
         
-        # Use the Double-ID as scissors to cut the text into blocks
-        # e.g., "4716 4716" becomes the divider
-        tokens = re.split(r'\b(\d{4})\s+\1\s+', flat_content)
+        # 2. Destroy all non-printable junk characters from the Jet DB
+        clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
         
-        # Process each block individually
+        # 3. Collapse multiple spaces into a single space
+        clean_text = re.sub(r'\s+', ' ', clean_text)
+        
+        # 4. Use the double-ID perfectly isolated in the clean text as our scissors
+        tokens = re.split(r'\b(\d{4}) \1 ', clean_text)
+        
         for i in range(1, len(tokens) - 1, 2):
             sid = tokens[i]
             block = tokens[i+1]
@@ -87,12 +92,12 @@ def process_upload(configs):
                 c1, c2 = float(coords[0]), float(coords[1])
                 lat, lon = max(c1, c2), min(c1, c2)
                 
-                # Double-check it's actually in California to prevent ghost sites
-                if 32.0 < lat < 42.0 and -125.0 < lon < -114.0:
+                # Verify it's in Southern California to ignore broken junk data
+                if 32.0 < lat < 36.0 and -125.0 < lon < -114.0:
                     all_raw.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']})
     
     if all_raw:
-        # Group duplicates to ensure exact site counts
+        # Group duplicates to get exact site counts
         df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
         route, curr, rem = [], HOME_COORDS, df.to_dict('records')
         
@@ -122,7 +127,7 @@ if not st.session_state.get("optimized_route"):
         
         if st.button("🚀 CALCULATE & SYNC ROUTE", use_container_width=True):
             status = st.empty()
-            status.warning("⚡ SHREDDING DATA & ROUTING...")
+            status.warning("⚡ PURIFYING BINARY DATA & ROUTING...")
             
             start_time = time.time()
             success, count = process_upload(configs)
@@ -130,7 +135,7 @@ if not st.session_state.get("optimized_route"):
             
             if success:
                 calc_time = round(end_time - start_time, 2)
-                status.success(f"✅ COMPLETE! Found {count} sites in {calc_time} seconds.")
+                status.success(f"✅ COMPLETE! Found {count} valid sites in {calc_time} seconds.")
                 time.sleep(1.5)
                 st.rerun()
             else:
@@ -176,7 +181,7 @@ else:
             st.progress(cur_idx / total_sites)
             st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
             
-            with st.form(key=f"f_v20_{sid}"):
+            with st.form(key=f"f_v21_{sid}"):
                 c1, c2 = st.columns(2)
                 with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                 with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
@@ -217,7 +222,7 @@ else:
                     if not is_picked:
                         st.caption(f"Raw GPS: `{s['LAT']}, {s['LON']}`")
                         st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
-                        with st.form(key=f"pu_v20_{sid}"):
+                        with st.form(key=f"pu_v21_{sid}"):
                             p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                             if st.form_submit_button("MARK SECURED"):
                                 st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()

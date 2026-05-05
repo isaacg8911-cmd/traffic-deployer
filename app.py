@@ -4,13 +4,12 @@ import pandas as pd
 import math
 import json
 import io
-import time
 import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire Field Ops", layout="centered")
+st.set_page_config(page_title="Live Wire V10", layout="centered")
 
 st.markdown("""
     <style>
@@ -61,87 +60,66 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
+def process_raw_text(text_blocks, labels):
+    all_raw = []
+    for idx, text in enumerate(text_blocks):
+        if not text.strip(): continue
+        matches = re.findall(r'(\d{4})\s+.*?\s+(\d{5})\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)', text)
+        for m in matches:
+            if m[0] == "3333": continue
+            all_raw.append({"id": str(m[0]), "lat": float(m[2]), "lon": float(m[3]), "sheet": labels[idx]})
+    
+    if all_raw:
+        df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
+        route, curr, rem = [], HOME_COORDS, df.to_dict('records')
+        while rem:
+            nxt = min(rem, key=lambda x: math.hypot(curr[0]-x['lat'], curr[1]-x['lon']))
+            route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
+        
+        st.session_state.optimized_route = route
+        st.session_state.active_files = [l for l in labels if l]
+        st.session_state.site_data = {s['id']: {"Date":"","Time":"","Site":s['id'],"Counter":"c1b","Serial":"","Directions":"n","Lanes":1,"Notes":"","Installed":"","Picked up":"","LAT":s['lat'],"LON":s['lon'],"Skipped":False,"Sheet":s['sheet']} for s in route}
+        auto_save()
+        return True
+    return False
+
 # ==========================================
-# STAGE 1: SECURE VAULT
+# STAGE 1: TERMINAL INPUT
 # ==========================================
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 SECURE VAULT")
+    st.title("🚦 TERMINAL GATEWAY")
+    st.warning("Uploader bypassed for Pixel 9 stability. Open your .est files, copy all text, and paste below.")
     
-    st.subheader("1. START NEW ROUTE")
-    up_files = st.file_uploader("DROP .EST / .TXT MAPS", type=["est", "txt"], accept_multiple_files=True)
-    if up_files:
-        st.success(f"✅ {len(up_files)} FILES DETECTED.")
-        configs = [{"file": f, "label": st.text_input(f"Label for {f.name}:", value=f"Day {i+1}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 PROCESS ROUTE", use_container_width=True):
-            all_raw = []
-            for cfg in configs:
-                content = cfg['file'].getvalue().decode('latin-1', errors='ignore')
-                matches = re.findall(r'(\d{4})\s+.*?\s+(\d{5})\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)', content)
-                for m in matches:
-                    if m[0] == "3333": continue
-                    all_raw.append({"id": str(m[0]), "lat": float(m[2]), "lon": float(m[3]), "sheet": cfg['label']})
-            
-            if all_raw:
-                df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
-                route, curr, rem = [], HOME_COORDS, df.to_dict('records')
-                while rem:
-                    nxt = min(rem, key=lambda x: math.hypot(curr[0]-x['lat'], curr[1]-x['lon']))
-                    route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
-                
-                st.session_state.optimized_route = route
-                st.session_state.active_files = [c['label'] for c in configs]
-                st.session_state.site_data = {s['id']: {"Date":"","Time":"","Site":s['id'],"Counter":"c1b","Serial":"","Directions":"n","Lanes":1,"Notes":"","Installed":"","Picked up":"","LAT":s['lat'],"LON":s['lon'],"Skipped":False,"Sheet":s['sheet']} for s in route}
-                auto_save()
-                st.rerun()
-            else: st.error("No valid sites found.")
-
-    st.divider()
+    col1, col2 = st.columns(2)
+    with col1: lbl_1 = st.text_input("Label 1:", value="Day 1")
+    with col2: lbl_2 = st.text_input("Label 2:", value="Day 2")
     
-    st.subheader("2. EMERGENCY RESTORE")
-    restore_file = st.file_uploader("UPLOAD ROUTE_BACKUP.JSON", type=["json"])
-    if restore_file:
-        if st.button("🔄 RESTORE PREVIOUS ROUTE", use_container_width=True):
-            try:
-                data = json.loads(restore_file.getvalue())
-                st.session_state.active_files = data.get("active_files", [])
-                st.session_state.optimized_route = data.get("optimized_route", [])
-                st.session_state.site_data = data.get("site_data", {})
-                st.session_state.current_index = data.get("current_index", 0)
-                auto_save()
-                st.rerun()
-            except: st.error("Invalid backup file.")
+    text_1 = st.text_area(f"PASTE {lbl_1} DATA HERE:", height=150)
+    text_2 = st.text_area(f"PASTE {lbl_2} DATA HERE (Optional):", height=150)
+    
+    if st.button("🚀 PROCESS ROUTE DATA", use_container_width=True):
+        if text_1.strip() or text_2.strip():
+            with st.spinner("CRUNCHING COORDINATES..."):
+                if process_raw_text([text_1, text_2], [lbl_1, lbl_2]):
+                    st.success("SYNC COMPLETE!")
+                    st.rerun()
+                else: st.error("No valid site data found in pasted text.")
+        else:
+            st.error("Text boxes are empty.")
 
 # ==========================================
 # STAGE 2: MAIN DASHBOARD
 # ==========================================
 else:
-    st.title("🚦 Live Wire Dashboard")
-    tab1, tab2, tab3, tab4 = st.tabs(["📁 VAULT", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
+    st.title("🚦 Live Wire Field Ops")
+    tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
 
     with tab1:
         st.success(f"ACTIVE ROUTE: {len(st.session_state.optimized_route)} STOPS")
         st.map(pd.DataFrame(st.session_state.optimized_route), zoom=9)
         
         st.divider()
-        st.markdown("### 💾 SAVE YOUR PROGRESS")
-        st.info("Download this file before closing the app for the weekend. You can upload it on Monday to pick up exactly where you left off.")
-        
-        payload = {
-            "active_files": st.session_state.active_files,
-            "optimized_route": st.session_state.optimized_route,
-            "site_data": st.session_state.site_data,
-            "current_index": st.session_state.current_index
-        }
-        st.download_button(
-            label="📥 DOWNLOAD ROUTE BACKUP",
-            data=json.dumps(payload),
-            file_name=f"ROUTE_BACKUP_{datetime.now().strftime('%Y%m%d')}.json",
-            mime="application/json",
-            use_container_width=True
-        )
-        
-        st.divider()
-        if st.button("🗑️ PURGE & RESET ALL", use_container_width=True):
+        if st.button("🗑️ PURGE & START FRESH", use_container_width=True):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             for key in ["active_files", "optimized_route", "site_data", "current_index"]:
                 st.session_state[key] = [] if isinstance(st.session_state[key], list) else ({} if isinstance(st.session_state[key], dict) else 0)
@@ -156,7 +134,7 @@ else:
             st.progress(cur_idx / len(st.session_state.optimized_route))
             st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
             
-            with st.form(key=f"f_v9_{sid}"):
+            with st.form(key=f"f_v10_{sid}"):
                 c1, c2 = st.columns(2)
                 with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                 with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
@@ -185,7 +163,6 @@ else:
             if st.button("🔄 Optimize Pick-Up Order", use_container_width=True):
                 curr, new_itin, rem = HOME_COORDS, [], installed.copy()
                 while rem:
-                    # Uses original site coordinates since GPS chip access is removed for stability
                     nxt = min(rem, key=lambda x: math.hypot(curr[0]-x['LAT'], curr[1]-x['LON']))
                     new_itin.append(nxt); curr = (nxt['LAT'], nxt['LON']); rem.remove(nxt)
                 st.session_state.pickup_itinerary = new_itin; st.success("Pick-Up sequence optimized.")
@@ -197,7 +174,7 @@ else:
                 with st.expander(f"{status} #{i+1} - Site {sid}"):
                     if not is_picked:
                         st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
-                        with st.form(key=f"pu_v9_{sid}"):
+                        with st.form(key=f"pu_v10_{sid}"):
                             p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                             if st.form_submit_button("MARK SECURED"):
                                 st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()

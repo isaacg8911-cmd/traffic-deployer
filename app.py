@@ -3,6 +3,8 @@ import re
 import pandas as pd
 import math
 import time
+import json
+import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -11,18 +13,41 @@ st.title("🚦 Field Data Collector")
 
 HOME_COORDS = (33.7715, -117.9431) 
 HOME_ADDR = "13121 Yockey St, Garden Grove, CA 92844"
+BACKUP_FILE = "field_backup.json"
+
+# --- AUTO-SAVE LOGIC ---
+def save_state():
+    """Saves your daily route to a background file to prevent mobile browser refresh data loss."""
+    backup_data = {
+        "active_file_name": st.session_state.active_file_name,
+        "optimized_route": st.session_state.optimized_route,
+        "site_data": st.session_state.site_data
+    }
+    with open(BACKUP_FILE, "w") as f:
+        json.dump(backup_data, f)
+
+def load_state():
+    """Loads the route if you accidentally close your phone browser."""
+    if os.path.exists(BACKUP_FILE):
+        with open(BACKUP_FILE, "r") as f:
+            backup_data = json.load(f)
+            st.session_state.active_file_name = backup_data.get("active_file_name", None)
+            st.session_state.optimized_route = backup_data.get("optimized_route", [])
+            st.session_state.site_data = backup_data.get("site_data", {})
+            return True
+    return False
 
 # --- SESSION STATES ---
-if "optimized_route" not in st.session_state:
-    st.session_state.optimized_route = []
-if "site_data" not in st.session_state:
-    st.session_state.site_data = {} 
-if "active_file" not in st.session_state:
-    st.session_state.active_file = None 
+if "initialized" not in st.session_state:
+    loaded = load_state()
+    if not loaded:
+        st.session_state.active_file_name = None
+        st.session_state.optimized_route = []
+        st.session_state.site_data = {} 
+    st.session_state.initialized = True
 
 # --- HELPER FUNCTIONS ---
 def get_california_time():
-    """Gets current CA time and rounds UP to next hour in military format."""
     now = datetime.now(ZoneInfo("America/Los_Angeles"))
     if now.minute > 0 or now.second > 0:
         now += timedelta(hours=1)
@@ -32,7 +57,7 @@ def calculate_distance(p1, p2):
     return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
 
 # --- NAVIGATION TABS ---
-tab1, tab2, tab3 = st.tabs(["📁 File Vault", "📍 Installation", "♻️ Pick-Up"])
+tab1, tab2, tab3, tab4 = st.tabs(["📁 Vault", "📍 Install", "♻️ Pick-Up", "📊 Data"])
 
 # ==========================================
 # TAB 1: FILE VAULT & PROCESSING
@@ -40,84 +65,80 @@ tab1, tab2, tab3 = st.tabs(["📁 File Vault", "📍 Installation", "♻️ Pick
 with tab1:
     st.subheader("Map Management")
     
-    if not st.session_state.active_file:
-        uploaded_file = st.file_uploader("Upload .est Map", type=["est", "txt"])
+    if not st.session_state.active_file_name:
+        uploaded_file = st.file_uploader("Upload .est Map to begin your route", type=["est", "txt"])
+        
         if uploaded_file:
-            st.session_state.active_file = {
-                "name": uploaded_file.name,
-                "data": uploaded_file.getvalue()
-            }
-            st.rerun()
+            with st.spinner("Analyzing map and calculating optimal route..."):
+                time.sleep(1) 
+                try:
+                    raw_data = uploaded_file.read()
+                    readable_text = "".join([chr(b) if 32 <= b < 127 else " " for b in raw_data])
+                    
+                    site_pattern = r'(\d{4})\s+.*?\s+(\d{5})\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)'
+                    matches = re.findall(site_pattern, readable_text)
+                    
+                    if matches:
+                        raw_sites = []
+                        for m in matches:
+                            sid = m[0]
+                            if sid == "3333": # Block internal Microsoft glitch
+                                continue 
+                            raw_sites.append({"id": sid, "lat": float(m[2]), "lon": float(m[3])})
+                            
+                        midpoint_data = pd.DataFrame(raw_sites).groupby("id").mean().reset_index()
+                        
+                        temp_route = []
+                        current_pos = HOME_COORDS
+                        remaining = midpoint_data.to_dict('records')
+                        
+                        while remaining:
+                            next_stop = min(remaining, key=lambda x: calculate_distance(current_pos, (x['lat'], x['lon'])))
+                            temp_route.append(next_stop)
+                            current_pos = (next_stop['lat'], next_stop['lon'])
+                            remaining.remove(next_stop)
+                        
+                        # Save to memory
+                        st.session_state.optimized_route = temp_route
+                        st.session_state.active_file_name = uploaded_file.name
+                        
+                        for site in temp_route:
+                            if site['id'] not in st.session_state.site_data:
+                                st.session_state.site_data[site['id']] = {
+                                    "Date": "", "Time": "", "Site": site['id'],
+                                    "Counter": "c1b", "Serial": "", "Directions": "n", 
+                                    "Lanes": 1, "Notes": "", "Installed": "", "Picked up": "",
+                                    "LAT": site['lat'], "LON": site['lon'] 
+                                }
+                        
+                        save_state() # Trigger auto-save
+                        st.rerun()
+                    else:
+                        st.error("No valid sites found in the file.")
+                except Exception as e:
+                    st.error(f"Error processing file: {e}")
             
     else:
-        st.success("File securely loaded into the Vault.")
+        st.success(f"🔒 Securely Loaded: {st.session_state.active_file_name}")
+        st.info("You do not need to upload this file again. Your progress is auto-saving.")
         
-        new_name = st.text_input("Edit File Name:", value=st.session_state.active_file["name"])
-        if new_name != st.session_state.active_file["name"]:
-             st.session_state.active_file["name"] = new_name
-             
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🚀 Calculate Route", use_container_width=True):
-                with st.spinner("Analyzing map and calculating optimal route..."):
-                    time.sleep(1) 
-                    try:
-                        raw_data = st.session_state.active_file["data"]
-                        readable_text = "".join([chr(b) if 32 <= b < 127 else " " for b in raw_data])
-                        
-                        site_pattern = r'(\d{4})\s+.*?\s+(\d{5})\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)'
-                        matches = re.findall(site_pattern, readable_text)
-                        
-                        if matches:
-                            raw_sites = []
-                            for m in matches:
-                                sid = m[0]
-                                if sid == "3333": # Block internal Microsoft glitch
-                                    continue 
-                                raw_sites.append({"id": sid, "lat": float(m[2]), "lon": float(m[3])})
-                                
-                            midpoint_data = pd.DataFrame(raw_sites).groupby("id").mean().reset_index()
-                            
-                            temp_route = []
-                            current_pos = HOME_COORDS
-                            remaining = midpoint_data.to_dict('records')
-                            
-                            while remaining:
-                                next_stop = min(remaining, key=lambda x: calculate_distance(current_pos, (x['lat'], x['lon'])))
-                                temp_route.append(next_stop)
-                                current_pos = (next_stop['lat'], next_stop['lon'])
-                                remaining.remove(next_stop)
-                            
-                            st.session_state.optimized_route = temp_route
-                            
-                            for site in temp_route:
-                                if site['id'] not in st.session_state.site_data:
-                                    st.session_state.site_data[site['id']] = {
-                                        "Date": "", "Time": "", "Site": site['id'],
-                                        "Counter": "c1b", "Serial": "", "Directions": "n", 
-                                        "Lanes": 1, "Notes": "", "Installed": "", "Picked up": "",
-                                        "LAT": site['lat'], "LON": site['lon'] 
-                                    }
-                            st.success("✅ Route Ready! Switch to the 'Installation' tab.")
-                        else:
-                            st.error("No valid sites found in the file.")
-                    except Exception as e:
-                        st.error(f"Error processing file: {e}")
-
-        with col2:
-            if st.button("🗑️ Delete File", type="secondary", use_container_width=True):
-                st.session_state.active_file = None
-                st.session_state.optimized_route = []
-                st.session_state.site_data = {}
-                st.rerun()
+        st.divider()
+        st.markdown("### Job Completion")
+        st.write("Only delete the file when the entire route (including pick-up) is fully complete and exported.")
+        if st.button("🗑️ Delete Current Job & Start Fresh", type="primary", use_container_width=True):
+            st.session_state.active_file_name = None
+            st.session_state.optimized_route = []
+            st.session_state.site_data = {}
+            if os.path.exists(BACKUP_FILE):
+                os.remove(BACKUP_FILE)
+            st.rerun()
 
 # ==========================================
 # TAB 2: INSTALLATION WORKFLOW
 # ==========================================
 with tab2:
     if not st.session_state.optimized_route:
-        st.info("👈 Please load and process a map in the File Vault first.")
+        st.info("👈 Please load a map in the Vault first.")
     else:
         total = len(st.session_state.optimized_route)
         completed = sum(1 for data in st.session_state.site_data.values() if data["Installed"] == "x")
@@ -141,7 +162,6 @@ with tab2:
                     with st.form(key=f"install_form_{sid}"):
                         col1, col2 = st.columns(2)
                         with col1:
-                            # Safely set direction logic without triggering syntax errors
                             dir_options = ["n", "e", "s", "w"]
                             current_dir = s_data.get("Directions", "n")
                             safe_index = dir_options.index(current_dir) if current_dir in dir_options else 0
@@ -158,9 +178,6 @@ with tab2:
                                 st.error("⚠️ Error: Lanes must be 1 or greater.")
                             else:
                                 mil_time, current_date = get_california_time()
-                                
-                                # --- AXIS MAPPING LOGIC ---
-                                # N or S becomes N. E or W becomes E.
                                 mapped_direction = "n" if direction in ["n", "s"] else "e"
                                 
                                 st.session_state.site_data[sid].update({
@@ -172,6 +189,7 @@ with tab2:
                                     "Notes": notes.strip(),
                                     "Installed": "x"
                                 })
+                                save_state() # Auto-save progress
                                 st.rerun()
                 else:
                     st.success(f"Installed at {s_data['Time']} on {s_data['Date']}.")
@@ -180,10 +198,11 @@ with tab2:
                     
                     if st.button("✏️ Edit Entry", key=f"edit_install_{sid}"):
                         st.session_state.site_data[sid]["Installed"] = ""
+                        save_state()
                         st.rerun()
 
 # ==========================================
-# TAB 3: PICK-UP & EXPORT
+# TAB 3: PICK-UP
 # ==========================================
 with tab3:
     installed_sites = [data for sid, data in st.session_state.site_data.items() if data["Installed"] == "x"]
@@ -193,8 +212,8 @@ with tab3:
         if missing_sites:
             st.error(f"🛑 SYSTEM AUDIT: {len(missing_sites)} sites not marked installed!")
             st.write(f"**Missing:** {', '.join(missing_sites)}")
-        else:
-            st.success("✅ SYSTEM AUDIT: 100% of sites from the map are accounted for.")
+        elif installed_sites:
+            st.success("✅ SYSTEM AUDIT: 100% of map sites accounted for.")
     
     if not installed_sites:
         st.info("No sites have been marked as installed yet.")
@@ -215,6 +234,7 @@ with tab3:
                         if st.form_submit_button("Mark Picked Up"):
                             st.session_state.site_data[sid]["Picked up"] = "x"
                             st.session_state.site_data[sid]["Notes"] = pickup_notes.strip()
+                            save_state() # Auto-save progress
                             st.rerun()
                 else:
                     st.success("Equipment secured.")
@@ -222,20 +242,35 @@ with tab3:
                     
                     if st.button("✏️ Edit Entry", key=f"edit_pickup_{sid}"):
                         st.session_state.site_data[sid]["Picked up"] = ""
+                        save_state()
                         st.rerun()
-        
-        st.divider()
-        st.subheader("Export Excel Data")
-        
-        # Format explicitly to match your uploaded CSV column headers
+
+# ==========================================
+# TAB 4: DATA SPREADSHEET & EXPORT
+# ==========================================
+with tab4:
+    st.subheader("Live Excel Sheet")
+    
+    installed_sites = [data for sid, data in st.session_state.site_data.items() if data["Installed"] == "x"]
+    
+    if not installed_sites:
+        st.info("Your spreadsheet is empty. Start logging installations to see data here.")
+    else:
+        # Build the exact column structure
         export_df = pd.DataFrame(installed_sites)
         export_df = export_df[["Date", "Time", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]]
         
+        # Display the interactive grid view on the phone
+        st.dataframe(export_df, use_container_width=True)
+        
+        st.divider()
         csv_data = export_df.to_csv(index=False).encode('utf-8')
         
         st.download_button(
-            label="📊 Download Final Data Sheet",
+            label="📊 Download Final .CSV",
             data=csv_data,
             file_name=f"Traffic_Data_{datetime.now(ZoneInfo('America/Los_Angeles')).strftime('%Y_%m_%d')}.csv",
-            mime="text/csv"
+            mime="text/csv",
+            type="primary",
+            use_container_width=True
         )

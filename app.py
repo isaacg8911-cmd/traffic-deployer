@@ -4,12 +4,12 @@ import pandas as pd
 import math
 import json
 import io
-import os
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V11", layout="centered")
+st.set_page_config(page_title="Live Wire V13", layout="centered")
 
 st.markdown("""
     <style>
@@ -27,32 +27,13 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 HOME_COORDS = (33.7715, -117.9431) 
-BACKUP_FILE = "live_wire_backup.json"
 
-# --- NATIVE SAVE ENGINE ---
-def auto_save():
-    payload = {
-        "active_files": st.session_state.get("active_files", []),
-        "optimized_route": st.session_state.get("optimized_route", []),
-        "site_data": st.session_state.get("site_data", {}),
-        "current_index": st.session_state.get("current_index", 0)
-    }
-    with open(BACKUP_FILE, "w") as f:
-        json.dump(payload, f)
-
+# --- NATIVE SESSION STATE ---
 if "init" not in st.session_state:
-    if os.path.exists(BACKUP_FILE):
-        try:
-            with open(BACKUP_FILE, "r") as f:
-                data = json.load(f)
-                st.session_state.active_files = data.get("active_files", [])
-                st.session_state.optimized_route = data.get("optimized_route", [])
-                st.session_state.site_data = data.get("site_data", {})
-                st.session_state.current_index = data.get("current_index", 0)
-        except:
-            st.session_state.active_files, st.session_state.optimized_route, st.session_state.site_data, st.session_state.current_index = [], [], {}, 0
-    else:
-        st.session_state.active_files, st.session_state.optimized_route, st.session_state.site_data, st.session_state.current_index = [], [], {}, 0
+    st.session_state.active_files = []
+    st.session_state.optimized_route = []
+    st.session_state.site_data = {}
+    st.session_state.current_index = 0
     st.session_state.init = True
 
 def get_ca_time():
@@ -60,67 +41,73 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- THE SHREDDER (Indestructible File Parser) ---
-def shred_and_process(configs):
+# --- HIGH-SPEED DATA SHREDDER ---
+def process_upload(configs):
     all_raw = []
+    coord_pattern = re.compile(r'-?\d{1,3}\.\d{3,}')
+    id_pattern = re.compile(r'\b(\d{4})\b')
+    
     for cfg in configs:
         content = cfg['file'].getvalue().decode('latin-1', errors='ignore')
-        lines = content.splitlines()
         
-        for line in lines:
-            # 1. Look for ANY isolated 4-digit number
-            id_match = re.search(r'\b(\d{4})\b', line)
-            if id_match:
-                sid = id_match.group(1)
-                if sid == "3333": continue # Skip Microsoft internal codes
-                
-                # 2. Look for ANY two numbers with decimals
-                coords = re.findall(r'-?\d{1,3}\.\d{3,}', line)
+        for line in content.splitlines():
+            if "3333" in line: continue
+            
+            # Speed Boost: Only check lines with decimals
+            if "." in line:
+                coords = coord_pattern.findall(line)
                 if len(coords) >= 2:
-                    c1, c2 = float(coords[0]), float(coords[1])
-                    
-                    # Auto-Sort California Coords (Lat is ~33, Lon is ~-117)
-                    lat = max(c1, c2) 
-                    lon = min(c1, c2)
-                    
-                    all_raw.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']})
+                    id_match = id_pattern.search(line)
+                    if id_match:
+                        c1, c2 = float(coords[0]), float(coords[1])
+                        # California coords (Lat ~33, Lon ~-117)
+                        lat, lon = max(c1, c2), min(c1, c2)
+                        all_raw.append({"id": id_match.group(1), "lat": lat, "lon": lon, "sheet": cfg['label']})
     
     if all_raw:
         df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
         route, curr, rem = [], HOME_COORDS, df.to_dict('records')
+        
+        # High-Speed Route Math
         while rem:
-            nxt = min(rem, key=lambda x: math.hypot(curr[0]-x['lat'], curr[1]-x['lon']))
-            route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
+            nxt = min(rem, key=lambda x: (curr[0] - x['lat'])**2 + (curr[1] - x['lon'])**2)
+            route.append(nxt)
+            curr = (nxt['lat'], nxt['lon'])
+            rem.remove(nxt)
         
         st.session_state.optimized_route = route
         st.session_state.active_files = [c['label'] for c in configs]
         st.session_state.site_data = {s['id']: {"Date":"","Time":"","Site":s['id'],"Counter":"c1b","Serial":"","Directions":"n","Lanes":1,"Notes":"","Installed":"","Picked up":"","LAT":s['lat'],"LON":s['lon'],"Skipped":False,"Sheet":s['sheet']} for s in route}
-        auto_save()
-        return True, len(all_raw)
+        return True, len(route)
     return False, 0
 
 # ==========================================
-# STAGE 1: THE VAULT UPLOADER
+# STAGE 1: THE UPLOAD GATEWAY
 # ==========================================
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 UPLOAD GATEWAY")
+    st.title("🚦 UPLOAD MAPS")
     
-    up_files = st.file_uploader("DROP .EST MAPS HERE", type=["est", "txt"], accept_multiple_files=True)
+    up_files = st.file_uploader("DROP .EST / .TXT MAPS", type=["est", "txt"], accept_multiple_files=True)
     
     if up_files:
-        st.success(f"✅ {len(up_files)} FILES SECURED IN MEMORY.")
-        configs = [{"file": f, "label": st.text_input(f"Work Order {i+1} Label:", value=f"Day {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
+        st.success(f"✅ {len(up_files)} FILES READY.")
+        configs = [{"file": f, "label": st.text_input(f"Label for Work Order {i+1}:", value=f"Day {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
         
         if st.button("🚀 CALCULATE & SYNC", use_container_width=True):
-            with st.spinner("SHREDDING FILE DATA..."):
-                success, count = shred_and_process(configs)
-                
-                if success:
-                    st.success(f"SYNC COMPLETE! Found {count} sites.")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ ERROR: App could not find any 4-digit IDs with GPS coordinates in this file.")
+            status = st.empty()
+            status.warning("⚡ SHREDDING DATA & ROUTING...")
+            
+            start_time = time.time()
+            success, count = process_upload(configs)
+            end_time = time.time()
+            
+            if success:
+                calc_time = round(end_time - start_time, 2)
+                status.success(f"✅ COMPLETE! Found {count} sites in {calc_time} seconds.")
+                time.sleep(1.5)
+                st.rerun()
+            else:
+                status.error("❌ ERROR: Could not find 4-digit IDs with GPS coordinates.")
 
 # ==========================================
 # STAGE 2: MAIN DASHBOARD
@@ -134,10 +121,13 @@ else:
         st.map(pd.DataFrame(st.session_state.optimized_route), zoom=9)
         
         st.divider()
-        if st.button("🗑️ PURGE & START FRESH", use_container_width=True):
-            if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
-            for key in ["active_files", "optimized_route", "site_data", "current_index"]:
-                st.session_state[key] = [] if isinstance(st.session_state[key], list) else ({} if isinstance(st.session_state[key], dict) else 0)
+        st.info("⚠️ Ensure you download your Excel file before refreshing or closing the app.")
+        
+        if st.button("🗑️ CLEAR DATA & UPLOAD NEW MAPS", use_container_width=True):
+            st.session_state.active_files = []
+            st.session_state.optimized_route = []
+            st.session_state.site_data = {}
+            st.session_state.current_index = 0
             st.rerun()
 
     with tab2:
@@ -149,7 +139,7 @@ else:
             st.progress(cur_idx / len(st.session_state.optimized_route))
             st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
             
-            with st.form(key=f"f_v11_{sid}"):
+            with st.form(key=f"f_v13_{sid}"):
                 c1, c2 = st.columns(2)
                 with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                 with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
@@ -160,14 +150,14 @@ else:
                 if col_a.form_submit_button("✅ COMPLETE", use_container_width=True):
                     t, d = get_ca_time()
                     st.session_state.site_data[sid].update({"Date":d,"Time":t,"Directions":"n" if dr in ["n","s"] else "e","Serial":ser,"Lanes":ln,"Notes":nt,"Installed":"x"})
-                    st.session_state.current_index += 1; auto_save(); st.rerun()
+                    st.session_state.current_index += 1; st.rerun()
                 if col_b.form_submit_button("🚨 UNABLE", use_container_width=True):
                     t, d = get_ca_time()
                     st.session_state.site_data[sid].update({"Date":d,"Time":t,"Notes":f"UNABLE: {nt.upper()}","Skipped":True})
-                    st.session_state.current_index += 1; auto_save(); st.rerun()
+                    st.session_state.current_index += 1; st.rerun()
             
             if cur_idx > 0 and st.button("⬅️ PREVIOUS STOP", use_container_width=True):
-                st.session_state.current_index -= 1; auto_save(); st.rerun()
+                st.session_state.current_index -= 1; st.rerun()
         else:
             st.balloons(); st.success("🏁 MISSION COMPLETED.")
 
@@ -178,7 +168,7 @@ else:
             if st.button("🔄 Optimize Pick-Up Order", use_container_width=True):
                 curr, new_itin, rem = HOME_COORDS, [], installed.copy()
                 while rem:
-                    nxt = min(rem, key=lambda x: math.hypot(curr[0]-x['LAT'], curr[1]-x['LON']))
+                    nxt = min(rem, key=lambda x: (curr[0]-x['LAT'])**2 + (curr[1]-x['LON'])**2)
                     new_itin.append(nxt); curr = (nxt['LAT'], nxt['LON']); rem.remove(nxt)
                 st.session_state.pickup_itinerary = new_itin; st.success("Pick-Up sequence optimized.")
 
@@ -189,10 +179,10 @@ else:
                 with st.expander(f"{status} #{i+1} - Site {sid}"):
                     if not is_picked:
                         st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
-                        with st.form(key=f"pu_v11_{sid}"):
+                        with st.form(key=f"pu_v13_{sid}"):
                             p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                             if st.form_submit_button("MARK SECURED"):
-                                st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()
+                                st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); st.rerun()
                     else: st.write(f"Secured.")
 
     with tab4:

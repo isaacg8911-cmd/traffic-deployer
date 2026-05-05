@@ -141,4 +141,95 @@ with tab2:
                     with st.form(key=f"install_form_{sid}"):
                         col1, col2 = st.columns(2)
                         with col1:
-                            direction = st.selectbox("Direction", ["N", "E", "S", "W"], index=["N", "E", "S",
+                            # --- FIX APPLIED HERE ---
+                            dir_options = ["N", "E", "S", "W"]
+                            current_dir = s_data.get("DIR", "N")
+                            safe_index = dir_options.index(current_dir) if current_dir in dir_options else 0
+                            direction = st.selectbox("Direction", dir_options, index=safe_index)
+                            
+                        with col2:
+                            lanes = st.number_input("Lanes", min_value=0, step=1, value=int(s_data["LANES"]))
+                        
+                        notes = st.text_input("Install Notes", value=s_data["NOTES"])
+                        
+                        if st.form_submit_button("Save & Mark Installed"):
+                            if lanes < 1:
+                                st.error("⚠️ Error: Lanes must be 1 or greater.")
+                            else:
+                                mil_time, current_date = get_california_time()
+                                clean_notes = notes.strip().upper()
+                                
+                                st.session_state.site_data[sid].update({
+                                    "DATE": current_date,
+                                    "TIME": mil_time,
+                                    "DIR": direction,
+                                    "LANES": lanes,
+                                    "NOTES": clean_notes,
+                                    "INSTALLED": "x"
+                                })
+                                st.rerun()
+                else:
+                    st.success(f"Installed at {s_data['TIME']} on {s_data['DATE']}.")
+                    st.write(f"**Lanes:** {s_data['LANES']} | **Dir:** {s_data['DIR']} | **Counter:** {s_data['COUNTER']}")
+                    st.write(f"**Notes:** {s_data['NOTES']}")
+                    
+                    if st.button("✏️ Edit Entry", key=f"edit_install_{sid}"):
+                        st.session_state.site_data[sid]["INSTALLED"] = ""
+                        st.rerun()
+
+# ==========================================
+# TAB 3: PICK-UP & EXPORT
+# ==========================================
+with tab3:
+    installed_sites = [data for sid, data in st.session_state.site_data.items() if data["INSTALLED"] == "x"]
+    
+    if st.session_state.optimized_route:
+        missing_sites = [s['id'] for s in st.session_state.optimized_route if st.session_state.site_data[s['id']]["INSTALLED"] != "x"]
+        if missing_sites:
+            st.error(f"🛑 SYSTEM AUDIT: {len(missing_sites)} sites not marked installed!")
+            st.write(f"**Missing:** {', '.join(missing_sites)}")
+        else:
+            st.success("✅ SYSTEM AUDIT: 100% of sites from the map are accounted for.")
+    
+    if not installed_sites:
+        st.info("No sites have been marked as installed yet.")
+    else:
+        st.subheader("Pick-Up Itinerary")
+        for s_data in installed_sites:
+            sid = s_data["SITE"]
+            is_picked = s_data["PICKED UP"] == "x"
+            
+            icon = "✅" if is_picked else "📦"
+            with st.expander(f"{icon} Pick Up: Site {sid}"):
+                if not is_picked:
+                    maps_url = f"https://www.google.com/maps/dir/?api=1&destination={s_data['LAT']},{s_data['LON']}"
+                    st.link_button("🚗 Drive to Pick-Up", maps_url)
+                    
+                    with st.form(key=f"pickup_form_{sid}"):
+                        pickup_notes = st.text_input("Pick-Up Notes", value=s_data["NOTES"])
+                        if st.form_submit_button("Mark Picked Up"):
+                            st.session_state.site_data[sid]["PICKED UP"] = "x"
+                            st.session_state.site_data[sid]["NOTES"] = pickup_notes.strip().upper()
+                            st.rerun()
+                else:
+                    st.success("Equipment secured.")
+                    st.write(f"Final Notes: {s_data['NOTES']}")
+                    
+                    if st.button("✏️ Edit Entry", key=f"edit_pickup_{sid}"):
+                        st.session_state.site_data[sid]["PICKED UP"] = ""
+                        st.rerun()
+        
+        st.divider()
+        st.subheader("Export Excel Data")
+        
+        export_df = pd.DataFrame(installed_sites)
+        export_df = export_df[["DATE", "TIME", "SITE", "DIR", "LANES", "COUNTER", "NOTES", "INSTALLED", "PICKED UP"]]
+        
+        csv_data = export_df.to_csv(index=False).encode('utf-8')
+        
+        st.download_button(
+            label="📊 Download Final Data Sheet",
+            data=csv_data,
+            file_name=f"Traffic_Data_{datetime.now(ZoneInfo('America/Los_Angeles')).strftime('%Y_%m_%d')}.csv",
+            mime="text/csv"
+        )

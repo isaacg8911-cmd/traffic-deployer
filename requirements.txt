@@ -2,5 +2,3 @@ pandas
 streamlit
 tzdata
 openpyxl
-streamlit-js-eval
-streamlit-local-storage

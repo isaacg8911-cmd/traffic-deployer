@@ -8,68 +8,25 @@ import os
 import io
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from streamlit_js_eval import streamlit_js_eval
 
 # --- THEME & AESTHETIC ---
-st.set_page_config(page_title="Live Wire Precision Pro", layout="centered")
+st.set_page_config(page_title="Live Wire Field Pro", layout="centered")
 
 st.markdown("""
     <style>
-    /* Main Background - Asphalt Grey */
-    .stApp {
-        background-color: #2F2F2F;
-        color: #FFFFFF;
-    }
-    /* Headers - Caution Yellow */
-    h1, h2, h3 {
-        color: #FFD700 !important;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-    }
-    /* Tabs Customization */
-    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        color: #FFD700 !important;
-        border-bottom-color: #FFD700 !important;
-    }
-    /* Buttons - Heavy Duty Style */
-    div.stButton > button:first-child {
-        background-color: #444444;
-        color: #FFD700;
-        border: 2px solid #FFD700;
-        border-radius: 10px;
-        font-weight: bold;
-    }
-    /* Progress Bar - Road Stripe Yellow */
-    .stProgress > div > div > div > div {
-        background-color: #FFD700;
-    }
-    /* GPS Status Styling */
-    .gps-locked { 
-        color: #1DA1F2; 
-        font-weight: bold; 
-        border: 2px solid #1DA1F2; 
-        padding: 10px; 
-        border-radius: 10px; 
-        text-align: center; 
-        margin-bottom: 15px;
-        background-color: rgba(29, 161, 242, 0.1);
-    }
-    .gps-warning { 
-        color: #FF4B4B; 
-        font-weight: bold; 
-        border: 2px solid #FF4B4B; 
-        padding: 10px; 
-        border-radius: 10px; 
-        text-align: center; 
-        margin-bottom: 15px;
-    }
+    .stApp { background-color: #2F2F2F; color: #FFFFFF; }
+    h1, h2, h3 { color: #FFD700 !important; text-transform: uppercase; letter-spacing: 2px; }
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { color: #FFD700 !important; border-bottom-color: #FFD700 !important; }
+    div.stButton > button:first-child { background-color: #444444; color: #FFD700; border: 2px solid #FFD700; border-radius: 10px; font-weight: bold; }
+    .stProgress > div > div > div > div { background-color: #FFD700; }
+    [data-testid="stMetricValue"] { color: #FFD700 !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🚦 Field Data Collector")
 
 HOME_COORDS = (33.7715, -117.9431) 
-BACKUP_FILE = "field_backup_precision.json"
+BACKUP_FILE = "field_backup_standard.json"
 
 # --- PERSISTENCE ENGINE ---
 def save_state():
@@ -114,7 +71,7 @@ def get_california_time():
 tab1, tab2, tab3, tab4 = st.tabs(["📁 VAULT", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
 
 # ==========================================
-# TAB 1: VAULT (MULTI-FILE MERGING)
+# TAB 1: VAULT
 # ==========================================
 with tab1:
     if not st.session_state.optimized_route:
@@ -123,7 +80,7 @@ with tab1:
         if files:
             configs = []
             for i, f in enumerate(files):
-                lbl = st.text_input(f"Sheet Name for {f.name}:", value=f"Day {i+1}", key=f"label_{i}")
+                lbl = st.text_input(f"Sheet Name for {f.name}:", value=f"Day {i+1}", key=f"lbl_{i}")
                 configs.append({"file": f, "label": lbl})
             
             if st.button("🚀 Calculate & Sync Route", use_container_width=True):
@@ -144,38 +101,30 @@ with tab1:
                     st.session_state.optimized_route = route
                     st.session_state.active_files = [c["label"] for c in configs]
                     for s in route:
-                        st.session_state.site_data[s['id']] = {"Date":"","Time":"","Site":s['id'],"Counter":"c1b","Serial":"","Directions":"n","Lanes":1,"Notes":"","Installed":"","Picked up":"","LAT":s['lat'],"LON":s['lon'],"Skipped":False,"Sheet":s['sheet'],"INSTALL_LAT":s['lat'],"INSTALL_LON":s['lon']}
+                        st.session_state.site_data[s['id']] = {"Date":"","Time":"","Site":s['id'],"Counter":"c1b","Serial":"","Directions":"n","Lanes":1,"Notes":"","Installed":"","Picked up":"","LAT":s['lat'],"LON":s['lon'],"Skipped":False,"Sheet":s['sheet']}
                     save_state(); st.rerun()
     else:
         st.success(f"Route Active: {len(st.session_state.optimized_route)} Stops")
         st.map(pd.DataFrame(st.session_state.optimized_route))
         with st.expander("⚠️ Danger Zone"):
-            if st.checkbox("Confirm: I want to wipe all current progress"):
+            if st.checkbox("Confirm: Wipe all progress"):
                 if st.button("🗑️ Reset Application", type="primary", use_container_width=True):
                     if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
                     st.session_state.active_files, st.session_state.optimized_route, st.session_state.site_data, st.session_state.current_index = [], [], {}, 0
                     st.rerun()
 
 # ==========================================
-# TAB 2: INSTALL (BLUE CHECK GPS VERIFICATION)
+# TAB 2: INSTALL
 # ==========================================
 with tab2:
     if not st.session_state.optimized_route: st.info("Load maps in Vault.")
     else:
         view = st.radio("Display View:", ["🎯 Focus Mode", "📜 List Mode"], horizontal=True)
-        # Fetch Hardware GPS from Pixel 9
-        loc_raw = streamlit_js_eval(js_expressions='done(JSON.stringify([latitude,longitude]))', key='GPS_PRO_LOCK')
         
         def run_install(sid, coords, i):
             sd = st.session_state.site_data[sid]
             st.markdown(f"### Stop #{i+1}: Site {sid} ({sd.get('Sheet','Day')})")
-            st.link_button("🚗 Start GPS Navigation", f"https://www.google.com/maps/dir/?api=1&destination={coords[0]},{coords[1]}", use_container_width=True)
-            
-            # THE BLUE CHECK INDICATOR
-            if loc_raw:
-                st.markdown('<div class="gps-locked">✅ GPS LOCK ACQUIRED</div>', unsafe_allow_html=True)
-            else:
-                st.markdown('<div class="gps-warning">⚠️ WAITING FOR PIXEL GPS SIGNAL...</div>', unsafe_allow_html=True)
+            st.link_button("🚗 Open GPS", f"https://www.google.com/maps/dir/?api=1&destination={coords[0]},{coords[1]}", use_container_width=True)
             
             with st.form(key=f"form_{sid}"):
                 c1, c2 = st.columns(2)
@@ -187,13 +136,9 @@ with tab2:
                 ca, cb = st.columns(2)
                 if ca.form_submit_button("✅ COMPLETE ➡️"):
                     t, d = get_california_time()
-                    lat_c, lon_c = coords
-                    if loc_raw: 
-                        c_vals = json.loads(loc_raw); lat_c, lon_c = c_vals[0], c_vals[1]
                     st.session_state.site_data[sid].update({
                         "Date":d,"Time":t,"Directions":"n" if direction in ["n","s"] else "e",
-                        "Serial":serial,"Lanes":lanes,"Notes":notes.upper(),"Installed":"x",
-                        "INSTALL_LAT":lat_c,"INSTALL_LON":lon_c
+                        "Serial":serial,"Lanes":lanes,"Notes":notes.upper(),"Installed":"x"
                     })
                     if view == "🎯 Focus Mode": st.session_state.current_index += 1
                     save_state(); st.rerun()
@@ -226,7 +171,7 @@ with tab2:
                             st.session_state.site_data[s['id']]["Installed"] = ""; st.session_state.site_data[s['id']]["Skipped"] = False; save_state(); st.rerun()
 
 # ==========================================
-# TAB 3: PICK-UP (ACTUAL LOCATION ROUTING)
+# TAB 3: PICK-UP
 # ==========================================
 with tab3:
     installed = [d for d in st.session_state.site_data.values() if d["Installed"] == "x"]
@@ -235,9 +180,9 @@ with tab3:
         if st.button("🔄 Optimize Pick-Up Sequence", use_container_width=True):
             curr, itin, rem = HOME_COORDS, [], installed.copy()
             while rem:
-                nxt = min(rem, key=lambda x: math.sqrt((curr[0]-x['INSTALL_LAT'])**2 + (curr[1]-x['INSTALL_LON'])**2))
-                itin.append(nxt); curr = (nxt['INSTALL_LAT'], nxt['INSTALL_LON']); rem.remove(nxt)
-            st.session_state.pickup_itinerary = itin; st.success("Pick-up sequence updated.")
+                nxt = min(rem, key=lambda x: math.sqrt((curr[0]-x['LAT'])**2 + (curr[1]-x['LON'])**2))
+                itin.append(nxt); curr = (nxt['LAT'], nxt['LON']); rem.remove(nxt)
+            st.session_state.pickup_itinerary = itin; st.success("Sequence Updated.")
 
         itin = st.session_state.get("pickup_itinerary", installed)
         for i, s in enumerate(itin):
@@ -245,14 +190,14 @@ with tab3:
             status = "✅" if done else "📦"
             with st.expander(f"{status} #{i+1} - Site {sid}"):
                 if not done:
-                    st.link_button("🚗 GPS to Actual Truck Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['INSTALL_LAT']},{s['INSTALL_LON']}")
+                    st.link_button("🚗 GPS to Site", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}")
                     with st.form(key=f"pu_{sid}"):
                         p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                         if st.form_submit_button("MARK SECURED"):
                             st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip().upper(); save_state(); st.rerun()
 
 # ==========================================
-# TAB 4: MULTI-SHEET EXCEL
+# TAB 4: EXCEL
 # ==========================================
 with tab4:
     all_d = [d for d in st.session_state.site_data.values() if d["Installed"] == "x" or d.get("Skipped")]
@@ -267,8 +212,8 @@ with tab4:
                     df[cols].to_excel(writer, index=False, sheet_name=name)
                     st.write(f"**Day: {name}**"); st.dataframe(df[cols], use_container_width=True)
         st.divider()
-        st.download_button("📊 DOWNLOAD MASTER WORKBOOK", out.getvalue(), f"Traffic_Precision.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+        st.download_button("📊 DOWNLOAD MASTER WORKBOOK", out.getvalue(), f"Traffic_Work.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
 
 # --- SIDEBAR SYNC STATUS ---
-st.sidebar.markdown(f"**Disk Sync:** ✅ ACTIVE")
+st.sidebar.markdown(f"**Sync Status:** ✅ ACTIVE")
 st.sidebar.markdown(f"**Last Backup:** {st.session_state.get('last_sync', 'N/A')}")

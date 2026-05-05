@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V14 Pro", layout="centered")
+st.set_page_config(page_title="Live Wire V15 Pro", layout="centered")
 
 st.markdown("""
     <style>
@@ -63,7 +63,7 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- HIGH-SPEED DATA SHREDDER ---
+# --- HIGH-SPEED DATA SHREDDER (WITH STREET EXTRACTION) ---
 def process_upload(configs):
     all_raw = []
     coord_pattern = re.compile(r'-?\d{1,3}\.\d{3,}')
@@ -80,10 +80,17 @@ def process_upload(configs):
                     if id_match:
                         c1, c2 = float(coords[0]), float(coords[1])
                         lat, lon = max(c1, c2), min(c1, c2)
-                        all_raw.append({"id": id_match.group(1), "lat": lat, "lon": lon, "sheet": cfg['label']})
+                        
+                        # V15 Upgrade: Isolate the Street Name
+                        clean_line = re.sub(r'-?\d{1,3}\.\d{3,}', '', line) # Remove GPS
+                        clean_line = re.sub(r'\b\d{4,5}\b', '', clean_line) # Remove IDs and Zip Codes
+                        street_name = " ".join(clean_line.replace(',', '').split()).strip()
+                        street_name = street_name[:35] if street_name else "Location Unknown"
+                        
+                        all_raw.append({"id": id_match.group(1), "lat": lat, "lon": lon, "sheet": cfg['label'], "street": street_name})
     
     if all_raw:
-        df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
+        df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first','street':'first'}).reset_index()
         route, curr, rem = [], HOME_COORDS, df.to_dict('records')
         while rem:
             nxt = min(rem, key=lambda x: (curr[0] - x['lat'])**2 + (curr[1] - x['lon'])**2)
@@ -91,7 +98,7 @@ def process_upload(configs):
         
         st.session_state.optimized_route = route
         st.session_state.active_files = [c['label'] for c in configs]
-        st.session_state.site_data = {s['id']: {"Date":"","Time":"","Site":s['id'],"Counter":"c1b","Serial":"","Directions":"n","Lanes":1,"Notes":"","Installed":"","Picked up":"","LAT":s['lat'],"LON":s['lon'],"Skipped":False,"Sheet":s['sheet']} for s in route}
+        st.session_state.site_data = {s['id']: {"Date":"","Time":"","Site":s['id'],"Counter":"c1b","Serial":"","Directions":"n","Lanes":1,"Notes":"","Installed":"","Picked up":"","LAT":s['lat'],"LON":s['lon'],"Skipped":False,"Sheet":s['sheet'],"Street":s['street']} for s in route}
         auto_save()
         return True, len(route)
     return False, 0
@@ -143,7 +150,6 @@ else:
             st.rerun()
 
     with tab2:
-        # Field Dashboard Metrics
         total_sites = len(st.session_state.optimized_route)
         installed_count = sum(1 for d in st.session_state.site_data.values() if d["Installed"] == "x")
         skipped_count = sum(1 for d in st.session_state.site_data.values() if d.get("Skipped"))
@@ -160,12 +166,15 @@ else:
             s = st.session_state.optimized_route[cur_idx]; sid = s['id']; sd = st.session_state.site_data[sid]
             
             st.subheader(f"STOP #{cur_idx+1}: SITE {sid}")
+            
+            # V15 Upgrade: High-Visibility Target Street
+            st.markdown(f"### 📍 TARGET: <span style='color:#FFD700;'>{sd.get('Street')}</span>", unsafe_allow_html=True)
             st.caption(f"Sheet: {sd.get('Sheet')} | Raw GPS: `{s['lat']}, {s['lon']}`") 
             
             st.progress(cur_idx / total_sites)
             st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
             
-            with st.form(key=f"f_v14_{sid}"):
+            with st.form(key=f"f_v15_{sid}"):
                 c1, c2 = st.columns(2)
                 with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                 with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
@@ -204,9 +213,10 @@ else:
                 status = "✅" if is_picked else "📦"
                 with st.expander(f"{status} #{i+1} - Site {sid}"):
                     if not is_picked:
+                        st.markdown(f"**📍 {s.get('Street')}**")
                         st.caption(f"Raw GPS: `{s['LAT']}, {s['LON']}`")
                         st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
-                        with st.form(key=f"pu_v14_{sid}"):
+                        with st.form(key=f"pu_v15_{sid}"):
                             p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                             if st.form_submit_button("MARK SECURED"):
                                 st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()
@@ -217,7 +227,7 @@ else:
         if all_d:
             try:
                 full_df = pd.DataFrame(all_d)
-                cols = ["Date", "Time", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]
+                cols = ["Date", "Time", "Site", "Street", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     for sheet_name in st.session_state.active_files:

@@ -61,7 +61,7 @@ def calculate_distance(p1, p2):
 tab1, tab2, tab3, tab4 = st.tabs(["📁 Vault", "📍 Install", "♻️ Pick-Up", "📊 Excel"])
 
 # ==========================================
-# TAB 1: MULTI-FILE VAULT (With Sheet Naming)
+# TAB 1: MULTI-FILE VAULT
 # ==========================================
 with tab1:
     st.subheader("Load Map Files")
@@ -71,20 +71,19 @@ with tab1:
         
         if uploaded_files:
             file_configs = []
-            st.info("Assign a Sheet Name for each file (e.g., Day 1, Day 2):")
             for i, f in enumerate(uploaded_files):
-                label = st.text_input(f"Label for {f.name}:", value=f"Day {i+1}", key=f"label_{i}")
+                label = st.text_input(f"Sheet Name for {f.name}:", value=f"Day {i+1}", key=f"label_{i}")
                 file_configs.append({"file": f, "label": label})
             
             if st.button("🚀 Merge & Optimize Route", use_container_width=True):
                 all_raw_sites = []
-                active_file_info = []
+                active_labels = []
                 
                 with st.spinner("Processing maps..."):
                     for config in file_configs:
                         f = config["file"]
-                        label = config["label"]
-                        active_file_info.append(label)
+                        lbl = config["label"]
+                        active_labels.append(lbl)
                         
                         raw_data = f.read()
                         readable_text = "".join([chr(b) if 32 <= b < 127 else " " for b in raw_data])
@@ -92,15 +91,15 @@ with tab1:
                         
                         for m in matches:
                             if m[0] == "3333": continue 
-                            all_raw_sites.append({"id": m[0], "lat": float(m[2]), "lon": float(m[3]), "sheet": label})
+                            all_raw_sites.append({"id": m[0], "lat": float(m[2]), "lon": float(m[3]), "sheet": lbl})
                 
                 if all_raw_sites:
-                    # Logic: Group by ID but keep the Sheet Label associated with the counter
+                    # Robust grouping: Ensure sheet label is preserved
                     midpoint_df = pd.DataFrame(all_raw_sites).groupby("id").agg({
                         'lat': 'mean', 'lon': 'mean', 'sheet': 'first'
                     }).reset_index()
                     
-                    # Solve Route
+                    # TSP Optimization
                     temp_route = []
                     current_pos = HOME_COORDS
                     remaining = midpoint_df.to_dict('records')
@@ -111,7 +110,7 @@ with tab1:
                         remaining.remove(next_stop)
                     
                     st.session_state.optimized_route = temp_route
-                    st.session_state.active_files = active_file_info
+                    st.session_state.active_files = active_labels
                     
                     for site in temp_route:
                         st.session_state.site_data[site['id']] = {
@@ -120,61 +119,87 @@ with tab1:
                             "LAT": site['lat'], "LON": site['lon'], "Skipped": False, "Sheet": site['sheet']
                         }
                     save_state(); st.rerun()
-    
     else:
         st.success(f"Merged: {', '.join(st.session_state.active_files)}")
         st.map(pd.DataFrame(st.session_state.optimized_route), zoom=9)
-        if st.button("🗑️ Delete Job"):
+        if st.button("🗑️ Reset Application"):
             st.session_state.active_files = []; st.session_state.optimized_route = []; st.session_state.site_data = {}; st.session_state.current_index = 0
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.rerun()
 
 # ==========================================
-# TAB 2 & 3: INSTALL & PICK-UP (Slightly Updated to handle sheet logic)
+# TAB 2: INSTALL (WITH AUTO-ADVANCE)
 # ==========================================
 with tab2:
-    if not st.session_state.optimized_route: st.info("Load maps first.")
+    if not st.session_state.optimized_route: st.info("Load maps in Vault first.")
     else:
         idx = st.session_state.current_index
         if idx < len(st.session_state.optimized_route):
-            site = st.session_state.optimized_route[idx]; sid = site['id']; s_data = st.session_state.site_data[sid]
-            st.subheader(f"Stop {idx+1}: Site {sid} ({s_data['Sheet']})")
-            st.link_button("🚗 GPS", f"https://www.google.com/maps/dir/?api=1&destination={site['lat']},{site['lon']}", use_container_width=True)
-            with st.form(key=f"ins_{sid}"):
+            site = st.session_state.optimized_route[idx]
+            sid = site['id']
+            s_data = st.session_state.site_data.get(sid, {})
+            
+            # Safety check for the sheet label to prevent crashing
+            sheet_lbl = s_data.get('Sheet', 'Unlabeled')
+            
+            st.subheader(f"Stop {idx+1}: Site {sid} ({sheet_lbl})")
+            st.link_button("🚗 GPS to Midpoint", f"https://www.google.com/maps/dir/?api=1&destination={site['lat']},{site['lon']}", use_container_width=True)
+            
+            with st.form(key=f"ins_form_{sid}"):
                 c1, c2 = st.columns(2)
-                with c1: dir_opt = ["n", "e", "s", "w"]; direction = st.selectbox("Dir", dir_opt, index=dir_opt.index(s_data["Directions"]))
-                with c2: lanes = st.number_input("Lanes", min_value=1, value=int(s_data["Lanes"]))
-                serial = st.text_input("Serial", value=s_data["Serial"]); notes = st.text_input("Notes", value=s_data["Notes"])
-                ca1, ca2 = st.columns(2)
-                if ca1.form_submit_button("COMPLETE ➡️"):
+                with c1: 
+                    dir_opt = ["n", "e", "s", "w"]
+                    curr_dir = s_data.get("Directions", "n")
+                    direction = st.selectbox("Dir", dir_opt, index=dir_opt.index(curr_dir))
+                with c2: 
+                    lanes = st.number_input("Lanes", min_value=1, value=int(s_data.get("Lanes", 1)))
+                
+                serial = st.text_input("Serial Number", value=s_data.get("Serial", ""))
+                notes = st.text_input("Notes", value=s_data.get("Notes", ""))
+                
+                btn1, btn2 = st.columns(2)
+                if btn1.form_submit_button("COMPLETE ➡️"):
                     t, d = get_california_time()
-                    st.session_state.site_data[sid].update({"Date": d, "Time": t, "Directions": "n" if direction in ["n", "s"] else "e", "Serial": serial, "Lanes": lanes, "Notes": notes, "Installed": "x", "Skipped": False})
+                    st.session_state.site_data[sid].update({
+                        "Date": d, "Time": t, "Directions": "n" if direction in ["n", "s"] else "e", 
+                        "Serial": serial, "Lanes": lanes, "Notes": notes, "Installed": "x", "Skipped": False
+                    })
                     st.session_state.current_index += 1; save_state(); st.rerun()
-                if ca2.form_submit_button("🚨 UNABLE"):
+                if btn2.form_submit_button("🚨 UNABLE"):
                     t, d = get_california_time()
-                    st.session_state.site_data[sid].update({"Date": d, "Time": t, "Directions": "n" if direction in ["n", "s"] else "e", "Serial": serial, "Lanes": lanes, "Notes": notes.upper(), "Installed": "", "Skipped": True})
+                    st.session_state.site_data[sid].update({
+                        "Date": d, "Time": t, "Directions": "n" if direction in ["n", "s"] else "e", 
+                        "Serial": serial, "Lanes": lanes, "Notes": f"UNABLE: {notes.upper()}", "Installed": "", "Skipped": True
+                    })
                     st.session_state.current_index += 1; save_state(); st.rerun()
+            
             if idx > 0:
                 if st.button("⬅️ Back"): st.session_state.current_index -= 1; save_state(); st.rerun()
-        else: st.success("🏁 Route complete.")
+        else:
+            st.balloons()
+            st.success("🏁 All installations handled. Head back to Garden Grove!")
 
+# ==========================================
+# TAB 3: PICK-UP
+# ==========================================
 with tab3:
     installed = [d for sid, d in st.session_state.site_data.items() if d["Installed"] == "x"]
-    if not installed: st.info("No sites installed yet.")
+    if not installed: st.info("No installations logged yet.")
     else:
         for s in installed:
             sid = s["Site"]; is_picked = s["Picked up"] == "x"
             if not is_picked:
-                with st.expander(f"📦 {s['Sheet']} - Site {sid}"):
+                with st.expander(f"📦 {s.get('Sheet', 'Day')} - Site {sid}"):
                     st.link_button("🚗 GPS", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}")
-                    with st.form(key=f"pu_{sid}"):
-                        p_notes = st.text_input("Notes", value=s["Notes"])
+                    with st.form(key=f"pu_form_{sid}"):
+                        p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                         if st.form_submit_button("Mark Picked Up"):
                             st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); save_state(); st.rerun()
-            else: st.write(f"✅ {s['Sheet']} - Site {sid} Secured")
+            else:
+                st.write(f"✅ {s.get('Sheet', 'Day')} - Site {sid} Secured")
 
 # ==========================================
-# TAB 4: EXCEL WORKBOOK GENERATOR
+# TAB 4: MULTI-SHEET EXCEL
 # ==========================================
 with tab4:
     st.subheader("Workbook Preview")
@@ -184,20 +209,20 @@ with tab4:
         full_df = pd.DataFrame(all_data)
         cols = ["Date", "Time", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]
         
-        # Create Excel in Memory
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             for sheet_name in st.session_state.active_files:
-                # Filter data for this specific sheet/day
-                sheet_df = full_df[full_df["Sheet"] == sheet_name][cols]
+                sheet_df = full_df[full_df["Sheet"] == sheet_name]
                 if not sheet_df.empty:
-                    sheet_df.to_excel(writer, index=False, sheet_name=sheet_name)
-                    st.write(f"**{sheet_name} Preview:**")
-                    st.dataframe(sheet_df, use_container_width=True)
+                    # Clean up the output columns
+                    final_sheet_df = sheet_df[cols]
+                    final_sheet_df.to_excel(writer, index=False, sheet_name=sheet_name)
+                    st.write(f"**Sheet: {sheet_name}**")
+                    st.dataframe(final_sheet_df, use_container_width=True)
 
         st.divider()
         st.download_button(
-            label="📊 Download Multi-Sheet Workbook (.XLSX)",
+            label="📊 Download Excel Workbook",
             data=output.getvalue(),
             file_name=f"Traffic_Work_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

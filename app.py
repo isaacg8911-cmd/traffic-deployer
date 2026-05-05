@@ -18,7 +18,7 @@ if "optimized_route" not in st.session_state:
 if "site_data" not in st.session_state:
     st.session_state.site_data = {} 
 if "active_file" not in st.session_state:
-    st.session_state.active_file = None # Holds file in a "Vault" before processing
+    st.session_state.active_file = None 
 
 # --- HELPER FUNCTIONS ---
 def get_california_time():
@@ -40,11 +40,9 @@ tab1, tab2, tab3 = st.tabs(["📁 File Vault", "📍 Installation", "♻️ Pick
 with tab1:
     st.subheader("Map Management")
     
-    # Show uploader only if no file is currently held in memory
     if not st.session_state.active_file:
         uploaded_file = st.file_uploader("Upload .est Map", type=["est", "txt"])
         if uploaded_file:
-            # Save file to memory vault instantly
             st.session_state.active_file = {
                 "name": uploaded_file.name,
                 "data": uploaded_file.getvalue()
@@ -52,10 +50,8 @@ with tab1:
             st.rerun()
             
     else:
-        # File Management Interface
         st.success("File securely loaded into the Vault.")
         
-        # 1. Rename Feature
         new_name = st.text_input("Edit File Name:", value=st.session_state.active_file["name"])
         if new_name != st.session_state.active_file["name"]:
              st.session_state.active_file["name"] = new_name
@@ -63,10 +59,9 @@ with tab1:
         col1, col2 = st.columns(2)
         
         with col1:
-            # 2. Manual Processing Button + Loading Spinner
             if st.button("🚀 Calculate Route", use_container_width=True):
                 with st.spinner("Analyzing map and calculating optimal route..."):
-                    time.sleep(1) # Ensures the spinner renders smoothly on mobile
+                    time.sleep(1) 
                     try:
                         raw_data = st.session_state.active_file["data"]
                         readable_text = "".join([chr(b) if 32 <= b < 127 else " " for b in raw_data])
@@ -111,7 +106,6 @@ with tab1:
                         st.error(f"Error processing file: {e}")
 
         with col2:
-            # 3. Delete Feature
             if st.button("🗑️ Delete File", type="secondary", use_container_width=True):
                 st.session_state.active_file = None
                 st.session_state.optimized_route = []
@@ -147,81 +141,4 @@ with tab2:
                     with st.form(key=f"install_form_{sid}"):
                         col1, col2 = st.columns(2)
                         with col1:
-                            direction = st.selectbox("Direction", ["N", "E", "S", "W"], index=0 if s_data["DIR"] == "N" else 1)
-                        with col2:
-                            lanes = st.number_input("Lanes", min_value=0, step=1, value=int(s_data["LANES"]))
-                        
-                        notes = st.text_input("Install Notes", value=s_data["NOTES"])
-                        
-                        if st.form_submit_button("Save & Mark Installed"):
-                            if lanes < 1:
-                                st.error("⚠️ Error: Lanes must be 1 or greater.")
-                            else:
-                                mil_time, current_date = get_california_time()
-                                clean_notes = notes.strip().upper()
-                                
-                                st.session_state.site_data[sid].update({
-                                    "DATE": current_date,
-                                    "TIME": mil_time,
-                                    "DIR": direction,
-                                    "LANES": lanes,
-                                    "NOTES": clean_notes,
-                                    "INSTALLED": "x"
-                                })
-                                st.rerun()
-                else:
-                    st.success(f"Installed at {s_data['TIME']} on {s_data['DATE']}.")
-                    st.write(f"**Lanes:** {s_data['LANES']} | **Dir:** {s_data['DIR']} | **Counter:** {s_data['COUNTER']}")
-
-# ==========================================
-# TAB 3: PICK-UP & EXPORT
-# ==========================================
-with tab3:
-    installed_sites = [data for sid, data in st.session_state.site_data.items() if data["INSTALLED"] == "x"]
-    
-    if st.session_state.optimized_route:
-        missing_sites = [s['id'] for s in st.session_state.optimized_route if st.session_state.site_data[s['id']]["INSTALLED"] != "x"]
-        if missing_sites:
-            st.error(f"🛑 SYSTEM AUDIT: {len(missing_sites)} sites not marked installed!")
-            st.write(f"**Missing:** {', '.join(missing_sites)}")
-        else:
-            st.success("✅ SYSTEM AUDIT: 100% of sites from the map are accounted for.")
-    
-    if not installed_sites:
-        st.info("No sites have been marked as installed yet.")
-    else:
-        st.subheader("Pick-Up Itinerary")
-        for s_data in installed_sites:
-            sid = s_data["SITE"]
-            is_picked = s_data["PICKED UP"] == "x"
-            
-            icon = "✅" if is_picked else "📦"
-            with st.expander(f"{icon} Pick Up: Site {sid}"):
-                if not is_picked:
-                    maps_url = f"https://www.google.com/maps/dir/?api=1&destination={s_data['LAT']},{s_data['LON']}"
-                    st.link_button("🚗 Drive to Pick-Up", maps_url)
-                    
-                    with st.form(key=f"pickup_form_{sid}"):
-                        pickup_notes = st.text_input("Pick-Up Notes", value=s_data["NOTES"])
-                        if st.form_submit_button("Mark Picked Up"):
-                            st.session_state.site_data[sid]["PICKED UP"] = "x"
-                            st.session_state.site_data[sid]["NOTES"] = pickup_notes.strip().upper()
-                            st.rerun()
-                else:
-                    st.success("Equipment secured.")
-                    st.write(f"Final Notes: {s_data['NOTES']}")
-        
-        st.divider()
-        st.subheader("Export Excel Data")
-        
-        export_df = pd.DataFrame(installed_sites)
-        export_df = export_df[["DATE", "TIME", "SITE", "DIR", "LANES", "COUNTER", "NOTES", "INSTALLED", "PICKED UP"]]
-        
-        csv_data = export_df.to_csv(index=False).encode('utf-8')
-        
-        st.download_button(
-            label="📊 Download Final Data Sheet",
-            data=csv_data,
-            file_name=f"Traffic_Data_{datetime.now(ZoneInfo('America/Los_Angeles')).strftime('%Y_%m_%d')}.csv",
-            mime="text/csv"
-        )
+                            direction = st.selectbox("Direction", ["N", "E", "S", "W"], index=["N", "E", "S",

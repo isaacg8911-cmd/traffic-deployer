@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V19 Core", layout="centered")
+st.set_page_config(page_title="Live Wire V20 Core", layout="centered")
 
 st.markdown("""
     <style>
@@ -62,32 +62,37 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V19 MASTERKEY SHREDDER (Strict Extraction, No Street Names) ---
+# --- V20 BLOCK SPLITTER (Indestructible Extraction) ---
 def process_upload(configs):
     all_raw = []
-    
-    # Perfect fingerprint matcher: Double ID -> Text -> Zip Code -> 2 Coordinates
-    pattern = re.compile(r'\b(\d{4})\s+\1\s+.*?\s+\d{5}\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)')
     
     for cfg in configs:
         content = cfg['file'].getvalue().decode('latin-1', errors='ignore')
         
-        # Flatten the file into one line to prevent Word-Wrap breaks
+        # Flatten the file into a single line to prevent breaks
         flat_content = content.replace('\n', ' ')
         
-        matches = pattern.findall(flat_content)
+        # Use the Double-ID as scissors to cut the text into blocks
+        # e.g., "4716 4716" becomes the divider
+        tokens = re.split(r'\b(\d{4})\s+\1\s+', flat_content)
         
-        for match in matches:
-            sid = match[0]
-            c1, c2 = float(match[1]), float(match[2])
+        # Process each block individually
+        for i in range(1, len(tokens) - 1, 2):
+            sid = tokens[i]
+            block = tokens[i+1]
             
-            # Sort Lat/Lon automatically
-            lat, lon = max(c1, c2), min(c1, c2)
-            
-            all_raw.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']})
+            # Find the coordinates inside this specific block
+            coords = re.findall(r'-?\d{2,3}\.\d{3,}', block)
+            if len(coords) >= 2:
+                c1, c2 = float(coords[0]), float(coords[1])
+                lat, lon = max(c1, c2), min(c1, c2)
+                
+                # Double-check it's actually in California to prevent ghost sites
+                if 32.0 < lat < 42.0 and -125.0 < lon < -114.0:
+                    all_raw.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']})
     
     if all_raw:
-        # Group duplicates to get exact site count
+        # Group duplicates to ensure exact site counts
         df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
         route, curr, rem = [], HOME_COORDS, df.to_dict('records')
         
@@ -171,7 +176,7 @@ else:
             st.progress(cur_idx / total_sites)
             st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
             
-            with st.form(key=f"f_v19_{sid}"):
+            with st.form(key=f"f_v20_{sid}"):
                 c1, c2 = st.columns(2)
                 with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                 with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
@@ -212,7 +217,7 @@ else:
                     if not is_picked:
                         st.caption(f"Raw GPS: `{s['LAT']}, {s['LON']}`")
                         st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
-                        with st.form(key=f"pu_v19_{sid}"):
+                        with st.form(key=f"pu_v20_{sid}"):
                             p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                             if st.form_submit_button("MARK SECURED"):
                                 st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()
@@ -223,7 +228,6 @@ else:
         if all_d:
             try:
                 full_df = pd.DataFrame(all_d)
-                # Removed Street from the Excel columns
                 cols = ["Date", "Time", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:

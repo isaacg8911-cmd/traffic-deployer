@@ -26,7 +26,7 @@ def get_california_time():
     now = datetime.now(ZoneInfo("America/Los_Angeles"))
     if now.minute > 0 or now.second > 0:
         now += timedelta(hours=1)
-    return now.strftime("%H00"), now.strftime("%m/%d/%Y")
+    return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
 def calculate_distance(p1, p2):
     return math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
@@ -94,9 +94,9 @@ with tab1:
                             for site in temp_route:
                                 if site['id'] not in st.session_state.site_data:
                                     st.session_state.site_data[site['id']] = {
-                                        "DATE": "", "TIME": "", "SITE": site['id'],
-                                        "DIR": "N", "LANES": 1, "COUNTER": "C1B",
-                                        "NOTES": "", "INSTALLED": "", "PICKED UP": "",
+                                        "Date": "", "Time": "", "Site": site['id'],
+                                        "Counter": "c1b", "Serial": "", "Directions": "n", 
+                                        "Lanes": 1, "Notes": "", "Installed": "", "Picked up": "",
                                         "LAT": site['lat'], "LON": site['lon'] 
                                     }
                             st.success("✅ Route Ready! Switch to the 'Installation' tab.")
@@ -120,7 +120,7 @@ with tab2:
         st.info("👈 Please load and process a map in the File Vault first.")
     else:
         total = len(st.session_state.optimized_route)
-        completed = sum(1 for data in st.session_state.site_data.values() if data["INSTALLED"] == "x")
+        completed = sum(1 for data in st.session_state.site_data.values() if data["Installed"] == "x")
         
         st.metric("Installation Progress", f"{completed} / {total} Sites")
         st.progress(completed / total if total > 0 else 0)
@@ -128,7 +128,7 @@ with tab2:
         for i, site in enumerate(st.session_state.optimized_route):
             sid = site['id']
             s_data = st.session_state.site_data[sid]
-            is_done = s_data["INSTALLED"] == "x"
+            is_done = s_data["Installed"] == "x"
             
             icon = "✅" if is_done else "📝"
             
@@ -141,50 +141,55 @@ with tab2:
                     with st.form(key=f"install_form_{sid}"):
                         col1, col2 = st.columns(2)
                         with col1:
-                            # --- FIX APPLIED HERE ---
-                            dir_options = ["N", "E", "S", "W"]
-                            current_dir = s_data.get("DIR", "N")
+                            # Safely set direction logic without triggering syntax errors
+                            dir_options = ["n", "e", "s", "w"]
+                            current_dir = s_data.get("Directions", "n")
                             safe_index = dir_options.index(current_dir) if current_dir in dir_options else 0
                             direction = st.selectbox("Direction", dir_options, index=safe_index)
                             
                         with col2:
-                            lanes = st.number_input("Lanes", min_value=0, step=1, value=int(s_data["LANES"]))
+                            lanes = st.number_input("Lanes", min_value=0, step=1, value=int(s_data["Lanes"]))
                         
-                        notes = st.text_input("Install Notes", value=s_data["NOTES"])
+                        serial = st.text_input("Serial Number", value=s_data["Serial"])
+                        notes = st.text_input("Install Notes", value=s_data["Notes"])
                         
                         if st.form_submit_button("Save & Mark Installed"):
                             if lanes < 1:
                                 st.error("⚠️ Error: Lanes must be 1 or greater.")
                             else:
                                 mil_time, current_date = get_california_time()
-                                clean_notes = notes.strip().upper()
+                                
+                                # --- AXIS MAPPING LOGIC ---
+                                # N or S becomes N. E or W becomes E.
+                                mapped_direction = "n" if direction in ["n", "s"] else "e"
                                 
                                 st.session_state.site_data[sid].update({
-                                    "DATE": current_date,
-                                    "TIME": mil_time,
-                                    "DIR": direction,
-                                    "LANES": lanes,
-                                    "NOTES": clean_notes,
-                                    "INSTALLED": "x"
+                                    "Date": current_date,
+                                    "Time": mil_time,
+                                    "Directions": mapped_direction, 
+                                    "Serial": serial.strip(),
+                                    "Lanes": lanes,
+                                    "Notes": notes.strip(),
+                                    "Installed": "x"
                                 })
                                 st.rerun()
                 else:
-                    st.success(f"Installed at {s_data['TIME']} on {s_data['DATE']}.")
-                    st.write(f"**Lanes:** {s_data['LANES']} | **Dir:** {s_data['DIR']} | **Counter:** {s_data['COUNTER']}")
-                    st.write(f"**Notes:** {s_data['NOTES']}")
+                    st.success(f"Installed at {s_data['Time']} on {s_data['Date']}.")
+                    st.write(f"**Lanes:** {s_data['Lanes']} | **Dir:** {s_data['Directions']} | **Counter:** {s_data['Counter']} | **Serial:** {s_data['Serial']}")
+                    st.write(f"**Notes:** {s_data['Notes']}")
                     
                     if st.button("✏️ Edit Entry", key=f"edit_install_{sid}"):
-                        st.session_state.site_data[sid]["INSTALLED"] = ""
+                        st.session_state.site_data[sid]["Installed"] = ""
                         st.rerun()
 
 # ==========================================
 # TAB 3: PICK-UP & EXPORT
 # ==========================================
 with tab3:
-    installed_sites = [data for sid, data in st.session_state.site_data.items() if data["INSTALLED"] == "x"]
+    installed_sites = [data for sid, data in st.session_state.site_data.items() if data["Installed"] == "x"]
     
     if st.session_state.optimized_route:
-        missing_sites = [s['id'] for s in st.session_state.optimized_route if st.session_state.site_data[s['id']]["INSTALLED"] != "x"]
+        missing_sites = [s['id'] for s in st.session_state.optimized_route if st.session_state.site_data[s['id']]["Installed"] != "x"]
         if missing_sites:
             st.error(f"🛑 SYSTEM AUDIT: {len(missing_sites)} sites not marked installed!")
             st.write(f"**Missing:** {', '.join(missing_sites)}")
@@ -196,8 +201,8 @@ with tab3:
     else:
         st.subheader("Pick-Up Itinerary")
         for s_data in installed_sites:
-            sid = s_data["SITE"]
-            is_picked = s_data["PICKED UP"] == "x"
+            sid = s_data["Site"]
+            is_picked = s_data["Picked up"] == "x"
             
             icon = "✅" if is_picked else "📦"
             with st.expander(f"{icon} Pick Up: Site {sid}"):
@@ -206,24 +211,25 @@ with tab3:
                     st.link_button("🚗 Drive to Pick-Up", maps_url)
                     
                     with st.form(key=f"pickup_form_{sid}"):
-                        pickup_notes = st.text_input("Pick-Up Notes", value=s_data["NOTES"])
+                        pickup_notes = st.text_input("Pick-Up Notes", value=s_data["Notes"])
                         if st.form_submit_button("Mark Picked Up"):
-                            st.session_state.site_data[sid]["PICKED UP"] = "x"
-                            st.session_state.site_data[sid]["NOTES"] = pickup_notes.strip().upper()
+                            st.session_state.site_data[sid]["Picked up"] = "x"
+                            st.session_state.site_data[sid]["Notes"] = pickup_notes.strip()
                             st.rerun()
                 else:
                     st.success("Equipment secured.")
-                    st.write(f"Final Notes: {s_data['NOTES']}")
+                    st.write(f"Final Notes: {s_data['Notes']}")
                     
                     if st.button("✏️ Edit Entry", key=f"edit_pickup_{sid}"):
-                        st.session_state.site_data[sid]["PICKED UP"] = ""
+                        st.session_state.site_data[sid]["Picked up"] = ""
                         st.rerun()
         
         st.divider()
         st.subheader("Export Excel Data")
         
+        # Format explicitly to match your uploaded CSV column headers
         export_df = pd.DataFrame(installed_sites)
-        export_df = export_df[["DATE", "TIME", "SITE", "DIR", "LANES", "COUNTER", "NOTES", "INSTALLED", "PICKED UP"]]
+        export_df = export_df[["Date", "Time", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]]
         
         csv_data = export_df.to_csv(index=False).encode('utf-8')
         

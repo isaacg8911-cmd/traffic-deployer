@@ -250,4 +250,4 @@ else:
                     c1, c2 = st.columns(2)
                     with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                     with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
-                    ser = st.text_input("SERIAL #", value=
+                    ser = ser = st.text_input("SERIAL #", value=sd["Serial"])

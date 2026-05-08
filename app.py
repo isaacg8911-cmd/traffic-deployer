@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V28 Protocol", layout="centered")
+st.set_page_config(page_title="Live Wire V29 Protocol", layout="centered")
 
 st.markdown("""
     <style>
@@ -75,9 +75,10 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V28 DUAL-PASS ISOLATED EXTRACTION ENGINE ---
+# --- V29 CHRONO-LOCK EXTRACTION ENGINE ---
 def process_upload(configs, m_type):
-    all_raw = []
+    all_raw_master = []
+    valid_uids_for_mission = set()
     is_pickup = "PICK-UP" in m_type
     
     for cfg in configs:
@@ -88,8 +89,7 @@ def process_upload(configs, m_type):
         clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
-        # PASS 1: Harvest ALL coordinates using aggressive 4-digit search
-        master_sites = {} 
+        # PASS 1: Harvest the complete Master List of coordinates
         tokens = re.split(r'\b(\d{4})\b', clean_text)
         for i in range(1, len(tokens) - 1, 2):
             sid = tokens[i]
@@ -98,51 +98,51 @@ def process_upload(configs, m_type):
             if len(coords) >= 2:
                 c1, c2 = float(coords[0]), float(coords[1])
                 lat, lon = max(c1, c2), min(c1, c2)
-                # Verify coordinates are in Southern California
                 if 32.0 < lat < 36.0 and -125.0 < lon < -114.0:
-                    uid = f"{cfg['label']}_{sid}"
-                    master_sites[uid] = {"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']}
+                    all_raw_master.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']})
                     
-        # PASS 2: Mission-Specific Filtering
+        # PASS 2: Determine which sites actually belong in this specific mission
         if is_pickup:
-            # Forgiving regex: 4-digits, optional spaces/symbols, then an X
+            # Hunts for 4-digits attached to an X
             pin_matches = re.findall(r'\b(\d{4})[^\w\s]*\s*[xX]', clean_text, re.IGNORECASE)
-            pin_uids = set([f"{cfg['label']}_{sid}" for sid in pin_matches])
-            
-            for uid in pin_uids:
-                if uid in master_sites:
-                    all_raw.append(master_sites[uid])
+            for sid in pin_matches:
+                valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
         else:
             # Install mode: require double ID to prevent ghosts
             double_id_tokens = re.split(r'\b(\d{4})\s+\1\s+', clean_text)
             valid_sids = set([double_id_tokens[i] for i in range(1, len(double_id_tokens)-1, 2)])
-            valid_uids = set([f"{cfg['label']}_{sid}" for sid in valid_sids])
-            
-            for uid in valid_uids:
-                if uid in master_sites:
-                    all_raw.append(master_sites[uid])
+            for sid in valid_sids:
+                valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
     
-    if all_raw:
-        # V28 FIX: Group by ID AND Sheet to prevent cross-map merging
-        df = pd.DataFrame(all_raw).groupby(["id", "sheet"]).agg({'lat':'mean','lon':'mean'}).reset_index()
-        
-        # Re-create unique ID for the system
+    if all_raw_master:
+        # Group by ID AND Sheet to prevent cross-map merging
+        df = pd.DataFrame(all_raw_master).groupby(["id", "sheet"]).agg({'lat':'mean','lon':'mean'}).reset_index()
         df['uid'] = df['sheet'] + "_" + df['id']
-        route, curr, rem = [], HOME_COORDS, df.to_dict('records')
         
-        # Calculates fastest path from basecamp to all pins
-        while rem:
-            nxt = min(rem, key=lambda x: (curr[0] - x['lat'])**2 + (curr[1] - x['lon'])**2)
-            route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
+        # Calculate the PERFECT Master Route first (Install Sequence)
+        master_rem = df.to_dict('records')
+        master_route = []
+        curr = HOME_COORDS
+        while master_rem:
+            nxt = min(master_rem, key=lambda x: (curr[0] - x['lat'])**2 + (curr[1] - x['lon'])**2)
+            master_route.append(nxt)
+            curr = (nxt['lat'], nxt['lon'])
+            master_rem.remove(nxt)
             
+        # PASS 3: The Chrono-Lock Filter
+        # Filters down to the current mission without ever changing the Master Install Sequence
+        final_route = [stop for stop in master_route if stop['uid'] in valid_uids_for_mission]
+        
+        if not final_route: return False, 0
+        
         installed_status = "x" if is_pickup else ""
         
-        st.session_state.optimized_route = route
+        st.session_state.optimized_route = final_route
         st.session_state.active_files = [c['label'] for c in configs]
         st.session_state.site_data = {
             s['uid']: {"Date":"","Time":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"","Directions":"n",
                       "Lanes":1,"Notes":"","Installed":installed_status,"Picked up":"","LAT":s['lat'],
-                      "LON":s['lon'],"Skipped":False,"Sheet":s['sheet']} for s in route
+                      "LON":s['lon'],"Skipped":False,"Sheet":s['sheet']} for s in final_route
         }
         
         st.session_state.mission_type = m_type
@@ -150,10 +150,10 @@ def process_upload(configs, m_type):
         st.session_state.pickup_index = 0
         
         if is_pickup:
-            st.session_state.pickup_itinerary = [st.session_state.site_data[s['uid']] for s in route]
+            st.session_state.pickup_itinerary = [st.session_state.site_data[s['uid']] for s in final_route]
         
         auto_save()
-        return True, len(route)
+        return True, len(final_route)
     return False, 0
 
 # ==========================================
@@ -268,7 +268,7 @@ else:
                 st.progress(cur_idx / total_sites)
                 st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
                 
-                with st.form(key=f"f_v28_{uid}"):
+                with st.form(key=f"f_v29_{uid}"):
                     c1, c2 = st.columns(2)
                     with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                     with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
@@ -298,16 +298,10 @@ else:
             view_mode = st.radio("VIEW MODE", ["Focus Mode (1-by-1)", "List View"], horizontal=True)
             st.divider()
 
+            # The itinerary is now permanently locked into chronological order
             itinerary = st.session_state.get("pickup_itinerary", installed)
 
             if view_mode == "List View":
-                if st.button("🔄 Re-Optimize Pick-Up Order", use_container_width=True):
-                    curr, new_itin, rem = HOME_COORDS, [], installed.copy()
-                    while rem:
-                        nxt = min(rem, key=lambda x: (curr[0]-x['LAT'])**2 + (curr[1]-x['LON'])**2)
-                        new_itin.append(nxt); curr = (nxt['LAT'], nxt['LON']); rem.remove(nxt)
-                    st.session_state.pickup_itinerary = new_itin; auto_save(); st.rerun()
-
                 for i, s in enumerate(itinerary):
                     uid = s["UID"]
                     sid = s["Site"]

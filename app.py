@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V26 Protocol", layout="centered")
+st.set_page_config(page_title="Live Wire V27 Protocol", layout="centered")
 
 st.markdown("""
     <style>
@@ -75,7 +75,7 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V26 DUAL-ENGINE SANITIZER & OMNI-SCANNER ---
+# --- V27 GHOST-FILTER EXTRACTION ENGINE ---
 def process_upload(configs, m_type):
     all_raw = []
     is_pickup = "PICK-UP" in m_type
@@ -88,46 +88,34 @@ def process_upload(configs, m_type):
         clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
+        # PASS 1: Harvest ALL flawless coordinates using the standard base-route format
+        master_sites = {}
+        tokens = re.split(r'\b(\d{4})\s+\1\s+', clean_text)
+        for i in range(1, len(tokens) - 1, 2):
+            sid = tokens[i]
+            block = tokens[i+1]
+            coords = re.findall(r'-?\d{2,3}\.\d{3,}', block)
+            if len(coords) >= 2:
+                c1, c2 = float(coords[0]), float(coords[1])
+                lat, lon = max(c1, c2), min(c1, c2)
+                if 32.0 < lat < 36.0 and -125.0 < lon < -114.0:
+                    master_sites[sid] = {"lat": lat, "lon": lon, "sheet": cfg['label']}
+        
+        # PASS 2: If Pick-Up, scan the file for Pushpins and FILTER the master list
         if is_pickup:
-            # OMNI-SCANNER: Hunts for '1234x' and searches backwards and forwards
-            pattern = re.compile(r'\b(\d{4}[xX])(?=[\s\W]|$)')
-            for match in pattern.finditer(clean_text):
-                raw_sid = match.group(1)
-                sid = raw_sid.lower().replace('x', '')
-                
-                # Radar Net: 400 characters backwards and forwards
-                start_idx = max(0, match.start() - 400)
-                end_idx = min(len(clean_text), match.end() + 400)
-                window = clean_text[start_idx:end_idx]
-                
-                coords = re.findall(r'-?\d{2,3}\.\d{3,}', window)
-                
-                for i in range(len(coords) - 1):
-                    c1, c2 = float(coords[i]), float(coords[i+1])
-                    lat, lon = max(c1, c2), min(c1, c2)
-                    
-                    # Verify coordinates are in Southern California
-                    if 32.0 < lat < 36.0 and -125.0 < lon < -114.0:
-                        all_raw.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']})
-                        break # Found the coordinates for this pin, stop searching this window
+            # Hunts for 4-digits attached to an X/x (handles spaces from broken map codes)
+            pin_matches = re.findall(r'\b(\d{4})\s*[xX]\b', clean_text, re.IGNORECASE)
+            
+            # Intersection: Only keep sites that have a Pushpin match
+            for sid in set(pin_matches):
+                if sid in master_sites:
+                    all_raw.append({"id": sid, "lat": master_sites[sid]['lat'], "lon": master_sites[sid]['lon'], "sheet": master_sites[sid]['sheet']})
         else:
-            # STRICT INSTALL MATCHER: Looks for the standard base route double-ID (e.g., 4716 4716)
-            tokens = re.split(r'\b(\d{4})\s+\1\s+', clean_text)
-            for i in range(1, len(tokens) - 1, 2):
-                raw_sid = tokens[i]
-                block = tokens[i+1]
-                sid = raw_sid.lower().replace('x', '')
-                
-                coords = re.findall(r'-?\d{2,3}\.\d{3,}', block)
-                if len(coords) >= 2:
-                    c1, c2 = float(coords[0]), float(coords[1])
-                    lat, lon = max(c1, c2), min(c1, c2)
-                    
-                    if 32.0 < lat < 36.0 and -125.0 < lon < -114.0:
-                        all_raw.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']})
+            # If Installation, just load all of them
+            for sid, data in master_sites.items():
+                all_raw.append({"id": sid, "lat": data['lat'], "lon": data['lon'], "sheet": data['sheet']})
     
     if all_raw:
-        # Group duplicates to get exact site counts
         df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
         route, curr, rem = [], HOME_COORDS, df.to_dict('records')
         
@@ -198,7 +186,7 @@ if not st.session_state.get("optimized_route"):
             
             if success:
                 calc_time = round(end_time - start_time, 2)
-                status.success(f"✅ COMPLETE! Found {count} exact pushpin sites in {calc_time} seconds.")
+                status.success(f"✅ COMPLETE! Found {count} sites in {calc_time} seconds.")
                 time.sleep(1.5)
                 st.rerun()
             else:
@@ -269,7 +257,7 @@ else:
                 st.progress(cur_idx / total_sites)
                 st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
                 
-                with st.form(key=f"f_v26_{sid}"):
+                with st.form(key=f"f_v27_{sid}"):
                     c1, c2 = st.columns(2)
                     with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                     with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))

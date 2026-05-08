@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V27 Protocol", layout="centered")
+st.set_page_config(page_title="Live Wire V28 Protocol", layout="centered")
 
 st.markdown("""
     <style>
@@ -75,7 +75,7 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V27 GHOST-FILTER EXTRACTION ENGINE ---
+# --- V28 DUAL-PASS ISOLATED EXTRACTION ENGINE ---
 def process_upload(configs, m_type):
     all_raw = []
     is_pickup = "PICK-UP" in m_type
@@ -88,48 +88,59 @@ def process_upload(configs, m_type):
         clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
-        # PASS 1: Harvest ALL flawless coordinates using the standard base-route format
-        master_sites = {}
-        tokens = re.split(r'\b(\d{4})\s+\1\s+', clean_text)
+        # PASS 1: Harvest ALL coordinates using aggressive 4-digit search
+        master_sites = {} 
+        tokens = re.split(r'\b(\d{4})\b', clean_text)
         for i in range(1, len(tokens) - 1, 2):
             sid = tokens[i]
-            block = tokens[i+1]
+            block = tokens[i+1][:400] # Radar net
             coords = re.findall(r'-?\d{2,3}\.\d{3,}', block)
             if len(coords) >= 2:
                 c1, c2 = float(coords[0]), float(coords[1])
                 lat, lon = max(c1, c2), min(c1, c2)
+                # Verify coordinates are in Southern California
                 if 32.0 < lat < 36.0 and -125.0 < lon < -114.0:
-                    master_sites[sid] = {"lat": lat, "lon": lon, "sheet": cfg['label']}
-        
-        # PASS 2: If Pick-Up, scan the file for Pushpins and FILTER the master list
+                    uid = f"{cfg['label']}_{sid}"
+                    master_sites[uid] = {"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']}
+                    
+        # PASS 2: Mission-Specific Filtering
         if is_pickup:
-            # Hunts for 4-digits attached to an X/x (handles spaces from broken map codes)
-            pin_matches = re.findall(r'\b(\d{4})\s*[xX]\b', clean_text, re.IGNORECASE)
+            # Forgiving regex: 4-digits, optional spaces/symbols, then an X
+            pin_matches = re.findall(r'\b(\d{4})[^\w\s]*\s*[xX]', clean_text, re.IGNORECASE)
+            pin_uids = set([f"{cfg['label']}_{sid}" for sid in pin_matches])
             
-            # Intersection: Only keep sites that have a Pushpin match
-            for sid in set(pin_matches):
-                if sid in master_sites:
-                    all_raw.append({"id": sid, "lat": master_sites[sid]['lat'], "lon": master_sites[sid]['lon'], "sheet": master_sites[sid]['sheet']})
+            for uid in pin_uids:
+                if uid in master_sites:
+                    all_raw.append(master_sites[uid])
         else:
-            # If Installation, just load all of them
-            for sid, data in master_sites.items():
-                all_raw.append({"id": sid, "lat": data['lat'], "lon": data['lon'], "sheet": data['sheet']})
+            # Install mode: require double ID to prevent ghosts
+            double_id_tokens = re.split(r'\b(\d{4})\s+\1\s+', clean_text)
+            valid_sids = set([double_id_tokens[i] for i in range(1, len(double_id_tokens)-1, 2)])
+            valid_uids = set([f"{cfg['label']}_{sid}" for sid in valid_sids])
+            
+            for uid in valid_uids:
+                if uid in master_sites:
+                    all_raw.append(master_sites[uid])
     
     if all_raw:
-        df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
+        # V28 FIX: Group by ID AND Sheet to prevent cross-map merging
+        df = pd.DataFrame(all_raw).groupby(["id", "sheet"]).agg({'lat':'mean','lon':'mean'}).reset_index()
+        
+        # Re-create unique ID for the system
+        df['uid'] = df['sheet'] + "_" + df['id']
         route, curr, rem = [], HOME_COORDS, df.to_dict('records')
         
         # Calculates fastest path from basecamp to all pins
         while rem:
             nxt = min(rem, key=lambda x: (curr[0] - x['lat'])**2 + (curr[1] - x['lon'])**2)
             route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
-        
+            
         installed_status = "x" if is_pickup else ""
         
         st.session_state.optimized_route = route
         st.session_state.active_files = [c['label'] for c in configs]
         st.session_state.site_data = {
-            s['id']: {"Date":"","Time":"","Site":s['id'],"Counter":"c1b","Serial":"","Directions":"n",
+            s['uid']: {"Date":"","Time":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"","Directions":"n",
                       "Lanes":1,"Notes":"","Installed":installed_status,"Picked up":"","LAT":s['lat'],
                       "LON":s['lon'],"Skipped":False,"Sheet":s['sheet']} for s in route
         }
@@ -139,7 +150,7 @@ def process_upload(configs, m_type):
         st.session_state.pickup_index = 0
         
         if is_pickup:
-            st.session_state.pickup_itinerary = [st.session_state.site_data[s['id']] for s in route]
+            st.session_state.pickup_itinerary = [st.session_state.site_data[s['uid']] for s in route]
         
         auto_save()
         return True, len(route)
@@ -186,7 +197,7 @@ if not st.session_state.get("optimized_route"):
             
             if success:
                 calc_time = round(end_time - start_time, 2)
-                status.success(f"✅ COMPLETE! Found {count} sites in {calc_time} seconds.")
+                status.success(f"✅ COMPLETE! Found {count} accurate sites in {calc_time} seconds.")
                 time.sleep(1.5)
                 st.rerun()
             else:
@@ -249,15 +260,15 @@ else:
 
             cur_idx = st.session_state.current_index
             if cur_idx < total_sites:
-                s = st.session_state.optimized_route[cur_idx]; sid = s['id']; sd = st.session_state.site_data[sid]
+                s = st.session_state.optimized_route[cur_idx]; uid = s['uid']; sd = st.session_state.site_data[uid]
                 
-                st.subheader(f"STOP #{cur_idx+1}: SITE {sid}")
+                st.subheader(f"STOP #{cur_idx+1}: SITE {sd['Site']}")
                 st.caption(f"Sheet: {sd.get('Sheet')} | Raw GPS: `{s['lat']}, {s['lon']}`") 
                 
                 st.progress(cur_idx / total_sites)
                 st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
                 
-                with st.form(key=f"f_v27_{sid}"):
+                with st.form(key=f"f_v28_{uid}"):
                     c1, c2 = st.columns(2)
                     with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                     with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
@@ -267,11 +278,11 @@ else:
                     col_a, col_b = st.columns(2)
                     if col_a.form_submit_button("✅ COMPLETE", use_container_width=True):
                         t, d = get_ca_time()
-                        st.session_state.site_data[sid].update({"Date":d,"Time":t,"Directions":"n" if dr in ["n","s"] else "e","Serial":ser,"Lanes":ln,"Notes":nt,"Installed":"x"})
+                        st.session_state.site_data[uid].update({"Date":d,"Time":t,"Directions":"n" if dr in ["n","s"] else "e","Serial":ser,"Lanes":ln,"Notes":nt,"Installed":"x"})
                         st.session_state.current_index += 1; auto_save(); st.rerun()
                     if col_b.form_submit_button("🚨 UNABLE", use_container_width=True):
                         t, d = get_ca_time()
-                        st.session_state.site_data[sid].update({"Date":d,"Time":t,"Notes":f"UNABLE: {nt.upper()}","Skipped":True})
+                        st.session_state.site_data[uid].update({"Date":d,"Time":t,"Notes":f"UNABLE: {nt.upper()}","Skipped":True})
                         st.session_state.current_index += 1; auto_save(); st.rerun()
                 
                 if cur_idx > 0 and st.button("⬅️ PREVIOUS STOP", use_container_width=True):
@@ -298,16 +309,18 @@ else:
                     st.session_state.pickup_itinerary = new_itin; auto_save(); st.rerun()
 
                 for i, s in enumerate(itinerary):
-                    sid, is_picked = s["Site"], s["Picked up"] == "x"
+                    uid = s["UID"]
+                    sid = s["Site"]
+                    is_picked = s["Picked up"] == "x"
                     status = "✅" if is_picked else "📦"
-                    with st.expander(f"{status} #{i+1} - Site {sid}"):
+                    with st.expander(f"{status} #{i+1} - Site {sid} ({s['Sheet']})"):
                         if not is_picked:
                             st.caption(f"Raw GPS: `{s['LAT']}, {s['LON']}`")
                             st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
-                            with st.form(key=f"pu_list_{sid}"):
+                            with st.form(key=f"pu_list_{uid}"):
                                 p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                                 if st.form_submit_button("MARK SECURED"):
-                                    st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()
+                                    st.session_state.site_data[uid]["Picked up"] = "x"; st.session_state.site_data[uid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()
                         else: st.write(f"Secured.")
             
             else:
@@ -315,6 +328,7 @@ else:
                 p_idx = st.session_state.get("pickup_index", 0)
                 if p_idx < len(itinerary):
                     s = itinerary[p_idx]
+                    uid = s["UID"]
                     sid = s["Site"]
                     
                     st.subheader(f"PICK-UP #{p_idx+1}: SITE {sid}")
@@ -323,18 +337,18 @@ else:
                     st.progress(p_idx / len(itinerary))
                     st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
                     
-                    with st.form(key=f"pu_focus_{sid}"):
+                    with st.form(key=f"pu_focus_{uid}"):
                         p_notes = st.text_input("NOTES", value=s["Notes"])
                         
                         col_a, col_b = st.columns(2)
                         if col_a.form_submit_button("✅ SECURED", use_container_width=True):
-                            st.session_state.site_data[sid]["Picked up"] = "x"
-                            st.session_state.site_data[sid]["Notes"] = p_notes.strip()
+                            st.session_state.site_data[uid]["Picked up"] = "x"
+                            st.session_state.site_data[uid]["Notes"] = p_notes.strip()
                             st.session_state.pickup_index += 1
                             auto_save()
                             st.rerun()
                         if col_b.form_submit_button("🚨 MISSING/UNABLE", use_container_width=True):
-                            st.session_state.site_data[sid]["Notes"] = f"UNABLE: {p_notes.upper()}"
+                            st.session_state.site_data[uid]["Notes"] = f"UNABLE: {p_notes.upper()}"
                             st.session_state.pickup_index += 1
                             auto_save()
                             st.rerun()

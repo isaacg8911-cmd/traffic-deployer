@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V24 Protocol", layout="centered")
+st.set_page_config(page_title="Live Wire V25 Protocol", layout="centered")
 
 st.markdown("""
     <style>
@@ -75,9 +75,10 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V24 JET DB SANITIZER & PUSHPIN ROUTER ---
+# --- V25 DUAL-ENGINE SANITIZER & PUSHPIN ROUTER ---
 def process_upload(configs, m_type):
     all_raw = []
+    is_pickup = "PICK-UP" in m_type
     
     for cfg in configs:
         raw_bytes = cfg['file'].getvalue()
@@ -87,14 +88,18 @@ def process_upload(configs, m_type):
         clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
-        # V24 UPGRADE: Split on 4-digits with an optional 'x' (e.g., "1234", "1234x", or double "1234x 1234x")
-        tokens = re.split(r'\b(\d{4}[xX]?)(?:\s+\1)?\s+', clean_text)
+        if is_pickup:
+            # STRICT PUSHPIN MATCHER: Looks specifically for the "x" (e.g., 4716x) to filter out skipped sites
+            tokens = re.split(r'\b(\d{4}[xX])\b', clean_text)
+        else:
+            # STRICT INSTALL MATCHER: Looks for the standard base route double-ID (e.g., 4716 4716)
+            tokens = re.split(r'\b(\d{4})\s+\1\s+', clean_text)
         
         for i in range(1, len(tokens) - 1, 2):
             raw_sid = tokens[i]
             block = tokens[i+1]
             
-            # Strip the 'x' off so your records and UI are perfectly matched to the 4-digit ID
+            # Strip the 'x' off if it exists
             sid = raw_sid.lower().replace('x', '')
             
             coords = re.findall(r'-?\d{2,3}\.\d{3,}', block)
@@ -107,6 +112,7 @@ def process_upload(configs, m_type):
                     all_raw.append({"id": sid, "lat": lat, "lon": lon, "sheet": cfg['label']})
     
     if all_raw:
+        # Group duplicates to get exact site counts (22 and 33)
         df = pd.DataFrame(all_raw).groupby("id").agg({'lat':'mean','lon':'mean','sheet':'first'}).reset_index()
         route, curr, rem = [], HOME_COORDS, df.to_dict('records')
         
@@ -115,7 +121,6 @@ def process_upload(configs, m_type):
             nxt = min(rem, key=lambda x: (curr[0] - x['lat'])**2 + (curr[1] - x['lon'])**2)
             route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
         
-        is_pickup = "PICK-UP" in m_type
         installed_status = "x" if is_pickup else ""
         
         st.session_state.optimized_route = route
@@ -178,11 +183,11 @@ if not st.session_state.get("optimized_route"):
             
             if success:
                 calc_time = round(end_time - start_time, 2)
-                status.success(f"✅ COMPLETE! Found {count} valid sites in {calc_time} seconds.")
+                status.success(f"✅ COMPLETE! Found {count} exact pushpin sites in {calc_time} seconds.")
                 time.sleep(1.5)
                 st.rerun()
             else:
-                status.error("❌ ERROR: Could not find valid data. Ensure file has 4-digit site IDs.")
+                status.error("❌ ERROR: Could not find valid data. Ensure file has pushpins marked with 'x'.")
 
 # ==========================================
 # STAGE 2: MAIN DASHBOARD
@@ -249,7 +254,7 @@ else:
                 st.progress(cur_idx / total_sites)
                 st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
                 
-                with st.form(key=f"f_v24_{sid}"):
+                with st.form(key=f"f_v25_{sid}"):
                     c1, c2 = st.columns(2)
                     with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                     with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))

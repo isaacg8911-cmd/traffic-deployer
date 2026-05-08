@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V23 Protocol", layout="centered")
+st.set_page_config(page_title="Live Wire V24 Protocol", layout="centered")
 
 st.markdown("""
     <style>
@@ -75,7 +75,7 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V23 JET DB SANITIZER & ROUTER ---
+# --- V24 JET DB SANITIZER & PUSHPIN ROUTER ---
 def process_upload(configs, m_type):
     all_raw = []
     
@@ -87,12 +87,15 @@ def process_upload(configs, m_type):
         clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
-        # Split blocks by double ID pattern (e.g., "4716 4716 ")
-        tokens = re.split(r'\b(\d{4})\s+\1\s+', clean_text)
+        # V24 UPGRADE: Split on 4-digits with an optional 'x' (e.g., "1234", "1234x", or double "1234x 1234x")
+        tokens = re.split(r'\b(\d{4}[xX]?)(?:\s+\1)?\s+', clean_text)
         
         for i in range(1, len(tokens) - 1, 2):
-            sid = tokens[i]
+            raw_sid = tokens[i]
             block = tokens[i+1]
+            
+            # Strip the 'x' off so your records and UI are perfectly matched to the 4-digit ID
+            sid = raw_sid.lower().replace('x', '')
             
             coords = re.findall(r'-?\d{2,3}\.\d{3,}', block)
             if len(coords) >= 2:
@@ -179,7 +182,7 @@ if not st.session_state.get("optimized_route"):
                 time.sleep(1.5)
                 st.rerun()
             else:
-                status.error("❌ ERROR: Could not find valid data. Please check files.")
+                status.error("❌ ERROR: Could not find valid data. Ensure file has 4-digit site IDs.")
 
 # ==========================================
 # STAGE 2: MAIN DASHBOARD
@@ -246,8 +249,111 @@ else:
                 st.progress(cur_idx / total_sites)
                 st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['lat']},{s['lon']}", use_container_width=True)
                 
-                with st.form(key=f"f_v23_{sid}"):
+                with st.form(key=f"f_v24_{sid}"):
                     c1, c2 = st.columns(2)
                     with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                     with c2: ln = st.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
-                    ser = ser = st.text_input("SERIAL #", value=sd["Serial"])
+                    ser = st.text_input("SERIAL #", value=sd["Serial"])
+                    nt = st.text_input("NOTES", value=sd["Notes"])
+                    
+                    col_a, col_b = st.columns(2)
+                    if col_a.form_submit_button("✅ COMPLETE", use_container_width=True):
+                        t, d = get_ca_time()
+                        st.session_state.site_data[sid].update({"Date":d,"Time":t,"Directions":"n" if dr in ["n","s"] else "e","Serial":ser,"Lanes":ln,"Notes":nt,"Installed":"x"})
+                        st.session_state.current_index += 1; auto_save(); st.rerun()
+                    if col_b.form_submit_button("🚨 UNABLE", use_container_width=True):
+                        t, d = get_ca_time()
+                        st.session_state.site_data[sid].update({"Date":d,"Time":t,"Notes":f"UNABLE: {nt.upper()}","Skipped":True})
+                        st.session_state.current_index += 1; auto_save(); st.rerun()
+                
+                if cur_idx > 0 and st.button("⬅️ PREVIOUS STOP", use_container_width=True):
+                    st.session_state.current_index -= 1; auto_save(); st.rerun()
+            else:
+                st.balloons(); st.success("🏁 INSTALLATION COMPLETED.")
+
+    with tab3:
+        installed = [d for d in st.session_state.site_data.values() if d["Installed"] == "x"]
+        if not installed: 
+            st.info("No sites ready yet. Ensure you selected '♻️ PICK-UP' on the upload screen.")
+        else:
+            view_mode = st.radio("VIEW MODE", ["Focus Mode (1-by-1)", "List View"], horizontal=True)
+            st.divider()
+
+            itinerary = st.session_state.get("pickup_itinerary", installed)
+
+            if view_mode == "List View":
+                if st.button("🔄 Re-Optimize Pick-Up Order", use_container_width=True):
+                    curr, new_itin, rem = HOME_COORDS, [], installed.copy()
+                    while rem:
+                        nxt = min(rem, key=lambda x: (curr[0]-x['LAT'])**2 + (curr[1]-x['LON'])**2)
+                        new_itin.append(nxt); curr = (nxt['LAT'], nxt['LON']); rem.remove(nxt)
+                    st.session_state.pickup_itinerary = new_itin; auto_save(); st.rerun()
+
+                for i, s in enumerate(itinerary):
+                    sid, is_picked = s["Site"], s["Picked up"] == "x"
+                    status = "✅" if is_picked else "📦"
+                    with st.expander(f"{status} #{i+1} - Site {sid}"):
+                        if not is_picked:
+                            st.caption(f"Raw GPS: `{s['LAT']}, {s['LON']}`")
+                            st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
+                            with st.form(key=f"pu_list_{sid}"):
+                                p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
+                                if st.form_submit_button("MARK SECURED"):
+                                    st.session_state.site_data[sid]["Picked up"] = "x"; st.session_state.site_data[sid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()
+                        else: st.write(f"Secured.")
+            
+            else:
+                # 1-by-1 Focus Mode
+                p_idx = st.session_state.get("pickup_index", 0)
+                if p_idx < len(itinerary):
+                    s = itinerary[p_idx]
+                    sid = s["Site"]
+                    
+                    st.subheader(f"PICK-UP #{p_idx+1}: SITE {sid}")
+                    st.caption(f"Sheet: {s.get('Sheet')} | Raw GPS: `{s['LAT']}, {s['LON']}`") 
+                    
+                    st.progress(p_idx / len(itinerary))
+                    st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/dir/?api=1&destination={s['LAT']},{s['LON']}", use_container_width=True)
+                    
+                    with st.form(key=f"pu_focus_{sid}"):
+                        p_notes = st.text_input("NOTES", value=s["Notes"])
+                        
+                        col_a, col_b = st.columns(2)
+                        if col_a.form_submit_button("✅ SECURED", use_container_width=True):
+                            st.session_state.site_data[sid]["Picked up"] = "x"
+                            st.session_state.site_data[sid]["Notes"] = p_notes.strip()
+                            st.session_state.pickup_index += 1
+                            auto_save()
+                            st.rerun()
+                        if col_b.form_submit_button("🚨 MISSING/UNABLE", use_container_width=True):
+                            st.session_state.site_data[sid]["Notes"] = f"UNABLE: {p_notes.upper()}"
+                            st.session_state.pickup_index += 1
+                            auto_save()
+                            st.rerun()
+                    
+                    if p_idx > 0 and st.button("⬅️ PREVIOUS STOP", use_container_width=True):
+                        st.session_state.pickup_index -= 1
+                        auto_save()
+                        st.rerun()
+                else:
+                    st.balloons()
+                    st.success("🏁 ALL EQUIPMENT SECURED.")
+
+    with tab4:
+        all_d = [d for d in st.session_state.site_data.values() if d["Installed"] == "x" or d.get("Skipped")]
+        if all_d:
+            try:
+                full_df = pd.DataFrame(all_d)
+                cols = ["Date", "Time", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    for sheet_name in st.session_state.active_files:
+                        sheet_df = full_df[full_df["Sheet"] == sheet_name]
+                        if not sheet_df.empty:
+                            final = sheet_df[cols]; final.to_excel(writer, index=False, sheet_name=sheet_name)
+                            st.write(f"**Day: {sheet_name}**"); st.dataframe(final, use_container_width=True)
+                st.divider()
+                st.download_button("📊 DOWNLOAD MASTER WORKBOOK", output.getvalue(), f"Traffic_Precision.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+            except Exception as e:
+                st.error("⚠️ Data Export Error. Please contact admin or download raw JSON backup.")
+                st.write(e)

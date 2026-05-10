@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V37 Data-Forge", layout="centered")
+st.set_page_config(page_title="Live Wire V38 Auto-Compass", layout="centered")
 
 st.markdown("""
     <style>
@@ -64,7 +64,7 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V37 SLIDING PIN DISTANCE MATH ---
+# --- V38 SLIDING PIN DISTANCE MATH ---
 def get_closest_point_on_segment(px, py, ax, ay, bx, by):
     dx, dy = bx - ax, by - ay
     if dx == 0 and dy == 0: return ax, ay
@@ -72,29 +72,25 @@ def get_closest_point_on_segment(px, py, ax, ay, bx, by):
     t = max(0.0, min(1.0, t))
     return ax + t * dx, ay + t * dy
 
-# --- V37 BULLETPROOF ROSETTA STONE ENGINE ---
+# --- V38 BULLETPROOF ROSETTA STONE & AUTO-COMPASS ENGINE ---
 def process_upload(est_configs, data_files, m_type):
     all_raw_master = []
     valid_uids_for_mission = set()
     is_pickup = "PICK-UP" in m_type
     
-    # 1. BULLETPROOF CSV INGESTION
     csv_lookup = {}
     if data_files:
         dfs = []
         for f in data_files:
             try:
-                # Force Latin-1 encoding to prevent crashes from weird Microsoft exports
                 if f.name.lower().endswith('.csv'): dfs.append(pd.read_csv(f, encoding='latin-1'))
                 else: dfs.append(pd.read_excel(f))
             except: pass
             
         if dfs:
             master_df = pd.concat(dfs, ignore_index=True)
-            # Strip and lowercase all columns to fix invisible space bugs
             master_df.columns = [str(c).strip().lower() for c in master_df.columns]
             
-            # Fuzzy match the column names
             id_col = next((c for c in master_df.columns if 'tds' in c or 'site' in c or 'id' in c), None)
             lat1_col = next((c for c in master_df.columns if 'begin_lat' in c or 'lat' in c), None)
             lon1_col = next((c for c in master_df.columns if 'begin_lon' in c or 'lon' in c), None)
@@ -120,7 +116,6 @@ def process_upload(est_configs, data_files, m_type):
                                 }
                             except: pass
 
-    # 2. MAPPOINT EXTRACTION
     for cfg in est_configs:
         raw_bytes = cfg['file'].getvalue()
         text = raw_bytes.decode('latin-1', errors='ignore')
@@ -129,12 +124,9 @@ def process_upload(est_configs, data_files, m_type):
         clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
-        # Determine Base Route (Installation) SIDs to build timeline
         base_route_sids = set(re.findall(r'\b(\d{4,5})\s+\1\s+', clean_text))
         
-        # Determine Active Mission SIDs
         if is_pickup:
-            # specifically hunts for an 'x' to avoid grabbing 5-digit zip codes
             active_mission_sids = set(re.findall(r'\b(\d{4,5})[^\w\s]*\s*[xX]\b', clean_text, re.IGNORECASE))
         else:
             active_mission_sids = base_route_sids
@@ -142,7 +134,6 @@ def process_upload(est_configs, data_files, m_type):
         for sid in active_mission_sids:
             valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
             
-        # Collect data for all sites in the file
         for sid in base_route_sids.union(active_mission_sids):
             if sid in csv_lookup:
                 d = csv_lookup[sid]
@@ -152,7 +143,6 @@ def process_upload(est_configs, data_files, m_type):
                     "sheet": cfg['label'], "lanes": d['lanes'], "street": d['street']
                 })
             else:
-                # FALLBACK: If site wasn't in CSV, scrape it perfectly from MapPoint text
                 match = re.search(r'\b' + sid + r'\b(.{1,600})', clean_text)
                 if match:
                     block = match.group(1)
@@ -177,7 +167,6 @@ def process_upload(est_configs, data_files, m_type):
         master_rem = df.to_dict('records')
         master_route, curr = [], HOME_COORDS
         
-        # Calculate dynamic sliding-pin route
         while master_rem:
             best_nxt, best_dist, best_target = None, float('inf'), None
             for x in master_rem:
@@ -197,10 +186,20 @@ def process_upload(est_configs, data_files, m_type):
         
         installed_status = "x" if is_pickup else ""
         
+        # V38 AUTO-COMPASS CALCULATION
+        for s in final_route:
+            # Calculate the vertical spread vs horizontal spread of the street segment
+            lat_diff = abs(s['lat_end'] - s['lat_start'])
+            lon_diff = abs(s['lon_end'] - s['lon_start']) * 0.83 # Adjusted for SoCal Longitude curvature
+            
+            # If the vertical distance is greater than the horizontal, it's a North/South street (n). Otherwise, East/West (e).
+            s['auto_dir'] = "n" if lat_diff > lon_diff else "e"
+        
         st.session_state.optimized_route = final_route
         st.session_state.active_files = [c['label'] for c in est_configs]
         st.session_state.site_data = {
-            s['uid']: {"Date":"","Time":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"","Directions":"n",
+            s['uid']: {"Date":"","Time":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"",
+                      "Directions": s['auto_dir'], # V38 PRE-FILL INJECTION
                       "Lanes":s.get('lanes', 1),"Street":s.get('street', ""),"Notes":"","Installed":installed_status,
                       "Picked up":"","LAT":s['nav_lat'],"LON":s['nav_lon'],"Skipped":False,"Sheet":s['sheet']} for s in final_route
         }
@@ -326,9 +325,16 @@ else:
                     live_lat, live_lon = loc['latitude'], loc['longitude']
                     st.success(f"✅ GPS Locked: {live_lat}, {live_lon}")
                 
-                with st.form(key=f"f_v37_{uid}"):
+                with st.form(key=f"f_v38_{uid}"):
                     c1, c2 = st.columns(2)
-                    with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
+                    
+                    # V38 AUTO-COMPASS DROPDOWN
+                    # Reads the mathematically calculated direction and pre-selects it for you.
+                    dir_options = ["n","e","s","w"]
+                    current_dir = sd.get("Directions", "n")
+                    idx = dir_options.index(current_dir) if current_dir in dir_options else 0
+                    with c1: dr = st.selectbox("DIR", dir_options, index=idx)
+                    
                     with c2: ln = st.number_input("LANES", min_value=1, value=int(sd.get("Lanes", 1)))
                     ser = st.text_input("SERIAL #", value=sd["Serial"])
                     nt = st.text_input("NOTES", value=sd["Notes"])

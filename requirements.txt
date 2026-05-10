@@ -2,3 +2,4 @@ pandas
 streamlit
 tzdata
 openpyxl
+streamlit-geolocation

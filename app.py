@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V36 Rosetta", layout="centered")
+st.set_page_config(page_title="Live Wire V37 Data-Forge", layout="centered")
 
 st.markdown("""
     <style>
@@ -64,7 +64,7 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V36 SLIDING PIN DISTANCE MATH ---
+# --- V37 SLIDING PIN DISTANCE MATH ---
 def get_closest_point_on_segment(px, py, ax, ay, bx, by):
     dx, dy = bx - ax, by - ay
     if dx == 0 and dy == 0: return ax, ay
@@ -72,40 +72,55 @@ def get_closest_point_on_segment(px, py, ax, ay, bx, by):
     t = max(0.0, min(1.0, t))
     return ax + t * dx, ay + t * dy
 
-# --- V36 ROSETTA STONE ENGINE ---
+# --- V37 BULLETPROOF ROSETTA STONE ENGINE ---
 def process_upload(est_configs, data_files, m_type):
     all_raw_master = []
     valid_uids_for_mission = set()
     is_pickup = "PICK-UP" in m_type
     
-    # 1. Ingest Master CSV Data
+    # 1. BULLETPROOF CSV INGESTION
     csv_lookup = {}
     if data_files:
-        try:
-            dfs = []
-            for f in data_files:
-                if f.name.lower().endswith('.csv'): dfs.append(pd.read_csv(f))
+        dfs = []
+        for f in data_files:
+            try:
+                # Force Latin-1 encoding to prevent crashes from weird Microsoft exports
+                if f.name.lower().endswith('.csv'): dfs.append(pd.read_csv(f, encoding='latin-1'))
                 else: dfs.append(pd.read_excel(f))
-            if dfs:
-                master_df = pd.concat(dfs, ignore_index=True)
+            except: pass
+            
+        if dfs:
+            master_df = pd.concat(dfs, ignore_index=True)
+            # Strip and lowercase all columns to fix invisible space bugs
+            master_df.columns = [str(c).strip().lower() for c in master_df.columns]
+            
+            # Fuzzy match the column names
+            id_col = next((c for c in master_df.columns if 'tds' in c or 'site' in c or 'id' in c), None)
+            lat1_col = next((c for c in master_df.columns if 'begin_lat' in c or 'lat' in c), None)
+            lon1_col = next((c for c in master_df.columns if 'begin_lon' in c or 'lon' in c), None)
+            lat2_col = next((c for c in master_df.columns if 'end_lat' in c), lat1_col)
+            lon2_col = next((c for c in master_df.columns if 'end_lon' in c), lon1_col)
+            lanes_col = next((c for c in master_df.columns if 'lane' in c), None)
+            street_col = next((c for c in master_df.columns if 'street' in c), None)
+            
+            if id_col and lat1_col and lon1_col:
                 for _, row in master_df.iterrows():
-                    if 'tds' in row and pd.notna(row['tds']):
-                        raw_tds = str(row['tds'])
-                        # Hunts for 4 OR 5 digit IDs
-                        match = re.search(r'(\d{4,5})', raw_tds)
+                    if pd.notna(row[id_col]):
+                        raw_id = str(row[id_col])
+                        match = re.search(r'(\d{4,5})', raw_id)
                         if match:
                             sid = match.group(1)
-                            csv_lookup[sid] = {
-                                'lat_start': float(row['Begin_Lat']) if 'Begin_Lat' in row and pd.notna(row['Begin_Lat']) else None,
-                                'lon_start': float(row['Begin_Lon']) if 'Begin_Lon' in row and pd.notna(row['Begin_Lon']) else None,
-                                'lat_end': float(row['End_Lat']) if 'End_Lat' in row and pd.notna(row['End_Lat']) else None,
-                                'lon_end': float(row['End_Lon']) if 'End_Lon' in row and pd.notna(row['End_Lon']) else None,
-                                'lanes': int(float(row['Through_Lanes'])) if 'Through_Lanes' in row and pd.notna(row['Through_Lanes']) else 1,
-                                'street': str(row['Street']) if 'Street' in row and pd.notna(row['Street']) else ""
-                            }
-        except Exception as e:
-            pass # Failsafe: if CSVs are broken, it will just rely on the MapPoint files like before
-    
+                            try:
+                                csv_lookup[sid] = {
+                                    'lat_start': float(row[lat1_col]), 'lon_start': float(row[lon1_col]),
+                                    'lat_end': float(row[lat2_col]) if pd.notna(row[lat2_col]) else float(row[lat1_col]),
+                                    'lon_end': float(row[lon2_col]) if pd.notna(row[lon2_col]) else float(row[lon1_col]),
+                                    'lanes': int(float(row[lanes_col])) if lanes_col and pd.notna(row[lanes_col]) else 1,
+                                    'street': str(row[street_col]) if street_col and pd.notna(row[street_col]) else ""
+                                }
+                            except: pass
+
+    # 2. MAPPOINT EXTRACTION
     for cfg in est_configs:
         raw_bytes = cfg['file'].getvalue()
         text = raw_bytes.decode('latin-1', errors='ignore')
@@ -114,48 +129,42 @@ def process_upload(est_configs, data_files, m_type):
         clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
         clean_text = re.sub(r'\s+', ' ', clean_text)
         
-        # Look for 4 to 5 digit IDs
-        tokens = re.split(r'\b(\d{4,5})\b', clean_text)
-        for i in range(1, len(tokens) - 1, 2):
-            sid = tokens[i]
+        # Determine Base Route (Installation) SIDs to build timeline
+        base_route_sids = set(re.findall(r'\b(\d{4,5})\s+\1\s+', clean_text))
+        
+        # Determine Active Mission SIDs
+        if is_pickup:
+            # specifically hunts for an 'x' to avoid grabbing 5-digit zip codes
+            active_mission_sids = set(re.findall(r'\b(\d{4,5})[^\w\s]*\s*[xX]\b', clean_text, re.IGNORECASE))
+        else:
+            active_mission_sids = base_route_sids
             
-            # CROSS-REFERENCE: If we have the exact data from the CSV, use it directly!
-            if sid in csv_lookup and csv_lookup[sid]['lat_start'] is not None:
+        for sid in active_mission_sids:
+            valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
+            
+        # Collect data for all sites in the file
+        for sid in base_route_sids.union(active_mission_sids):
+            if sid in csv_lookup:
                 d = csv_lookup[sid]
                 all_raw_master.append({
-                    "id": sid, 
-                    "lat_start": d['lat_start'], "lon_start": d['lon_start'],
-                    "lat_end": d['lat_end'] if d['lat_end'] else d['lat_start'], 
-                    "lon_end": d['lon_end'] if d['lon_end'] else d['lon_start'], 
+                    "id": sid, "lat_start": d['lat_start'], "lon_start": d['lon_start'],
+                    "lat_end": d['lat_end'], "lon_end": d['lon_end'],
                     "sheet": cfg['label'], "lanes": d['lanes'], "street": d['street']
                 })
             else:
-                # FALLBACK: If site wasn't in CSV, extract manually from the scrambled MapPoint data
-                block = tokens[i+1][:600] 
-                coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{3,}', block)]
-                lats = [c for c in coords if 32.0 < c < 36.0]
-                lons = [c for c in coords if -125.0 < c < -114.0]
-                
-                if lats and lons:
-                    all_raw_master.append({
-                        "id": sid, 
-                        "lat_start": lats[0], "lon_start": lons[0],
-                        "lat_end": lats[-1], "lon_end": lons[-1], 
-                        "sheet": cfg['label'], "lanes": 1, "street": ""
-                    })
-                    
-        # Find valid targets for the current mission (Pick-ups vs Installs)
-        if is_pickup:
-            # Hunts for 4-5 digits followed by optional garbage/spaces and an X
-            pin_matches = re.findall(r'\b(\d{4,5})[^\w\s]*\s*[xX]', clean_text, re.IGNORECASE)
-            for sid in pin_matches:
-                valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
-        else:
-            # Install mode double-ID check
-            double_id_tokens = re.split(r'\b(\d{4,5})\s+\1\s+', clean_text)
-            valid_sids = set([double_id_tokens[i] for i in range(1, len(double_id_tokens)-1, 2)])
-            for sid in valid_sids:
-                valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
+                # FALLBACK: If site wasn't in CSV, scrape it perfectly from MapPoint text
+                match = re.search(r'\b' + sid + r'\b(.{1,600})', clean_text)
+                if match:
+                    block = match.group(1)
+                    coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{3,}', block)]
+                    lats = [c for c in coords if 32.0 < c < 36.0]
+                    lons = [c for c in coords if -125.0 < c < -114.0]
+                    if lats and lons:
+                        all_raw_master.append({
+                            "id": sid, "lat_start": lats[0], "lon_start": lons[0],
+                            "lat_end": lats[-1], "lon_end": lons[-1],
+                            "sheet": cfg['label'], "lanes": 1, "street": ""
+                        })
     
     if all_raw_master:
         df = pd.DataFrame(all_raw_master).groupby(["id", "sheet"]).agg({
@@ -168,7 +177,7 @@ def process_upload(est_configs, data_files, m_type):
         master_rem = df.to_dict('records')
         master_route, curr = [], HOME_COORDS
         
-        # Calculate the sliding pin distance math to optimize path
+        # Calculate dynamic sliding-pin route
         while master_rem:
             best_nxt, best_dist, best_target = None, float('inf'), None
             for x in master_rem:
@@ -179,7 +188,6 @@ def process_upload(est_configs, data_files, m_type):
             
             best_nxt['nav_lat'] = best_target[0]
             best_nxt['nav_lon'] = best_target[1]
-            
             master_route.append(best_nxt)
             curr = best_target
             master_rem.remove(best_nxt)
@@ -227,7 +235,6 @@ if not st.session_state.get("optimized_route"):
     st.markdown("### 🆕 START NEW MISSION")
     m_type = st.radio("SELECT MISSION TYPE:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
     
-    # NEW: Master Data Upload Box
     st.info("💡 OPTIONAL: Upload your Week Master Excel/CSV files here to pull exact coordinates and Street names.")
     data_files = st.file_uploader("1️⃣ DROP MASTER EXCEL / CSV DATA", type=["csv", "xls", "xlsx"], accept_multiple_files=True)
     
@@ -242,7 +249,7 @@ if not st.session_state.get("optimized_route"):
             success, count = process_upload(configs, data_files, m_type)
             if success:
                 status.success(f"✅ COMPLETE! Locked {count} perfect sites."); time.sleep(1.5); st.rerun()
-            else: status.error("❌ ERROR: Could not find valid data.")
+            else: status.error("❌ ERROR: Could not find valid data. Check files.")
 
 # ==========================================
 # STAGE 2: MAIN DASHBOARD
@@ -319,10 +326,9 @@ else:
                     live_lat, live_lon = loc['latitude'], loc['longitude']
                     st.success(f"✅ GPS Locked: {live_lat}, {live_lon}")
                 
-                with st.form(key=f"f_v36_{uid}"):
+                with st.form(key=f"f_v37_{uid}"):
                     c1, c2 = st.columns(2)
                     with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
-                    # Lanes now auto-fills perfectly from the Excel document!
                     with c2: ln = st.number_input("LANES", min_value=1, value=int(sd.get("Lanes", 1)))
                     ser = st.text_input("SERIAL #", value=sd["Serial"])
                     nt = st.text_input("NOTES", value=sd["Notes"])
@@ -330,7 +336,6 @@ else:
                     col_a, col_b = st.columns(2)
                     if col_a.form_submit_button("✅ COMPLETE", use_container_width=True):
                         t, d = get_ca_time()
-                        
                         final_lat = live_lat if live_lat else sd['LAT']
                         final_lon = live_lon if live_lon else sd['LON']
                         

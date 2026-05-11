@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.60 Pure Anchor", layout="centered")
+st.set_page_config(page_title="Live Wire V51.61 Intersection Snapper", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -88,26 +88,33 @@ def process_upload(est_configs, excel_files, m_type):
         try:
             df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
             
-            # Find the ID column
+            # Find the ID and coordinate columns
             id_c = next((c for c in df.columns if any(x in c.lower() for x in ['tds', 'site', 'id'])), df.columns[0])
-            
-            # Find Begin coordinates explicitly
             b_lat_c = next((c for c in df.columns if 'begin_lat' in c.lower()), next((c for c in df.columns if 'lat' in c.lower()), None))
             b_lon_c = next((c for c in df.columns if 'begin_lon' in c.lower()), next((c for c in df.columns if 'lon' in c.lower()), None))
-            
+            e_lat_c = next((c for c in df.columns if 'end_lat' in c.lower()), None)
+            e_lon_c = next((c for c in df.columns if 'end_lon' in c.lower()), None)
+
             if b_lat_c and b_lon_c:
                 for _, row in df.iterrows():
                     sid = str(row[id_c]).split('.')[0].strip()
                     if sid.isdigit():
                         try:
-                            # PURE RAW EXCEL DATA ONLY. NO MATH.
                             b_lat, b_lon = float(row[b_lat_c]), float(row[b_lon_c])
                             
-                            # Verify valid California GPS limits
+                            # Verify valid California GPS limits for Begin
                             if 30.0 < b_lat < 40.0 and -125.0 < b_lon < -110.0:
+                                nodes = [(b_lat, b_lon)] # Add the Begin point
+                                
+                                # If End points exist, add them to the options
+                                if e_lat_c and e_lon_c and pd.notna(row[e_lat_c]) and pd.notna(row[e_lon_c]):
+                                    e_lat, e_lon = float(row[e_lat_c]), float(row[e_lon_c])
+                                    if 30.0 < e_lat < 40.0 and -125.0 < e_lon < -110.0:
+                                        nodes.append((e_lat, e_lon)) # Add the End point
+                                
                                 street_name = str(row.get('Street', f'Site {sid}'))
-                                # Lock in the single, verified on-street coordinate
-                                excel_data[sid] = {"lat": b_lat, "lon": b_lon, "street": street_name}
+                                # Save BOTH exact, verified street points for the engine to test
+                                excel_data[sid] = {"nodes": nodes, "street": street_name}
                         except:
                             pass
         except: pass
@@ -126,22 +133,26 @@ def process_upload(est_configs, excel_files, m_type):
                 final_raw.append({
                     "id": sid, 
                     "uid": f"{cfg['label']}_{sid}", 
-                    "lat": data['lat'], 
-                    "lon": data['lon'], 
+                    "nodes": data['nodes'], 
                     "sheet": cfg['label'], 
                     "street": data['street']
                 })
 
     if final_raw:
-        # FASTEST ROUTE ALGORITHM: Start home -> nearest valid exact point -> repeat.
+        # FASTEST ROUTE ALGORITHM: Start home -> test both ends of the street -> pick the nearest -> repeat.
         master_route, curr = [], HOME_COORDS
         while final_raw:
-            # Find closest exact point
-            best_site = min(final_raw, key=lambda x: (curr[0]-x['lat'])**2 + (curr[1]-x['lon'])**2)
+            best_site, best_dist, best_node = None, float('inf'), None
+            for site in final_raw:
+                for node in site['nodes']:
+                    d = (curr[0]-node[0])**2 + (curr[1]-node[1])**2
+                    if d < best_dist:
+                        best_dist, best_site, best_node = d, site, node
             
-            best_site['nav_lat'], best_site['nav_lon'] = best_site['lat'], best_site['lon']
+            # Lock in the end of the street that was closest to the truck
+            best_site['nav_lat'], best_site['nav_lon'] = best_node
             master_route.append(best_site)
-            curr = (best_site['lat'], best_site['lon'])
+            curr = best_node
             final_raw.remove(best_site)
             
         st.session_state.optimized_route = master_route
@@ -204,7 +215,7 @@ else:
             safe_lon = sd.get('LON', sd.get('lon'))
             
             st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
-            st.link_button("🚗 NAV TO TRUE STREET NODE", f"https://www.google.com/maps/search/?api=1&query={safe_lat},{safe_lon}", use_container_width=True)
+            st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/search/?api=1&query={safe_lat},{safe_lon}", use_container_width=True)
             
             batch = []
             for bs in st.session_state.optimized_route[cur:cur+9]:

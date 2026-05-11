@@ -7,3 +7,4 @@ Pillow
 streamlit
 pandas
 openpyxl
+xlrd

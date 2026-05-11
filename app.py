@@ -7,11 +7,9 @@ import time
 import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from streamlit_folium import st_folium
-import folium
 
 # --- CORE CONFIG ---
-st.set_page_config(page_title="Live Wire V51.31 Pre-Tested", layout="centered")
+st.set_page_config(page_title="Live Wire V51.32 Stable-Core", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -21,18 +19,20 @@ st.markdown("""
     <style>
     .stApp { background-color: #0A0A0A; color: #FFFFFF; }
     h1, h2, h3 { color: #FFD700 !important; font-family: 'Arial Black'; }
-    div.stButton > button { background-color: #1E1E1E; color: #FFD700; border: 2px solid #FFD700; font-weight: bold; border-radius: 8px; }
+    div.stButton > button { 
+        background-color: #1E1E1E; color: #FFD700; border: 2px solid #FFD700; 
+        font-weight: bold; border-radius: 8px; height: 3em;
+    }
     .stSelectbox label { color: #FFD700 !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- SESSION SAFETY GATE ---
+# --- SESSION INITIALIZATION ---
 if "init" not in st.session_state:
     st.session_state.active_files = []
     st.session_state.optimized_route = []
     st.session_state.site_data = {}
     st.session_state.current_index = 0
-    st.session_state.plotting_mode = True 
     
     if os.path.exists(BACKUP_FILE):
         try:
@@ -47,8 +47,7 @@ def auto_save():
         "active_files": st.session_state.active_files,
         "optimized_route": st.session_state.optimized_route,
         "site_data": st.session_state.site_data,
-        "current_index": st.session_state.current_index,
-        "plotting_mode": st.session_state.plotting_mode
+        "current_index": st.session_state.current_index
     }
     with open(BACKUP_FILE, "w") as f: json.dump(payload, f)
 
@@ -56,17 +55,26 @@ def process_data(est_configs, excel_files):
     excel_data = {}
     for f in excel_files:
         try:
-            df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
+            # Handle XLS/XLSX/CSV
+            if f.name.lower().endswith('.csv'):
+                df = pd.read_csv(f, encoding='latin-1')
+            else:
+                df = pd.read_excel(f)
+            
+            # Find Geo Columns
             lat_c = next((c for c in df.columns if 'lat' in c.lower()), None)
             lon_c = next((c for c in df.columns if 'lon' in c.lower()), None)
             id_c = next((c for c in df.columns if any(x in c.lower() for x in ['site', 'tds', 'id'])), df.columns[0])
-            for _, row in df.iterrows():
-                sid = str(row[id_c]).split('.')[0].strip()
-                if sid.isdigit():
-                    v1, v2 = float(row[lat_c]), float(row[lon_c])
-                    lat = v1 if (32.0 < v1 < 36.0) else (v2 if (32.0 < v2 < 36.0) else v1)
-                    lon = v2 if (-120.0 < v2 < -114.0) else (v1 if (-120.0 < v1 < -114.0) else v2)
-                    excel_data[sid] = {"lat": lat, "lon": lon, "street": str(row.get('Street', f'Site {sid}'))}
+            
+            if lat_c and lon_c:
+                for _, row in df.iterrows():
+                    sid = str(row[id_c]).split('.')[0].strip()
+                    if sid.isdigit():
+                        v1, v2 = float(row[lat_c]), float(row[lon_c])
+                        # CA-Strict Boundary
+                        lat = v1 if (32.0 < v1 < 36.0) else (v2 if (32.0 < v2 < 36.0) else v1)
+                        lon = v2 if (-120.0 < v2 < -114.0) else (v1 if (-120.0 < v1 < -114.0) else v2)
+                        excel_data[sid] = {"lat": lat, "lon": lon, "street": str(row.get('Street', f'Site {sid}'))}
         except: pass
 
     final_raw = []
@@ -78,79 +86,64 @@ def process_data(est_configs, excel_files):
                 final_raw.append({"id": sid, "uid": uid, "lat": data['lat'], "lon": data['lon'], "sheet": cfg['label'], "street": data['street']})
     
     if not final_raw:
-        st.error("No matches found between Excel and Maps.")
+        st.error("❌ No matches found between Excel and Maps.")
         return
 
-    st.session_state.optimized_route = final_raw
-    st.session_state.site_data = {s['uid']: {**s, "Installed": False} for s in final_raw}
+    # Route Optimization (Nearest Neighbor)
+    curr = HOME_COORDS
+    route, rem = [], list(final_raw)
+    while rem:
+        nxt = min(rem, key=lambda x: (curr[0]-x['lat'])**2 + (curr[1]-x['lon'])**2)
+        route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
+
+    st.session_state.optimized_route = route
+    st.session_state.site_data = {s['uid']: {**s, "Installed": False} for s in route}
     st.session_state.active_files = [c['label'] for c in est_configs]
-    st.session_state.plotting_mode = True
+    st.session_state.current_index = 0
     auto_save()
     st.rerun()
 
 # --- UI LOGIC ---
 if not st.session_state.optimized_route:
-    st.title("🚦 Live Wire: Data Sync")
+    st.title("🚦 Live Wire: Direct Sync")
     ex = st.file_uploader("1️⃣ DATA (Excel/CSV)", accept_multiple_files=True)
     maps = st.file_uploader("2️⃣ MAPS (.EST)", accept_multiple_files=True)
-    if ex and maps and st.button("🚀 INITIAL SYNC"):
+    if ex and maps and st.button("🚀 SYNC & DRIVE"):
         configs = [{"file": f, "label": f"Day {i+1}"} for i, f in enumerate(maps)]
         process_data(configs, ex)
 
-elif st.session_state.plotting_mode:
-    st.title("🎯 Tactical Plotter")
-    options = [s['uid'] for s in st.session_state.optimized_route]
-    target_uid = st.selectbox("Select Site to Verify:", options)
-    sd = st.session_state.site_data[target_uid]
-
-    m = folium.Map(location=[sd['lat'], sd['lon']], zoom_start=18, tiles=None)
-    folium.TileLayer(
-        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attr='Esri', name='Satellite', overlay=False, control=True
-    ).add_to(m)
-    
-    folium.Marker([sd['lat'], sd['lon']], icon=folium.Icon(color='orange')).add_to(m)
-    map_data = st_folium(m, height=450, width=700, key="plotter_map")
-
-    if map_data and map_data.get("last_clicked"):
-        new_coords = map_data["last_clicked"]
-        if st.button(f"Relocate Site {sd['id']} to Tapped Spot"):
-            st.session_state.site_data[target_uid]['lat'] = new_coords['lat']
-            st.session_state.site_data[target_uid]['lon'] = new_coords['lng']
-            # Mirror the update to the route list
-            for i, s in enumerate(st.session_state.optimized_route):
-                if s['uid'] == target_uid:
-                    st.session_state.optimized_route[i]['lat'] = new_coords['lat']
-                    st.session_state.optimized_route[i]['lon'] = new_coords['lng']
-            st.success("Moved!")
-            auto_save(); time.sleep(0.5); st.rerun()
-
-    if st.button("🏁 LOCK ALL SITES & START ROUTE", use_container_width=True):
-        st.session_state.plotting_mode = False
-        curr = HOME_COORDS
-        new_route, rem = [], list(st.session_state.optimized_route)
-        while rem:
-            nxt = min(rem, key=lambda x: (curr[0]-x['lat'])**2 + (curr[1]-x['lon'])**2)
-            new_route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
-        st.session_state.optimized_route = new_route
-        auto_save(); st.rerun()
-
 else:
-    # --- DRIVING MODE ---
-    st.title("📁 Active Route")
+    st.title("📁 Active Manifest")
     idx = st.session_state.current_index
+    
     if idx < len(st.session_state.optimized_route):
         active = st.session_state.optimized_route[idx]
         sd = st.session_state.site_data[active['uid']]
-        st.subheader(f"Stop {idx+1}: Site {sd['id']}")
-        st.link_button("🚗 NAVIGATE", f"https://www.google.com/maps/search/?api=1&query={sd['lat']},{sd['lon']}", use_container_width=True)
-        if st.button("✅ MARK INSTALLED", use_container_width=True):
+        
+        st.subheader(f"Stop {idx+1} of {len(st.session_state.optimized_route)}")
+        st.info(f"**SITE {sd['id']}**\n\n{sd['street']}")
+        
+        st.link_button("🚗 NAVIGATE TO SITE", f"https://www.google.com/maps/search/?api=1&query={sd['lat']},{sd['lon']}", use_container_width=True)
+        
+        st.divider()
+        
+        if st.button("✅ MARK INSTALLED & NEXT", use_container_width=True):
             st.session_state.site_data[active['uid']]['Installed'] = True
             st.session_state.current_index += 1
-            auto_save(); st.rerun()
-    
-    if st.button("🗑️ RESET"):
+            auto_save()
+            st.rerun()
+            
+        if idx > 0:
+            if st.button("⬅️ PREVIOUS STOP"):
+                st.session_state.current_index -= 1
+                auto_save()
+                st.rerun()
+    else:
+        st.success("🏁 All sites installed. Shift Complete!")
+
+    if st.button("🗑️ CLEAR & RESET SYSTEM"):
         if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
         st.session_state.optimized_route = []
-        st.session_state.plotting_mode = True
+        st.session_state.site_data = {}
+        st.session_state.current_index = 0
         st.rerun()

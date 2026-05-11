@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.10 Sniper", layout="centered")
+st.set_page_config(page_title="Live Wire V51.11 Binary Bridge", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -115,25 +115,27 @@ def process_upload(est_configs, excel_files, m_type):
     master_site_ids = sorted(list(set(master_site_ids)))
     if not master_site_ids: return False, 0
 
-    # 2. SNIPER: GPS Extraction from Map
+    # 2. THE BRIDGE: Binary-Safe Extraction
     for cfg in est_configs:
         try:
-            raw_text = cfg['file'].getvalue().decode('latin-1', errors='ignore').replace('\x00', ' ')
-            text = re.sub(r'\s+', ' ', raw_text)
+            raw_data = cfg['file'].getvalue()
+            # Decode using latin-1 to keep byte integrity, then clean up non-printable
+            raw_text = raw_data.decode('latin-1', errors='ignore')
+            text = "".join([c if ord(c) < 128 else ' ' for c in raw_text])
+            text = re.sub(r'\s+', ' ', text)
             
             for sid in master_site_ids:
-                # Find the site number and look ahead for the coordinate block
-                match = re.search(r'\b' + sid + r'\b(.{1,2000})', text)
+                # Find the ID and scan a wide block (3000 chars) for coordinates
+                match = re.search(r'\b' + sid + r'\b(.{1,3000})', text)
                 if match:
-                    # Strict regex for coordinates with 4+ decimal places
-                    coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{4,}', match.group(1))]
+                    # Look for coordinates with at least 3 decimal places
+                    coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{3,}', match.group(1))]
                     
-                    # Target Southern California tightly to avoid map errors
-                    lats = [c for c in coords if 32.5 < c < 34.9]
-                    lons = [c for c in coords if -119.5 < c < -116.0]
+                    # Broadened SoCal bounds
+                    lats = [c for c in coords if 32.0 < c < 35.5]
+                    lons = [c for c in coords if -121.0 < c < -114.0]
                     
                     if lats and lons:
-                        # Grab the most stable pairing (first and last in the local block)
                         all_raw_master.append({
                             "id": sid,
                             "lat_start": lats[0], "lon_start": lons[0],
@@ -173,21 +175,23 @@ if not st.session_state.get("optimized_route"):
         except: st.error("Error")
     st.divider()
     m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
-    excel_files = st.file_uploader("1️⃣ DATA (EXCEL/CSV)", accept_multiple_files=True)
+    excel_files = st.file_uploader("1️⃣ EXCEL (COL A SITES)", accept_multiple_files=True)
     up_files = st.file_uploader("2️⃣ MAPS (.EST / .TXT)", accept_multiple_files=True)
     if up_files and excel_files:
-        configs = [{"file": f, "label": st.text_input(f"Label {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 SYNC SNIPER"):
-            success, count = process_upload(configs, excel_files, m_type)
-            if success: st.success(f"Locked {count} Sites."); time.sleep(1); st.rerun()
-            else: st.error("Coordinates not found in map for these site numbers.")
+        configs = [{"file": f, "label": st.text_input(f"Map Name {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
+        if st.button("🚀 SYNC SYSTEM"):
+            with st.spinner("Processing binary map data..."):
+                success, count = process_upload(configs, excel_files, m_type)
+                if success: st.success(f"Locked {count} Sites."); time.sleep(1); st.rerun()
+                else: st.error("Coordinates not found in map for these site numbers. Check Column A.")
 else:
-    new_theme = st.radio("📱 DISPLAY:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
+    st.title("🚦 Field Dashboard")
+    new_theme = st.radio("VISIBILITY:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
     
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
     with tab1:
-        st.success(f"{st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")
+        st.success(f"MISSION: {st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")
         map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF"}]
         for s in st.session_state.optimized_route:
             sd = st.session_state.site_data[s['uid']]
@@ -199,7 +203,7 @@ else:
             done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
             if st.button(f"{'✅' if done else '🟠'} {idx+1}: Site {sd['Site']}", key=f"m_{idx}", use_container_width=True):
                 st.session_state.current_index = idx; st.rerun()
-        st.download_button("💾 DOWNLOAD MASTER SHIFT FILE", json.dumps({k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary", "theme"]}), f"LiveWire_Save.json", use_container_width=True)
+        st.download_button("💾 DOWNLOAD BACKUP", json.dumps({k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary", "theme"]}), f"LiveWire_Backup.json", use_container_width=True)
         if st.button("🗑️ CLEAR"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.session_state.optimized_route = []; st.rerun()
@@ -208,7 +212,7 @@ else:
         if cur < len(st.session_state.optimized_route):
             s = st.session_state.optimized_route[cur]; sd = st.session_state.site_data[s['uid']]
             st.subheader(f"#{cur+1}: SITE {sd['Site']}")
-            st.link_button("🚗 SINGLE NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
+            st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
             batch = [f"{st.session_state.site_data[bs['uid']]['LAT']},{st.session_state.site_data[bs['uid']]['LON']}" for bs in st.session_state.optimized_route[cur:cur+9] if st.session_state.site_data[bs['uid']]['Installed'] != "x"]
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV {len(batch)}", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             loc = streamlit_geolocation()
@@ -242,4 +246,4 @@ else:
                 for sheet_name in st.session_state.active_files:
                     sheet_df = full_df[full_df["Sheet"] == sheet_name]
                     if not sheet_df.empty: sheet_df.to_excel(writer, index=False, sheet_name=sheet_name)
-            st.download_button("📊 DOWNLOAD EXCEL", output.getvalue(), f"Traffic_Report.xlsx", use_container_width=True)
+            st.download_button("📊 DOWNLOAD EXCEL", output.getvalue(), f"Traffic_Precision_Report.xlsx", use_container_width=True)

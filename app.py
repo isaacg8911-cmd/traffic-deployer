@@ -1,6 +1,6 @@
 import streamlit as st
 import re
-import pandas as pd
+import pd as pd
 import json
 import io
 import time
@@ -11,18 +11,17 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V48 Adaptive Display", layout="centered")
+st.set_page_config(page_title="Live Wire V50 Dual-Routing", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
 
-# --- THEME ENGINE ---
+# --- THEME ENGINE (OLED SAVER) ---
 if "theme" not in st.session_state:
     st.session_state.theme = "☁️ Overcast (Standard)"
 
 def set_theme(theme_choice):
     if theme_choice == "🌞 Bright Sun (OLED Contrast)":
-        # Pixel 9 Extreme Battery Saver Mode: Pitch black + Neon Cyan
         return """
         <style>
         .stApp { background-color: #000000; color: #FFFFFF; }
@@ -40,7 +39,6 @@ def set_theme(theme_choice):
         </style>
         """
     else:
-        # Standard Gloomy/Classic Mode: Soft dark gray + Gold
         return """
         <style>
         .stApp { background-color: #0A0A0A; color: #FFFFFF; }
@@ -69,7 +67,8 @@ def auto_save():
             "mission_type": st.session_state.get("mission_type", "📍 INSTALLATION"),
             "pickup_index": st.session_state.get("pickup_index", 0),
             "pickup_itinerary": st.session_state.get("pickup_itinerary", []),
-            "theme": st.session_state.get("theme", "☁️ Overcast (Standard)")
+            "theme": st.session_state.get("theme", "☁️ Overcast (Standard)"),
+            "last_sort_mode": st.session_state.get("last_sort_mode", "⏳ Chronological (Install Order)")
         }
         with open(BACKUP_FILE, "w") as f:
             json.dump(payload, f)
@@ -88,15 +87,17 @@ if "init" not in st.session_state:
         st.session_state.site_data = {}
         for k in ["current_index", "pickup_index"]: st.session_state[k] = 0
         st.session_state.mission_type = "📍 INSTALLATION"
+        st.session_state.last_sort_mode = "⏳ Chronological (Install Order)"
     st.session_state.init = True
 
-# Apply the theme dynamically
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 
+# V50: Upgraded Clock to log Exact Seconds for Chronological Sorting
 def get_ca_time():
     now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    exact_t = now.strftime("%Y-%m-%d %H:%M:%S")
     if now.minute > 0: now += timedelta(hours=1)
-    return now.strftime("%H00"), now.strftime("%Y-%m-%d")
+    return now.strftime("%H00"), now.strftime("%Y-%m-%d"), exact_t
 
 def get_bearing(lat1, lon1, lat2, lon2):
     if abs(lat1 - lat2) < 0.00001 and abs(lon1 - lon2) < 0.00001: return "n" 
@@ -169,7 +170,7 @@ def process_upload(est_configs, data_files, m_type):
                                         'lat_start': float(row[lat1_col]), 'lon_start': float(row[lon1_col]),
                                         'lat_end': float(row[lat2_col]) if lat2_col and pd.notna(row[lat2_col]) else float(row[lat1_col]),
                                         'lon_end': float(row[lon2_col]) if lon2_col and pd.notna(row[lon2_col]) else float(row[lon1_col]),
-                                        'lanes': int(float(row[lanes_col])) if lanes_col and pd.notna(row[lanes_col]) else 1,
+                                        'lanes': int(float(row[lanes_col])) if lanes_col and pd.notna(row[lanes_col]) else 2,
                                         'street': str(row[street_col]) if street_col and pd.notna(row[street_col]) else ""
                                     }
                                 except: pass
@@ -219,7 +220,7 @@ def process_upload(est_configs, data_files, m_type):
                             all_raw_master.append({
                                 "id": sid, "lat_start": lat1, "lon_start": lon1,
                                 "lat_end": lat2, "lon_end": lon2,
-                                "sheet": cfg['label'], "lanes": 1, "street": ""
+                                "sheet": cfg['label'], "lanes": 2, "street": "" 
                             })
         except Exception as e:
             st.error(f"Error parsing file {cfg['label']}")
@@ -261,9 +262,9 @@ def process_upload(est_configs, data_files, m_type):
         st.session_state.optimized_route = final_route
         st.session_state.active_files = [c['label'] for c in est_configs]
         st.session_state.site_data = {
-            s['uid']: {"Date":"","Time":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"",
+            s['uid']: {"Date":"","Time":"","ExactTime":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"",
                       "Directions": s['auto_dir'], 
-                      "Lanes":s.get('lanes', 1),"Street":s.get('street', ""),"Notes":"","Installed":installed_status,
+                      "Lanes":s.get('lanes', 2),"Street":s.get('street', ""),"Notes":"","Installed":installed_status,
                       "Lat_Start":s['lat_start'], "Lon_Start":s['lon_start'],
                       "Lat_End":s['lat_end'], "Lon_End":s['lon_end'],
                       "Picked up":"","LAT":s['nav_lat'],"LON":s['nav_lon'],"Skipped":False,"Sheet":s['sheet']} for s in final_route
@@ -271,6 +272,7 @@ def process_upload(est_configs, data_files, m_type):
         
         st.session_state.mission_type = m_type
         st.session_state.current_index, st.session_state.pickup_index = 0, 0
+        st.session_state.last_sort_mode = "⏳ Chronological (Install Order)"
         
         if is_pickup: st.session_state.pickup_itinerary = [st.session_state.site_data[s['uid']] for s in final_route]
         
@@ -284,13 +286,20 @@ def process_upload(est_configs, data_files, m_type):
 if not st.session_state.get("optimized_route"):
     st.title("🚦 SECURE UPLOAD")
     
-    st.markdown("### 🔄 MORNING RESTORE")
-    restore_file = st.file_uploader("DROP YESTERDAY'S BACKUP JSON HERE", type=["json"])
+    st.markdown("### 🔄 MORNING RESTORE (PICK-UP SYNC)")
+    st.info("Upload yesterday's **Master Shift File** here. Switch to the Pick-Up tab to instantly map your sites using yesterday's exact locked coordinates.")
+    restore_file = st.file_uploader("DROP MASTER SHIFT FILE (.JSON)", type=["json"])
     if restore_file:
-        if st.button("🔓 RESTORE ROUTE PROGRESS", use_container_width=True):
+        if st.button("🔓 RESTORE ROUTE & LOAD PICK-UPS", use_container_width=True):
             try:
                 data = json.loads(restore_file.getvalue())
                 for k in data: st.session_state[k] = data[k]
+                
+                # Auto-build Pick-Up itinerary and default to Chronological
+                installed_sites = [sd for uid, sd in st.session_state.site_data.items() if sd.get("Installed") == "x"]
+                st.session_state.pickup_itinerary = sorted(installed_sites, key=lambda x: x.get('ExactTime', ''))
+                st.session_state.last_sort_mode = "⏳ Chronological (Install Order)"
+                
                 auto_save(); st.success("✅ PROGRESS RESTORED!"); time.sleep(1); st.rerun()
             except: st.error("Invalid Backup File.")
     
@@ -319,7 +328,6 @@ if not st.session_state.get("optimized_route"):
 # STAGE 2: MAIN DASHBOARD
 # ==========================================
 else:
-    # V48 Theme Switcher
     st.markdown("### 📱 VISIBILITY MODE")
     new_theme = st.radio("Adjust for lighting conditions:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme:
@@ -379,11 +387,11 @@ else:
                     st.rerun()
 
         st.divider()
-        st.markdown("### 🛑 END OF DAY CHECKLIST")
-        st.info("⚠️ MUST DO: Download your backup now so Streamlit doesn't wipe your data overnight.")
+        st.markdown("### 🛑 END OF DAY: TOMORROW'S PREP")
+        st.info("⚠️ Download this file when your shift is over. Tomorrow morning, upload this file to perfectly generate your Pick-Up route.")
         
-        payload = {k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary", "theme"]}
-        st.download_button(label="💾 DOWNLOAD ROUTE BACKUP", data=json.dumps(payload), file_name=f"LiveWire_Backup_{datetime.now().strftime('%Y%m%d')}.json", mime="application/json", use_container_width=True)
+        payload = {k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary", "theme", "last_sort_mode"]}
+        st.download_button(label="💾 DOWNLOAD MASTER SHIFT FILE (.JSON)", data=json.dumps(payload), file_name=f"LiveWire_Master_Save_{datetime.now().strftime('%Y%m%d')}.json", mime="application/json", use_container_width=True)
 
         st.divider()
         if st.button("🗑️ CLEAR ROUTE & START OVER", use_container_width=True):
@@ -412,8 +420,19 @@ else:
                 
                 street_display = f" | {sd['Street']}" if sd.get('Street') else ""
                 st.subheader(f"STOP #{cur_idx+1}: SITE {sd['Site']}{street_display}")
-                st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
                 
+                st.link_button("🚗 SINGLE NAVIGATION", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
+                
+                batch_coords = []
+                for j in range(cur_idx, min(total_sites, cur_idx + 5)):
+                    bs = st.session_state.optimized_route[j]
+                    if st.session_state.site_data[bs['uid']]['Installed'] != "x" and not st.session_state.site_data[bs['uid']].get('Skipped'):
+                        batch_coords.append(f"{st.session_state.site_data[bs['uid']]['LAT']},{st.session_state.site_data[bs['uid']]['LON']}")
+                
+                if len(batch_coords) > 1:
+                    batch_url = "https://www.google.com/maps/dir/" + "/".join(batch_coords)
+                    st.link_button(f"🗺️ BATCH NAVIGATE NEXT {len(batch_coords)} STOPS", batch_url, use_container_width=True)
+
                 st.divider()
                 st.markdown("### 📍 GPS ANCHOR")
                 st.caption("Tap the crosshairs FIRST to grab your exact physical location.")
@@ -424,32 +443,33 @@ else:
                     live_lat, live_lon = loc['latitude'], loc['longitude']
                     st.success(f"✅ GPS Locked: {live_lat}, {live_lon}")
                 
-                with st.form(key=f"f_v48_{uid}"):
+                with st.form(key=f"f_v50_{uid}"):
                     c1, c2 = st.columns(2)
                     dir_options = ["n","e","s","w"]
                     current_dir = sd.get("Directions", "n")
                     idx = dir_options.index(current_dir) if current_dir in dir_options else 0
                     with c1: dr = st.selectbox("DIR", dir_options, index=idx)
-                    with c2: ln = st.number_input("LANES", min_value=1, value=int(sd.get("Lanes", 1)))
+                    with c2: ln = st.number_input("LANES", min_value=1, value=int(sd.get("Lanes", 2)), step=1)
+                    
                     ser = st.text_input("SERIAL #", value=sd["Serial"])
-                    nt = st.text_input("NOTES", value=sd["Notes"])
+                    nt = st.text_input("NOTES (Use Keyboard Mic 🎙️)", value=sd["Notes"])
                     
                     col_a, col_b = st.columns(2)
                     if col_a.form_submit_button("✅ COMPLETE", use_container_width=True):
-                        t, d = get_ca_time()
+                        t, d, exact_t = get_ca_time()
                         final_lat = live_lat if live_lat else sd['LAT']
                         final_lon = live_lon if live_lon else sd['LON']
                         
                         st.session_state.site_data[uid].update({
-                            "Date": d, "Time": t, 
+                            "Date": d, "Time": t, "ExactTime": exact_t,
                             "Directions": "n" if dr in ["n","s"] else "e", 
                             "Serial": ser, "Lanes": ln, "Notes": nt, 
                             "Installed": "x", "LAT": final_lat, "LON": final_lon, "Skipped": False
                         })
                         st.session_state.current_index += 1; auto_save(); st.rerun()
                     if col_b.form_submit_button("🚨 UNABLE (SKIP)", use_container_width=True):
-                        t, d = get_ca_time()
-                        st.session_state.site_data[uid].update({"Date":d,"Time":t,"Notes":f"UNABLE: {nt.upper()}","Skipped":True})
+                        t, d, exact_t = get_ca_time()
+                        st.session_state.site_data[uid].update({"Date":d,"Time":t,"ExactTime":exact_t,"Notes":f"UNABLE: {nt.upper()}","Skipped":True})
                         st.session_state.current_index += 1; auto_save(); st.rerun()
                 
                 if cur_idx > 0 and st.button("⬅️ PREVIOUS STOP", use_container_width=True):
@@ -457,10 +477,35 @@ else:
             else: st.balloons(); st.success("🏁 INSTALLATION COMPLETED.")
 
     with tab3:
-        if "INSTALL" in st.session_state.mission_type:
-            st.warning("⚠️ You are currently in Install Mode.")
+        # V50 DUAL-ROUTING TOGGLE
+        st.markdown("### 🗺️ ROUTING STRATEGY")
+        sort_mode = st.radio("Pick-Up Order:", ["⏳ Chronological (Install Order)", "🚀 Fastest Route (Optimized)"], horizontal=True, index=0 if st.session_state.get("last_sort_mode") == "⏳ Chronological (Install Order)" else 1)
+        
+        # Recalculate Pick-Up itinerary instantly if the switch is flipped
+        if sort_mode != st.session_state.get("last_sort_mode"):
+            base_itin = st.session_state.get("pickup_itinerary", [])
+            if sort_mode == "⏳ Chronological (Install Order)":
+                st.session_state.pickup_itinerary = sorted(base_itin, key=lambda x: x.get('ExactTime', ''))
+            else:
+                rem = base_itin.copy()
+                new_itin = []
+                curr = HOME_COORDS
+                while rem:
+                    nxt = min(rem, key=lambda x: (curr[0] - x['LAT'])**2 + (curr[1] - x['LON'])**2)
+                    new_itin.append(nxt)
+                    curr = (nxt['LAT'], nxt['LON'])
+                    rem.remove(nxt)
+                st.session_state.pickup_itinerary = new_itin
+                
+            st.session_state.last_sort_mode = sort_mode
+            st.session_state.pickup_index = 0
+            auto_save()
+            st.rerun()
+        
+        itinerary = st.session_state.get("pickup_itinerary", [])
+        if not itinerary:
+            st.info("No completed sites ready for Pick-Up yet. If you are starting a new day, upload your Master Shift File in Tab 1.")
         else:
-            itinerary = st.session_state.get("pickup_itinerary", [])
             view_mode = st.radio("VIEW MODE", ["Focus Mode (1-by-1)", "List View"], horizontal=True)
             st.divider()
 
@@ -477,7 +522,7 @@ else:
                         st.markdown(f"<div style='color: #FF0000; font-weight: 900; padding: 10px; border: 1px solid #FF0000; border-radius: 5px; margin-bottom: 10px;'>🚫 #{i+1} - SITE {sid}{street_txt} SKIPPED</div>", unsafe_allow_html=True)
                     else:
                         with st.expander(f"📦 #{i+1} - Site {sid}{street_txt} ({s['Sheet']})"):
-                            st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
+                            st.link_button("🚗 Navigate to Anchored Spot", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
                             with st.form(key=f"pu_list_{uid}"):
                                 p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                                 if st.form_submit_button("MARK SECURED"):
@@ -489,7 +534,17 @@ else:
                     street_txt = f" | {s['Street']}" if s.get('Street') else ""
                     st.subheader(f"PICK-UP #{p_idx+1}: SITE {sid}{street_txt}")
                     
-                    st.link_button("🚗 START NAVIGATION", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
+                    st.link_button("🚗 SINGLE NAVIGATION", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
+                    
+                    batch_coords_pu = []
+                    for j in range(p_idx, min(len(itinerary), p_idx + 5)):
+                        bs = itinerary[j]
+                        if st.session_state.site_data[bs['UID']]['Picked up'] != "x" and not st.session_state.site_data[bs['UID']].get('Skipped'):
+                            batch_coords_pu.append(f"{st.session_state.site_data[bs['UID']]['LAT']},{st.session_state.site_data[bs['UID']]['LON']}")
+                    
+                    if len(batch_coords_pu) > 1:
+                        batch_url_pu = "https://www.google.com/maps/dir/" + "/".join(batch_coords_pu)
+                        st.link_button(f"🗺️ BATCH NAVIGATE NEXT {len(batch_coords_pu)} STOPS", batch_url_pu, use_container_width=True)
                     
                     with st.form(key=f"pu_focus_{uid}"):
                         p_notes = st.text_input("NOTES", value=s["Notes"])
@@ -511,7 +566,7 @@ else:
         if all_d:
             try:
                 full_df = pd.DataFrame(all_d)
-                cols = ["Date", "Time", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]
+                cols = ["Date", "Time", "ExactTime", "Site", "Counter", "Serial", "Directions", "Lanes", "Notes", "Installed", "Picked up"]
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     for sheet_name in st.session_state.active_files:

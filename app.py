@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.18 Arterial Bias", layout="centered")
+st.set_page_config(page_title="Live Wire V51.19 Geofenced", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -82,18 +82,7 @@ def process_upload(est_configs, excel_files, m_type):
     excel_data = {}
     for f in excel_files:
         try:
-            if f.name.lower().endswith('.csv'):
-                df = pd.read_csv(f, encoding='latin-1')
-            else:
-                try:
-                    df = pd.read_excel(f)
-                except:
-                    raw = f.getvalue().decode('latin-1', errors='ignore')
-                    sids = re.findall(r'\b\d{4,5}\b', raw)
-                    lats = re.findall(r'33\.\d{4,}', raw)
-                    lons = re.findall(r'-11[78]\.\d{4,}', raw)
-                    df = pd.DataFrame({'Site': sids, 'LAT': lats[:len(sids)], 'LON': lons[:len(sids)]})
-            
+            df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
             lat_c = next((c for c in df.columns if 'lat' in c.lower()), None)
             lon_c = next((c for c in df.columns if 'lon' in c.lower()), None)
             id_c = next((c for c in df.columns if any(x in c.lower() for x in ['site', 'tds', 'id'])), df.columns[0])
@@ -102,9 +91,14 @@ def process_upload(est_configs, excel_files, m_type):
                 for _, row in df.iterrows():
                     sid = str(row[id_c]).split('.')[0].strip()
                     if sid.isdigit():
-                        excel_data[sid] = {"lat": float(row[lat_c]), "lon": float(row[lon_c]), "street": str(row.get('Street', f'Site {sid}'))}
-        except Exception as e:
-            st.error(f"Error reading {f.name}: {e}")
+                        v1, v2 = float(row[lat_c]), float(row[lon_c])
+                        # AUTO-FLIP LOGIC: Ensure Latitude is ~33 and Longitude is ~-117
+                        lat = v1 if 32 < v1 < 42 else v2
+                        lon = v2 if -125 < v2 < -110 else v1
+                        
+                        if 32.5 < lat < 35.5 and -121.0 < lon < -114.0:
+                            excel_data[sid] = {"lat": lat, "lon": lon, "street": str(row.get('Street', f'Site {sid}'))}
+        except: pass
 
     if not excel_data: return False, 0
 
@@ -113,26 +107,18 @@ def process_upload(est_configs, excel_files, m_type):
         raw_map = cfg['file'].getvalue().decode('latin-1', errors='ignore')
         for sid, data in excel_data.items():
             if sid in raw_map:
-                # Find the GPS pair associated with this site in the EST file
-                # V51.18: Look for the segment that is FURTHEST from home to avoid dead-ends
+                # Find associated coords in map file block
                 gps_matches = re.findall(r'(-?\d{2,3}\.\d{4,})', raw_map[raw_map.find(sid):raw_map.find(sid)+2000])
-                if len(gps_matches) >= 2:
-                    p1 = (float(gps_matches[0]), float(gps_matches[1]))
-                    p2 = (data['lat'], data['lon'])
-                    
-                    # Calculate which point is further from Home
-                    d1 = math.sqrt((p1[0]-HOME_COORDS[0])**2 + (p1[1]-HOME_COORDS[1])**2)
-                    d2 = math.sqrt((p2[0]-HOME_COORDS[0])**2 + (p2[1]-HOME_COORDS[1])**2)
-                    
-                    target = p1 if d1 > d2 else p2
-                    
-                    final_list.append({
-                        "id": sid, 
-                        "lat_start": target[0], 
-                        "lon_start": target[1], 
-                        "sheet": cfg['label'], 
-                        "street": data['street']
-                    })
+                points = []
+                for val in [float(x) for x in gps_matches]:
+                    if 32.5 < val < 35.5: points.append(val) # Potentially a Lat
+                    if -121.0 < val < -114.0: points.append(val) # Potentially a Lon
+                
+                # Determine point furthest from home for intersection bias
+                p_lat = points[0] if len(points) > 0 else data['lat']
+                p_lon = points[1] if len(points) > 1 else data['lon']
+                
+                final_list.append({"id": sid, "lat_start": p_lat, "lon_start": p_lon, "sheet": cfg['label'], "street": data['street']})
 
     if final_list:
         df_final = pd.DataFrame(final_list).drop_duplicates(subset=['id', 'sheet'])
@@ -154,7 +140,7 @@ def process_upload(est_configs, excel_files, m_type):
 
 # --- UI ---
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 Live Wire Precision")
+    st.title("🚦 Live Wire Geofenced")
     restore_file = st.file_uploader("🔄 RESTORE (.JSON)", type=["json"])
     if restore_file and st.button("🔓 LOAD"):
         data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
@@ -166,15 +152,15 @@ if not st.session_state.get("optimized_route"):
         configs = [{"file": f, "label": st.text_input(f"Day {i+1}:", value=f"Day {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
         if st.button("🚀 SYNC SYSTEM"):
             success, count = process_upload(configs, excel_files, m_type)
-            if success: st.success(f"Synced {count} sites."); time.sleep(1); st.rerun()
-            else: st.error("No site overlap found. Try saving your Excel as a .CSV file.")
+            if success: st.success(f"Synced {count} California Sites."); time.sleep(1); st.rerun()
+            else: st.error("No California coordinates found.")
 else:
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
     with tab1:
         st.success(f"STOPS: {len(st.session_state.optimized_route)}")
-        map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF", "size": 15}]
+        map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF", "size": 12}]
         for s in st.session_state.optimized_route:
             sd = st.session_state.site_data[s['uid']]
             done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"

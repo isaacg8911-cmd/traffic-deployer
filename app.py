@@ -9,11 +9,9 @@ import math
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
-from PIL import Image
-from PIL.ExifTags import TAGS, GPSTAGS
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V42 Auto-Matcher", layout="centered")
+st.set_page_config(page_title="Live Wire V45 Interactive", layout="centered")
 
 st.markdown("""
     <style>
@@ -88,36 +86,6 @@ def find_col(df, keywords):
         for c in df.columns:
             if kw in c: return c
     return None
-
-# --- V42 PHOTO GPS EXTRACTION ---
-def get_decimal_from_dms(dms, ref):
-    try:
-        degrees, minutes, seconds = float(dms[0]), float(dms[1]), float(dms[2])
-        decimal = degrees + (minutes / 60.0) + (seconds / 3600.0)
-        if ref in ['S', 'W']: decimal = -decimal
-        return decimal
-    except: return None
-
-def extract_gps_from_image(image_bytes):
-    try:
-        img = Image.open(io.BytesIO(image_bytes))
-        exif_data = img._getexif()
-        if not exif_data: return None, None
-        
-        gps_info = {}
-        for tag, value in exif_data.items():
-            decoded = TAGS.get(tag, tag)
-            if decoded == "GPSInfo":
-                for t in value:
-                    sub_decoded = GPSTAGS.get(t, t)
-                    gps_info[sub_decoded] = value[t]
-        
-        if "GPSLatitude" in gps_info and "GPSLongitude" in gps_info:
-            lat = get_decimal_from_dms(gps_info["GPSLatitude"], gps_info.get("GPSLatitudeRef", "N"))
-            lon = get_decimal_from_dms(gps_info["GPSLongitude"], gps_info.get("GPSLongitudeRef", "W"))
-            return lat, lon
-    except: pass
-    return None, None
 
 def process_upload(est_configs, data_files, m_type):
     all_raw_master = []
@@ -295,30 +263,57 @@ if not st.session_state.get("optimized_route"):
 # ==========================================
 else:
     st.title("🚦 Field Ops Dashboard")
-    # V42: Added the new PHOTOS tab
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📸 PHOTOS", "📊 EXCEL"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
 
     with tab1:
         st.success(f"MISSION: {st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")
         
+        # V45: Advanced Map Colors (Green = Done, Red = Skipped, Orange = Pending)
         map_points = []
         is_pickup_mode = "PICK-UP" in st.session_state.mission_type
         for s in st.session_state.optimized_route:
             sd = st.session_state.site_data[s['uid']]
             is_done = sd["Picked up"] == "x" if is_pickup_mode else sd["Installed"] == "x"
-            map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": "#00FF00" if is_done else "#FFA500"})
+            is_skipped = sd.get("Skipped", False)
+            
+            if is_done: color = "#00FF00"      # Green
+            elif is_skipped: color = "#FF0000" # Red
+            else: color = "#FFA500"            # Orange
+            map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": color})
         
         st.map(pd.DataFrame(map_points), color="color", zoom=9)
         
-        st.markdown("### 📋 ROUTE MANIFEST")
+        # V45: Interactive Button Manifest
+        st.markdown("### 📋 INTERACTIVE MANIFEST")
+        st.caption("Tap any stop to instantly lock it in. Then switch to your Install/Pick-Up tab to view it.")
+        
         for idx, s in enumerate(st.session_state.optimized_route):
             sd = st.session_state.site_data[s['uid']]
             is_done = sd["Picked up"] == "x" if is_pickup_mode else sd["Installed"] == "x"
+            is_skipped = sd.get("Skipped", False)
             street_text = f" - {sd['Street']}" if sd.get('Street') else ""
+            
             if is_done:
-                st.markdown(f"<div style='color:#00FF00; font-weight:900; margin-bottom:5px;'>✅ STOP {idx+1}: Site {sd['Site']}{street_text} (COMPLETED)</div>", unsafe_allow_html=True)
+                label = f"✅ STOP {idx+1}: Site {sd['Site']}{street_text} (COMPLETED)"
+            elif is_skipped:
+                label = f"🚫 STOP {idx+1}: Site {sd['Site']}{street_text} (SKIPPED)"
             else:
-                st.markdown(f"<div style='color:#FFA500; font-weight:bold; margin-bottom:5px;'>🟠 STOP {idx+1}: Site {sd['Site']}{street_text}</div>", unsafe_allow_html=True)
+                label = f"🟠 STOP {idx+1}: Site {sd['Site']}{street_text}"
+
+            # If you click a list item, it automatically sets the index for the other tabs
+            if st.button(label, key=f"manifest_btn_{idx}", use_container_width=True):
+                if is_pickup_mode:
+                    try:
+                        # Find where this specific site lives in the pickup itinerary
+                        p_idx = next(i for i, pu in enumerate(st.session_state.pickup_itinerary) if pu['UID'] == s['uid'])
+                        st.session_state.pickup_index = p_idx
+                        auto_save()
+                        st.rerun()
+                    except StopIteration: pass
+                else:
+                    st.session_state.current_index = idx
+                    auto_save()
+                    st.rerun()
 
         st.divider()
         st.markdown("### 🛑 END OF DAY CHECKLIST")
@@ -366,7 +361,7 @@ else:
                     live_lat, live_lon = loc['latitude'], loc['longitude']
                     st.success(f"✅ GPS Locked: {live_lat}, {live_lon}")
                 
-                with st.form(key=f"f_v42_{uid}"):
+                with st.form(key=f"f_v45_{uid}"):
                     c1, c2 = st.columns(2)
                     dir_options = ["n","e","s","w"]
                     current_dir = sd.get("Directions", "n")
@@ -386,10 +381,10 @@ else:
                             "Date": d, "Time": t, 
                             "Directions": "n" if dr in ["n","s"] else "e", 
                             "Serial": ser, "Lanes": ln, "Notes": nt, 
-                            "Installed": "x", "LAT": final_lat, "LON": final_lon
+                            "Installed": "x", "LAT": final_lat, "LON": final_lon, "Skipped": False
                         })
                         st.session_state.current_index += 1; auto_save(); st.rerun()
-                    if col_b.form_submit_button("🚨 UNABLE", use_container_width=True):
+                    if col_b.form_submit_button("🚨 UNABLE (SKIP)", use_container_width=True):
                         t, d = get_ca_time()
                         st.session_state.site_data[uid].update({"Date":d,"Time":t,"Notes":f"UNABLE: {nt.upper()}","Skipped":True})
                         st.session_state.current_index += 1; auto_save(); st.rerun()
@@ -410,16 +405,20 @@ else:
                 for i, s in enumerate(itinerary):
                     uid, sid = s["UID"], s["Site"]
                     is_picked = s["Picked up"] == "x"
+                    is_skipped = s.get("Skipped", False)
                     street_txt = f" - {s['Street']}" if s.get('Street') else ""
+                    
                     if is_picked:
                         st.markdown(f"<div style='color: #00FF00; font-weight: 900; padding: 10px; border: 1px solid #00FF00; border-radius: 5px; margin-bottom: 10px;'>✅ #{i+1} - SITE {sid}{street_txt} SECURED</div>", unsafe_allow_html=True)
+                    elif is_skipped:
+                        st.markdown(f"<div style='color: #FF0000; font-weight: 900; padding: 10px; border: 1px solid #FF0000; border-radius: 5px; margin-bottom: 10px;'>🚫 #{i+1} - SITE {sid}{street_txt} SKIPPED</div>", unsafe_allow_html=True)
                     else:
                         with st.expander(f"📦 #{i+1} - Site {sid}{street_txt} ({s['Sheet']})"):
                             st.link_button("🚗 Navigate to Spot", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
                             with st.form(key=f"pu_list_{uid}"):
                                 p_notes = st.text_input("Pick-Up Notes", value=s["Notes"])
                                 if st.form_submit_button("MARK SECURED"):
-                                    st.session_state.site_data[uid]["Picked up"] = "x"; st.session_state.site_data[uid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()
+                                    st.session_state.site_data[uid]["Picked up"] = "x"; st.session_state.site_data[uid]["Skipped"] = False; st.session_state.site_data[uid]["Notes"] = p_notes.strip(); auto_save(); st.rerun()
             else:
                 p_idx = st.session_state.get("pickup_index", 0)
                 if p_idx < len(itinerary):
@@ -434,47 +433,18 @@ else:
                         col_a, col_b = st.columns(2)
                         if col_a.form_submit_button("✅ SECURED", use_container_width=True):
                             st.session_state.site_data[uid]["Picked up"] = "x"
+                            st.session_state.site_data[uid]["Skipped"] = False
                             st.session_state.site_data[uid]["Notes"] = p_notes.strip(); st.session_state.pickup_index += 1; auto_save(); st.rerun()
-                        if col_b.form_submit_button("🚨 UNABLE", use_container_width=True):
-                            st.session_state.site_data[uid]["Notes"] = f"UNABLE: {p_notes.upper()}"; st.session_state.pickup_index += 1; auto_save(); st.rerun()
+                        # V45: Skipped logic added to Pick-Ups
+                        if col_b.form_submit_button("🚨 UNABLE (SKIP)", use_container_width=True):
+                            st.session_state.site_data[uid]["Notes"] = f"UNABLE: {p_notes.upper()}"
+                            st.session_state.site_data[uid]["Skipped"] = True
+                            st.session_state.pickup_index += 1; auto_save(); st.rerun()
                     if p_idx > 0 and st.button("⬅️ PREVIOUS STOP", use_container_width=True):
                         st.session_state.pickup_index -= 1; auto_save(); st.rerun()
                 else: st.balloons(); st.success("🏁 ALL EQUIPMENT SECURED.")
 
-    # --- V42 NEW PHOTO MATCHER TAB ---
     with tab4:
-        st.markdown("### 📸 PHOTO MATCHER")
-        st.info("Upload unlabelled installation photos. The app will extract their hidden GPS data and tell you exactly which Site ID they belong to.")
-        
-        uploaded_photos = st.file_uploader("Drop .JPG or .JPEG photos here", type=["jpg", "jpeg"], accept_multiple_files=True)
-        
-        if uploaded_photos:
-            if st.button("🔍 ANALYZE PHOTOS", use_container_width=True):
-                for photo in uploaded_photos:
-                    bytes_data = photo.getvalue()
-                    p_lat, p_lon = extract_gps_from_image(bytes_data)
-                    
-                    if p_lat and p_lon:
-                        # Find the closest matching site mathematically
-                        best_site = None
-                        best_street = ""
-                        best_dist = float('inf')
-                        
-                        for uid, sd in st.session_state.site_data.items():
-                            dist = (p_lat - sd['LAT'])**2 + (p_lon - sd['LON'])**2
-                            if dist < best_dist:
-                                best_dist = dist
-                                best_site = sd['Site']
-                                best_street = sd.get('Street', '')
-                        
-                        if best_site:
-                            st.success(f"**{photo.name}** ➡️ **SITE {best_site}** ({best_street})")
-                        else:
-                            st.warning(f"**{photo.name}**: Has GPS, but couldn't match to a route site.")
-                    else:
-                        st.error(f"**{photo.name}**: No GPS data found. (Ensure Location Services was ON when taking the photo).")
-
-    with tab5:
         all_d = [d for d in st.session_state.site_data.values() if d["Installed"] == "x" or d.get("Skipped")]
         if all_d:
             try:

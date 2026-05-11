@@ -11,11 +11,12 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.15 Universal", layout="centered")
+st.set_page_config(page_title="Live Wire V51.16 Absolute", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
 
+# --- THEME ENGINE ---
 if "theme" not in st.session_state:
     st.session_state.theme = "☁️ Overcast (Standard)"
 
@@ -26,7 +27,6 @@ def set_theme(theme_choice):
         .stApp { background-color: #000000; color: #FFFFFF; }
         h1, h2, h3 { color: #00FFFF !important; font-family: 'Arial Black'; font-weight: 900;}
         div.stButton > button { background-color: #000000; color: #00FFFF; border: 3px solid #00FFFF; font-weight: 900; }
-        .stTabs [data-baseweb="tab-list"] { background-color: #000000; border-bottom: 3px solid #333; }
         input, select, textarea { background-color: #000000 !important; color: #00FFFF !important; border: 2px solid #00FFFF !important; }
         div[data-testid="stMetricValue"] { color: #00FFFF !important; font-weight: 900; }
         </style>
@@ -41,6 +41,26 @@ def set_theme(theme_choice):
         div[data-testid="stMetricValue"] { color: #FFD700 !important; }
         </style>
         """
+
+st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
+
+if "init" not in st.session_state:
+    if os.path.exists(BACKUP_FILE):
+        try:
+            with open(BACKUP_FILE, "r") as f:
+                data = json.load(f)
+                for k, v in data.items(): st.session_state[k] = v
+        except: pass
+    if "optimized_route" not in st.session_state:
+        st.session_state.active_files, st.session_state.optimized_route, st.session_state.pickup_itinerary = [], [], []
+        st.session_state.site_data = {}
+        st.session_state.current_index, st.session_state.pickup_index = 0, 0
+        st.session_state.mission_type = "📍 INSTALLATION"
+    st.session_state.init = True
+
+def get_ca_time():
+    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    return now.strftime("%H00"), now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S")
 
 def auto_save():
     try:
@@ -58,97 +78,66 @@ def auto_save():
             json.dump(payload, f)
     except: pass
 
-if "init" not in st.session_state:
-    if os.path.exists(BACKUP_FILE):
-        try:
-            with open(BACKUP_FILE, "r") as f:
-                data = json.load(f)
-                for k, v in data.items(): st.session_state[k] = v
-        except: pass
-    if "optimized_route" not in st.session_state:
-        st.session_state.active_files, st.session_state.optimized_route, st.session_state.pickup_itinerary = [], [], []
-        st.session_state.site_data = {}
-        st.session_state.current_index, st.session_state.pickup_index = 0, 0
-        st.session_state.mission_type = "📍 INSTALLATION"
-    st.session_state.init = True
-
-st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
-
-def get_ca_time():
-    now = datetime.now(ZoneInfo("America/Los_Angeles"))
-    return now.strftime("%H00"), now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S")
-
 def process_upload(est_configs, excel_files, m_type):
-    all_raw_master = []
     excel_data = {}
     
-    # 1. READ EXCEL (Source of Truth)
-    if excel_files:
-        for f in excel_files:
-            try:
-                if f.name.lower().endswith('.csv'):
-                    df = pd.read_csv(f, encoding='latin-1')
-                else:
-                    df = pd.read_excel(f, engine='openpyxl')
-                
-                # Dynamic column finder
-                lat_c = next((c for c in df.columns if 'lat' in c.lower()), None)
-                lon_c = next((c for c in df.columns if 'lon' in c.lower()), None)
-                id_c = next((c for c in df.columns if any(x in c.lower() for x in ['site', 'tds', 'id'])), df.columns[0])
-                
-                if lat_c and lon_c:
-                    for _, row in df.iterrows():
-                        sid = str(row[id_c]).split('.')[0].strip()
-                        if sid.isdigit():
-                            excel_data[sid] = {
-                                "lat": float(row[lat_c]),
-                                "lon": float(row[lon_c]),
-                                "street": str(row.get('Street', 'Site ' + sid))
-                            }
-            except Exception as e:
-                st.error(f"Excel Read Error: {e}")
-
-    if not excel_data:
-        st.error("❌ No valid Site IDs or GPS coordinates found in Excel.")
-        return False, 0
-
-    # 2. UNIVERSAL MAP HARVESTER (Bytes-based)
-    for cfg in est_configs:
+    # 1. ABSOLUTE EXCEL SCRAPER
+    for f in excel_files:
         try:
-            # Read as raw bytes to catch everything
-            raw_bytes = cfg['file'].getvalue()
-            # Convert to a few different text formats to ensure we see the site IDs
-            texts = [
-                raw_bytes.decode('utf-8', errors='ignore'),
-                raw_bytes.decode('latin-1', errors='ignore'),
-                raw_bytes.decode('utf-16', errors='ignore')
-            ]
+            # Attempt normal read
+            if f.name.lower().endswith('.csv'):
+                df = pd.read_csv(f, encoding='latin-1')
+            else:
+                try:
+                    df = pd.read_excel(f)
+                except:
+                    # Fallback: Scrape binary for numbers and coords
+                    raw = f.getvalue().decode('latin-1', errors='ignore')
+                    # Grab potential site numbers
+                    sids = re.findall(r'\b\d{4,5}\b', raw)
+                    # Grab potential coords
+                    lats = re.findall(r'33\.\d{4,}', raw)
+                    lons = re.findall(r'-11[78]\.\d{4,}', raw)
+                    # Simple zip if counts match, else we need the DF
+                    df = pd.DataFrame({'Site': sids, 'LAT': lats[:len(sids)], 'LON': lons[:len(sids)]})
             
-            combined_text = " ".join(texts)
+            # Find the best columns
+            lat_c = next((c for c in df.columns if 'lat' in c.lower()), None)
+            lon_c = next((c for c in df.columns if 'lon' in c.lower()), None)
+            id_c = next((c for c in df.columns if any(x in c.lower() for x in ['site', 'tds', 'id'])), df.columns[0])
             
-            for sid, data in excel_data.items():
-                # Check if site ID exists in the map file in any encoding
-                if sid in combined_text:
-                    all_raw_master.append({
-                        "id": sid,
-                        "lat_start": data['lat'],
-                        "lon_start": data['lon'],
-                        "sheet": cfg['label'],
-                        "street": data['street']
-                    })
-        except: pass
+            if lat_c and lon_c:
+                for _, row in df.iterrows():
+                    sid = str(row[id_c]).split('.')[0].strip()
+                    if sid.isdigit():
+                        excel_data[sid] = {"lat": float(row[lat_c]), "lon": float(row[lon_c]), "street": str(row.get('Street', f'Site {sid}'))}
+        except Exception as e:
+            st.error(f"Error reading {f.name}: {e}")
 
-    if all_raw_master:
-        df = pd.DataFrame(all_raw_master).drop_duplicates(subset=['id', 'sheet'])
-        df['uid'] = df['sheet'] + "_" + df['id']
-        master_rem = df.to_dict('records')
+    if not excel_data: return False, 0
+
+    # 2. MATCH WITH MAP
+    final_list = []
+    for cfg in est_configs:
+        raw_map = cfg['file'].getvalue().decode('latin-1', errors='ignore')
+        for sid, data in excel_data.items():
+            if sid in raw_map:
+                final_list.append({
+                    "id": sid, "lat_start": data['lat'], "lon_start": data['lon'],
+                    "sheet": cfg['label'], "street": data['street']
+                })
+
+    if final_list:
+        df_final = pd.DataFrame(final_list).drop_duplicates(subset=['id', 'sheet'])
+        df_final['uid'] = df_final['sheet'] + "_" + df_final['id']
+        master_rem = df_final.to_dict('records')
         master_route, curr = [], HOME_COORDS
         
         while master_rem:
             nxt = min(master_rem, key=lambda x: (curr[0]-x['lat_start'])**2 + (curr[1]-x['lon_start'])**2)
             nxt['nav_lat'], nxt['nav_lon'] = nxt['lat_start'], nxt['lon_start']
             master_route.append(nxt); curr = (nxt['nav_lat'], nxt['nav_lon']); master_rem.remove(nxt)
-        
+            
         st.session_state.optimized_route = master_route
         st.session_state.active_files = [c['label'] for c in est_configs]
         st.session_state.site_data = {s['uid']: {"Date":"","Time":"","ExactTime":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"","Directions": "n", "Lanes":2,"Street":s['street'],"Notes":"","Installed":"","Lat_Start":s['lat_start'], "Lon_Start":s['lon_start'],"Lat_End":s['lat_start'], "Lon_End":s['lon_start'],"Picked up":"","LAT":s['nav_lat'],"LON":s['nav_lon'],"Skipped":False,"Sheet":s['sheet']} for s in master_route}
@@ -158,20 +147,20 @@ def process_upload(est_configs, excel_files, m_type):
 
 # --- UI ---
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 Live Wire Universal Sync")
+    st.title("🚦 Live Wire Absolute")
     restore_file = st.file_uploader("🔄 RESTORE (.JSON)", type=["json"])
     if restore_file and st.button("🔓 LOAD"):
         data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
     st.divider()
     m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
-    excel_files = st.file_uploader("1️⃣ EXCEL (CONTAINS SITE & GPS)", accept_multiple_files=True)
+    excel_files = st.file_uploader("1️⃣ DATA (EXCEL / CSV)", accept_multiple_files=True)
     up_files = st.file_uploader("2️⃣ MAPS (.EST / .TXT)", accept_multiple_files=True)
     if up_files and excel_files:
-        configs = [{"file": f, "label": st.text_input(f"Name Map {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 SYNC UNIVERSAL"):
+        configs = [{"file": f, "label": st.text_input(f"Day {i+1}:", value=f"Day {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
+        if st.button("🚀 SYNC SYSTEM"):
             success, count = process_upload(configs, excel_files, m_type)
             if success: st.success(f"Synced {count} sites."); time.sleep(1); st.rerun()
-            else: st.error("No site numbers found inside the Map file. Try exporting Map to .CSV or .TXT.")
+            else: st.error("No site overlap found. Try saving your Excel as a .CSV file.")
 else:
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
@@ -198,7 +187,7 @@ else:
         if cur < len(st.session_state.optimized_route):
             s = st.session_state.optimized_route[cur]; sd = st.session_state.site_data[s['uid']]
             st.subheader(f"#{cur+1}: Site {sd['Site']}")
-            st.link_button("🚗 SINGLE NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
+            st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
             batch = [f"{st.session_state.site_data[bs['uid']]['LAT']},{st.session_state.site_data[bs['uid']]['LON']}" for bs in st.session_state.optimized_route[cur:cur+9] if st.session_state.site_data[bs['uid']]['Installed'] != "x"]
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV {len(batch)}", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             loc = streamlit_geolocation()
@@ -223,11 +212,3 @@ else:
                 st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
                 if st.button("✅ SECURED", use_container_width=True):
                     st.session_state.site_data[uid].update({"Picked up":"x"}); st.session_state.pickup_index += 1; auto_save(); st.rerun()
-    with tab4:
-        all_d = [d for d in st.session_state.site_data.values() if d["Installed"] == "x"]
-        if all_d:
-            df = pd.DataFrame(all_d)
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False)
-            st.download_button("📊 DOWNLOAD EXCEL", output.getvalue(), f"Report.xlsx", use_container_width=True)

@@ -11,7 +11,7 @@ from streamlit_folium import st_folium
 import folium
 
 # --- CORE CONFIG ---
-st.set_page_config(page_title="Live Wire V51.28 Plotter", layout="centered")
+st.set_page_config(page_title="Live Wire V51.29 Sat-Plotter", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -21,7 +21,7 @@ st.markdown("""
     <style>
     .stApp { background-color: #0A0A0A; color: #FFFFFF; }
     h1, h2, h3 { color: #FFD700 !important; font-family: 'Arial Black'; }
-    div.stButton > button { background-color: #1E1E1E; color: #FFD700; border: 2px solid #FFD700; font-weight: bold; }
+    div.stButton > button { background-color: #1E1E1E; color: #FFD700; border: 2px solid #FFD700; font-weight: bold; border-radius: 8px; }
     .stSelectbox label { color: #FFD700 !important; }
     </style>
 """, unsafe_allow_html=True)
@@ -48,7 +48,6 @@ def auto_save():
     }
     with open(BACKUP_FILE, "w") as f: json.dump(payload, f)
 
-# --- COORDINATE PROCESSING ---
 def process_data(est_configs, excel_files):
     excel_data = {}
     for f in excel_files:
@@ -82,8 +81,8 @@ def process_data(est_configs, excel_files):
 
 # --- UI LOGIC ---
 if not st.session_state.optimized_route:
-    st.title("🚦 Live Wire Plotter")
-    ex = st.file_uploader("1️⃣ DATA (Excel)", accept_multiple_files=True)
+    st.title("🚦 Live Wire: Data Sync")
+    ex = st.file_uploader("1️⃣ DATA (Excel/CSV)", accept_multiple_files=True)
     maps = st.file_uploader("2️⃣ MAPS (.EST)", accept_multiple_files=True)
     if ex and maps and st.button("🚀 INITIAL SYNC"):
         configs = [{"file": f, "label": f"Day {i+1}"} for i, f in enumerate(maps)]
@@ -91,51 +90,60 @@ if not st.session_state.optimized_route:
         st.rerun()
 
 elif st.session_state.plotting_mode:
-    st.title("🎯 Pre-Flight Plotter")
-    st.info("Tap the map to move the selected site. Fix any dead-ends now.")
+    st.title("🎯 Tactical Plotter")
+    st.info("Tap the Satellite map to move the site pin. Get it off the dead-end and onto the main road.")
     
-    # Selector
     options = [s['uid'] for s in st.session_state.optimized_route]
-    target_uid = st.selectbox("Select Site to Relocate:", options)
+    target_uid = st.selectbox("Select Site to Verify:", options)
     sd = st.session_state.site_data[target_uid]
 
-    # Map for tapping
-    m = folium.Map(location=[sd['lat'], sd['lon']], zoom_start=17, tiles="OpenStreetMap")
-    folium.Marker([sd['lat'], sd['lon']], icon=folium.Icon(color='orange', icon='info-sign')).add_to(m)
+    # --- SATELLITE PLOTTER MAP ---
+    m = folium.Map(location=[sd['lat'], sd['lon']], zoom_start=18, tiles=None)
+    # Adding Esri Satellite tiles for better field visibility
+    folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri',
+        name='Satellite',
+        overlay=False,
+        control=True
+    ).add_to(m)
     
-    # Map rendering & Capture
-    map_data = st_folium(m, height=400, width=700)
+    folium.Marker(
+        [sd['lat'], sd['lon']], 
+        popup=f"Site {sd['id']}", 
+        icon=folium.Icon(color='orange', icon='location-dot', prefix='fa')
+    ).add_to(m)
+    
+    map_data = st_folium(m, height=450, width=700)
 
     if map_data and map_data.get("last_clicked"):
         new_coords = map_data["last_clicked"]
-        if st.button(f"Move Site {sd['id']} to Clicked Spot"):
+        if st.button(f"Relocate Site {sd['id']} to Tapped Spot"):
             st.session_state.site_data[target_uid]['lat'] = new_coords['lat']
             st.session_state.site_data[target_uid]['lon'] = new_coords['lng']
-            # Update the list version too
             for s in st.session_state.optimized_route:
                 if s['uid'] == target_uid:
                     s['lat'], s['lon'] = new_coords['lat'], new_coords['lng']
-            st.success(f"Site {sd['id']} Relocated!")
+            st.success(f"Site {sd['id']} Fixed!")
             auto_save()
             time.sleep(0.5)
             st.rerun()
 
-    if st.button("🏁 CONFIRM PLACEMENT & START DRIVING", use_container_width=True):
+    st.divider()
+    if st.button("🏁 LOCK PLACEMENT & GENERATE ROUTE", use_container_width=True):
         st.session_state.plotting_mode = False
-        # Re-sort route one last time based on the new custom positions
+        # Final Route Optimization
         curr = HOME_COORDS
-        new_route = []
-        rem = list(st.session_state.optimized_route)
+        new_route, rem = [], list(st.session_state.optimized_route)
         while rem:
             nxt = min(rem, key=lambda x: (curr[0]-x['lat'])**2 + (curr[1]-x['lon'])**2)
             new_route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
         st.session_state.optimized_route = new_route
-        auto_save()
-        st.rerun()
+        auto_save(); st.rerun()
 
 else:
     # --- DRIVING MODE ---
-    st.title("📁 Active Manifest")
+    st.title("📁 Active Route")
     idx = st.session_state.current_index
     if idx < len(st.session_state.optimized_route):
         active = st.session_state.optimized_route[idx]
@@ -144,14 +152,16 @@ else:
         st.subheader(f"Stop {idx+1}: Site {sd['id']}")
         st.write(f"📍 {sd['street']}")
         
-        st.link_button("🚗 NAV TO CUSTOM SPOT", f"https://www.google.com/maps/search/?api=1&query={sd['lat']},{sd['lon']}", use_container_width=True)
+        st.link_button("🚗 NAVIGATE TO PLOTTED SPOT", f"https://www.google.com/maps/search/?api=1&query={sd['lat']},{sd['lon']}", use_container_width=True)
         
         if st.button("✅ MARK INSTALLED", use_container_width=True):
             st.session_state.site_data[active['uid']]['Installed'] = True
             st.session_state.current_index += 1
-            auto_save()
-            st.rerun()
+            auto_save(); st.rerun()
+    else:
+        st.success("Shift Complete!")
     
-    if st.button("🗑️ RESET"):
+    if st.button("🗑️ CLEAR SYSTEM"):
+        if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
         st.session_state.optimized_route = []
         st.rerun()

@@ -4,3 +4,6 @@ tzdata
 openpyxl
 streamlit-geolocation
 Pillow
+streamlit
+pandas
+openpyxl

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.8 Brute-Force", layout="centered")
+st.set_page_config(page_title="Live Wire V51.9 Operator Core", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -99,29 +99,37 @@ def process_upload(est_configs, excel_files, m_type):
     all_raw_master = []
     master_site_ids = []
     
-    # 1. BRUTE-FORCE EXCEL READER (Handles .xlsx, .xls, and .csv)
+    # 1. FAIL-SAFE EXCEL/TEXT READER
     if excel_files:
         for f in excel_files:
-            df = None
             try:
-                if f.name.lower().endswith('.csv'):
-                    df = pd.read_csv(f, encoding='latin-1')
-                else:
-                    try:
-                        df = pd.read_excel(f, engine='openpyxl')
-                    except:
-                        # Fallback for older .xls files if xlrd isn't present
-                        st.warning(f"⚠️ Old Excel format detected in {f.name}. Converting to compatible view...")
-                        df = pd.read_excel(f)
-                
-                if df is not None:
-                    # Target Column A (Index 0)
+                # Try modern Excel
+                if f.name.lower().endswith('.xlsx'):
+                    df = pd.read_excel(f, engine='openpyxl')
                     ids = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
                     master_site_ids.extend([i.strip() for i in ids if i.strip().isdigit()])
+                # Try CSV
+                elif f.name.lower().endswith('.csv'):
+                    df = pd.read_csv(f, encoding='latin-1')
+                    ids = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
+                    master_site_ids.extend([i.strip() for i in ids if i.strip().isdigit()])
+                # Try Old Excel Fallback OR Raw Text Vacuum
+                else:
+                    try:
+                        df = pd.read_excel(f) # Requires xlrd
+                        ids = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
+                        master_site_ids.extend([i.strip() for i in ids if i.strip().isdigit()])
+                    except:
+                        # V51.9: VACUUM MODE - If library fails, just read the binary as text and grab numbers
+                        st.warning(f"⚠️ Direct import failed for {f.name}. Using Text-Vacuum mode...")
+                        raw_content = f.getvalue().decode('latin-1', errors='ignore')
+                        # Grab all 4 or 5 digit integers
+                        found_nums = re.findall(r'\b\d{4,5}\b', raw_content)
+                        master_site_ids.extend(found_nums)
             except Exception as e:
                 st.error(f"Failed to read {f.name}: {str(e)}")
 
-    master_site_ids = sorted(list(set(master_site_ids)))
+    master_site_ids = sorted(list(set(master_site_ids))) # Unique sites
     if not master_site_ids: return False, 0
 
     # 2. AGGRESSIVE MAP SCRAPER
@@ -131,12 +139,10 @@ def process_upload(est_configs, excel_files, m_type):
             text = re.sub(r'\s+', ' ', raw_bytes.decode('latin-1', errors='ignore').replace('\x00', ' '))
             
             for sid in master_site_ids:
-                # Wide-net search: find the number and grab the next 1200 characters of data
-                match = re.search(r'\b' + sid + r'\b(.{1,1200})', text)
+                match = re.search(r'\b' + sid + r'\b(.{1,1500})', text)
                 if match:
                     coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{4,}', match.group(1))]
-                    # SoCal bounds filter
-                    lats = [c for c in coords if 32.0 < c < 35.0]
+                    lats = [c for c in coords if 32.0 < c < 35.5]
                     lons = [c for c in coords if -120.0 < c < -114.0]
                     
                     if lats and lons:
@@ -178,19 +184,18 @@ if not st.session_state.get("optimized_route"):
             data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
         except: st.error("Error")
     st.divider()
-    m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
-    excel_files = st.file_uploader("1️⃣ DATA (SITE NUMBERS IN COL A)", accept_multiple_files=True)
+    m_type = st.radio("MISSION TYPE:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
+    excel_files = st.file_uploader("1️⃣ DATA (SITES IN COL A OR RAW XLS)", accept_multiple_files=True)
     up_files = st.file_uploader("2️⃣ MAPS (.EST / .TXT)", accept_multiple_files=True)
     if up_files and excel_files:
         configs = [{"file": f, "label": st.text_input(f"Label for Map {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
         if st.button("🚀 SYNC"):
             success, count = process_upload(configs, excel_files, m_type)
             if success: st.success(f"Locked {count} Sites."); time.sleep(1); st.rerun()
-            else: st.error("No matches found. Ensure Column A has the site numbers.")
+            else: st.error("Sync Failed. Please save Excel as .CSV for best results.")
 else:
     new_theme = st.radio("📱 DISPLAY:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
-    
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
     with tab1:
         st.success(f"{st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")

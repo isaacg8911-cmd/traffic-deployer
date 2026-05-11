@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.9 Operator Core", layout="centered")
+st.set_page_config(page_title="Live Wire V51.10 Sniper", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -80,7 +80,7 @@ def get_ca_time():
     return now.strftime("%H00"), now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S")
 
 def get_bearing(lat1, lon1, lat2, lon2):
-    if abs(lat1 - lat2) < 0.00001 and abs(lon1 - lon2) < 0.00001: return "n" 
+    if abs(lat1 - lat2) < 0.0001: return "n" 
     dLon = math.radians(lon2 - lon1)
     lat1_r, lat2_r = math.radians(lat1), math.radians(lat2)
     y = math.sin(dLon) * math.cos(lat2_r)
@@ -99,53 +99,41 @@ def process_upload(est_configs, excel_files, m_type):
     all_raw_master = []
     master_site_ids = []
     
-    # 1. FAIL-SAFE EXCEL/TEXT READER
+    # 1. BOSS: Excel Site Numbers
     if excel_files:
         for f in excel_files:
             try:
-                # Try modern Excel
-                if f.name.lower().endswith('.xlsx'):
-                    df = pd.read_excel(f, engine='openpyxl')
-                    ids = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
-                    master_site_ids.extend([i.strip() for i in ids if i.strip().isdigit()])
-                # Try CSV
-                elif f.name.lower().endswith('.csv'):
+                if f.name.lower().endswith('.csv'):
                     df = pd.read_csv(f, encoding='latin-1')
-                    ids = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
-                    master_site_ids.extend([i.strip() for i in ids if i.strip().isdigit()])
-                # Try Old Excel Fallback OR Raw Text Vacuum
                 else:
-                    try:
-                        df = pd.read_excel(f) # Requires xlrd
-                        ids = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
-                        master_site_ids.extend([i.strip() for i in ids if i.strip().isdigit()])
-                    except:
-                        # V51.9: VACUUM MODE - If library fails, just read the binary as text and grab numbers
-                        st.warning(f"⚠️ Direct import failed for {f.name}. Using Text-Vacuum mode...")
-                        raw_content = f.getvalue().decode('latin-1', errors='ignore')
-                        # Grab all 4 or 5 digit integers
-                        found_nums = re.findall(r'\b\d{4,5}\b', raw_content)
-                        master_site_ids.extend(found_nums)
-            except Exception as e:
-                st.error(f"Failed to read {f.name}: {str(e)}")
+                    df = pd.read_excel(f, engine='openpyxl')
+                
+                nums = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
+                master_site_ids.extend([n.strip() for n in nums if n.strip().isdigit()])
+            except: pass
 
-    master_site_ids = sorted(list(set(master_site_ids))) # Unique sites
+    master_site_ids = sorted(list(set(master_site_ids)))
     if not master_site_ids: return False, 0
 
-    # 2. AGGRESSIVE MAP SCRAPER
+    # 2. SNIPER: GPS Extraction from Map
     for cfg in est_configs:
         try:
-            raw_bytes = cfg['file'].getvalue()
-            text = re.sub(r'\s+', ' ', raw_bytes.decode('latin-1', errors='ignore').replace('\x00', ' '))
+            raw_text = cfg['file'].getvalue().decode('latin-1', errors='ignore').replace('\x00', ' ')
+            text = re.sub(r'\s+', ' ', raw_text)
             
             for sid in master_site_ids:
-                match = re.search(r'\b' + sid + r'\b(.{1,1500})', text)
+                # Find the site number and look ahead for the coordinate block
+                match = re.search(r'\b' + sid + r'\b(.{1,2000})', text)
                 if match:
+                    # Strict regex for coordinates with 4+ decimal places
                     coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{4,}', match.group(1))]
-                    lats = [c for c in coords if 32.0 < c < 35.5]
-                    lons = [c for c in coords if -120.0 < c < -114.0]
+                    
+                    # Target Southern California tightly to avoid map errors
+                    lats = [c for c in coords if 32.5 < c < 34.9]
+                    lons = [c for c in coords if -119.5 < c < -116.0]
                     
                     if lats and lons:
+                        # Grab the most stable pairing (first and last in the local block)
                         all_raw_master.append({
                             "id": sid,
                             "lat_start": lats[0], "lon_start": lons[0],
@@ -184,18 +172,19 @@ if not st.session_state.get("optimized_route"):
             data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
         except: st.error("Error")
     st.divider()
-    m_type = st.radio("MISSION TYPE:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
-    excel_files = st.file_uploader("1️⃣ DATA (SITES IN COL A OR RAW XLS)", accept_multiple_files=True)
+    m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
+    excel_files = st.file_uploader("1️⃣ DATA (EXCEL/CSV)", accept_multiple_files=True)
     up_files = st.file_uploader("2️⃣ MAPS (.EST / .TXT)", accept_multiple_files=True)
     if up_files and excel_files:
-        configs = [{"file": f, "label": st.text_input(f"Label for Map {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 SYNC"):
+        configs = [{"file": f, "label": st.text_input(f"Label {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
+        if st.button("🚀 SYNC SNIPER"):
             success, count = process_upload(configs, excel_files, m_type)
             if success: st.success(f"Locked {count} Sites."); time.sleep(1); st.rerun()
-            else: st.error("Sync Failed. Please save Excel as .CSV for best results.")
+            else: st.error("Coordinates not found in map for these site numbers.")
 else:
     new_theme = st.radio("📱 DISPLAY:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
+    
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
     with tab1:
         st.success(f"{st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")

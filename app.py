@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.7 Operator Core", layout="centered")
+st.set_page_config(page_title="Live Wire V51.8 Brute-Force", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -25,34 +25,21 @@ def set_theme(theme_choice):
         return """
         <style>
         .stApp { background-color: #000000; color: #FFFFFF; }
-        h1, h2, h3 { color: #00FFFF !important; font-family: 'Arial Black'; letter-spacing: -1px; font-weight: 900;}
-        div.stButton > button { 
-            background-color: #000000; color: #00FFFF; border: 3px solid #00FFFF; 
-            font-weight: 900; border-radius: 4px; transition: 0.3s;
-        }
-        div.stButton > button:active { transform: scale(0.95); background-color: #00FFFF; color: #000000; }
+        h1, h2, h3 { color: #00FFFF !important; font-family: 'Arial Black'; font-weight: 900;}
+        div.stButton > button { background-color: #000000; color: #00FFFF; border: 3px solid #00FFFF; font-weight: 900; }
         .stTabs [data-baseweb="tab-list"] { background-color: #000000; border-bottom: 3px solid #333; }
-        .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { color: #00FFFF !important; border-bottom-color: #00FFFF !important; }
-        input, select, textarea { background-color: #000000 !important; color: #00FFFF !important; border: 2px solid #00FFFF !important; font-weight: bold;}
-        div[data-testid="stMetricValue"] { color: #00FFFF !important; font-size: 2rem !important; font-weight: 900; }
-        div[data-testid="stMetricLabel"] { color: #FFFFFF !important; font-weight: bold; }
+        input, select, textarea { background-color: #000000 !important; color: #00FFFF !important; border: 2px solid #00FFFF !important; }
+        div[data-testid="stMetricValue"] { color: #00FFFF !important; font-weight: 900; }
         </style>
         """
     else:
         return """
         <style>
         .stApp { background-color: #0A0A0A; color: #FFFFFF; }
-        h1, h2, h3 { color: #FFD700 !important; font-family: 'Arial Black'; letter-spacing: -1px; }
-        div.stButton > button { 
-            background-color: #1E1E1E; color: #FFD700; border: 2px solid #FFD700; 
-            font-weight: 900; border-radius: 4px; transition: 0.3s;
-        }
-        div.stButton > button:active { transform: scale(0.95); background-color: #FFD700; color: #000; }
-        .stTabs [data-baseweb="tab-list"] { background-color: #0A0A0A; border-bottom: 2px solid #333; }
-        .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { color: #FFD700 !important; border-bottom-color: #FFD700 !important; }
+        h1, h2, h3 { color: #FFD700 !important; font-family: 'Arial Black'; }
+        div.stButton > button { background-color: #1E1E1E; color: #FFD700; border: 2px solid #FFD700; font-weight: 900; }
         input, select, textarea { background-color: #111 !important; color: #FFD700 !important; border: 1px solid #444 !important; }
-        div[data-testid="stMetricValue"] { color: #FFD700 !important; font-size: 2rem !important; font-weight: 900; }
-        div[data-testid="stMetricLabel"] { color: #CCCCCC !important; font-weight: bold; }
+        div[data-testid="stMetricValue"] { color: #FFD700 !important; }
         </style>
         """
 
@@ -112,39 +99,44 @@ def process_upload(est_configs, excel_files, m_type):
     all_raw_master = []
     master_site_ids = []
     
-    # 1. SCAN EXCEL (Column A) - Use 'openpyxl' for stability
+    # 1. BRUTE-FORCE EXCEL READER (Handles .xlsx, .xls, and .csv)
     if excel_files:
         for f in excel_files:
+            df = None
             try:
                 if f.name.lower().endswith('.csv'):
                     df = pd.read_csv(f, encoding='latin-1')
                 else:
-                    # Explicitly use openpyxl engine
-                    df = pd.read_excel(f, engine='openpyxl')
+                    try:
+                        df = pd.read_excel(f, engine='openpyxl')
+                    except:
+                        # Fallback for older .xls files if xlrd isn't present
+                        st.warning(f"⚠️ Old Excel format detected in {f.name}. Converting to compatible view...")
+                        df = pd.read_excel(f)
                 
-                # Extract clean numbers from Column A
-                ids = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
-                master_site_ids.extend([i for i in ids if i.strip().isdigit()])
+                if df is not None:
+                    # Target Column A (Index 0)
+                    ids = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
+                    master_site_ids.extend([i.strip() for i in ids if i.strip().isdigit()])
             except Exception as e:
-                st.error(f"Excel Error: {e}. Try saving as .xlsx or .csv")
+                st.error(f"Failed to read {f.name}: {str(e)}")
 
-    master_site_ids = sorted(list(set(master_site_ids))) # Unique sites
-    
+    master_site_ids = sorted(list(set(master_site_ids)))
     if not master_site_ids: return False, 0
 
-    # 2. MATCH SITES TO MAP FILES
+    # 2. AGGRESSIVE MAP SCRAPER
     for cfg in est_configs:
         try:
             raw_bytes = cfg['file'].getvalue()
             text = re.sub(r'\s+', ' ', raw_bytes.decode('latin-1', errors='ignore').replace('\x00', ' '))
             
             for sid in master_site_ids:
-                # Hunt for the number with word boundaries
-                match = re.search(r'\b' + sid + r'\b(.{1,1000})', text)
+                # Wide-net search: find the number and grab the next 1200 characters of data
+                match = re.search(r'\b' + sid + r'\b(.{1,1200})', text)
                 if match:
-                    # Look for coordinates in the text block following the site ID
                     coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{4,}', match.group(1))]
-                    lats = [c for c in coords if 32.0 < c < 35.5]
+                    # SoCal bounds filter
+                    lats = [c for c in coords if 32.0 < c < 35.0]
                     lons = [c for c in coords if -120.0 < c < -114.0]
                     
                     if lats and lons:
@@ -186,15 +178,15 @@ if not st.session_state.get("optimized_route"):
             data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
         except: st.error("Error")
     st.divider()
-    m_type = st.radio("MISSION TYPE:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
-    excel_files = st.file_uploader("1️⃣ EXCEL / CSV (SITES IN COL A)", accept_multiple_files=True)
+    m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
+    excel_files = st.file_uploader("1️⃣ DATA (SITE NUMBERS IN COL A)", accept_multiple_files=True)
     up_files = st.file_uploader("2️⃣ MAPS (.EST / .TXT)", accept_multiple_files=True)
     if up_files and excel_files:
-        configs = [{"file": f, "label": st.text_input(f"Label {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
+        configs = [{"file": f, "label": st.text_input(f"Label for Map {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
         if st.button("🚀 SYNC"):
             success, count = process_upload(configs, excel_files, m_type)
             if success: st.success(f"Locked {count} Sites."); time.sleep(1); st.rerun()
-            else: st.error("No site numbers from Column A found in Map files.")
+            else: st.error("No matches found. Ensure Column A has the site numbers.")
 else:
     new_theme = st.radio("📱 DISPLAY:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()

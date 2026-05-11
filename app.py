@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.17 Precision", layout="centered")
+st.set_page_config(page_title="Live Wire V51.18 Arterial Bias", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -113,7 +113,26 @@ def process_upload(est_configs, excel_files, m_type):
         raw_map = cfg['file'].getvalue().decode('latin-1', errors='ignore')
         for sid, data in excel_data.items():
             if sid in raw_map:
-                final_list.append({"id": sid, "lat_start": data['lat'], "lon_start": data['lon'], "sheet": cfg['label'], "street": data['street']})
+                # Find the GPS pair associated with this site in the EST file
+                # V51.18: Look for the segment that is FURTHEST from home to avoid dead-ends
+                gps_matches = re.findall(r'(-?\d{2,3}\.\d{4,})', raw_map[raw_map.find(sid):raw_map.find(sid)+2000])
+                if len(gps_matches) >= 2:
+                    p1 = (float(gps_matches[0]), float(gps_matches[1]))
+                    p2 = (data['lat'], data['lon'])
+                    
+                    # Calculate which point is further from Home
+                    d1 = math.sqrt((p1[0]-HOME_COORDS[0])**2 + (p1[1]-HOME_COORDS[1])**2)
+                    d2 = math.sqrt((p2[0]-HOME_COORDS[0])**2 + (p2[1]-HOME_COORDS[1])**2)
+                    
+                    target = p1 if d1 > d2 else p2
+                    
+                    final_list.append({
+                        "id": sid, 
+                        "lat_start": target[0], 
+                        "lon_start": target[1], 
+                        "sheet": cfg['label'], 
+                        "street": data['street']
+                    })
 
     if final_list:
         df_final = pd.DataFrame(final_list).drop_duplicates(subset=['id', 'sheet'])
@@ -155,22 +174,12 @@ else:
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
     with tab1:
         st.success(f"STOPS: {len(st.session_state.optimized_route)}")
-        # --- MAP PINS: SHRUNK 25% ---
         map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF", "size": 15}]
         for s in st.session_state.optimized_route:
             sd = st.session_state.site_data[s['uid']]
             done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
-            # Color logic + small dots
-            map_points.append({
-                "lat": sd['LAT'], 
-                "lon": sd['LON'], 
-                "color": "#00FF00" if done else "#FFA500",
-                "size": 8  # 1/4 smaller than previous versions
-            })
-        
-        # Displaying with auto-centering
+            map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": "#00FF00" if done else "#FFA500", "size": 8})
         st.map(pd.DataFrame(map_points), color="color", size="size")
-
         for idx, s in enumerate(st.session_state.optimized_route):
             sd = st.session_state.site_data[s['uid']]
             done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
@@ -198,15 +207,3 @@ else:
                     _, d, et = get_ca_time()
                     st.session_state.site_data[s['uid']].update({"Date":d, "ExactTime":et, "Directions":dr, "Serial":ser, "Lanes":ln, "Notes":nt, "Installed":"x", "LAT":loc['latitude'] if loc and loc.get('latitude') else sd['LAT'], "LON":loc['longitude'] if loc and loc.get('longitude') else sd['LON']})
                     st.session_state.current_index += 1; auto_save(); st.rerun()
-    with tab3:
-        if not st.session_state.get('pickup_itinerary'):
-            st.session_state.pickup_itinerary = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
-        itin = st.session_state.pickup_itinerary
-        if itin:
-            p_idx = st.session_state.pickup_index
-            if p_idx < len(itin):
-                s = itin[p_idx]; uid = s['UID']
-                st.subheader(f"PICK-UP #{p_idx+1}: Site {s['Site']}")
-                st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
-                if st.button("✅ SECURED", use_container_width=True):
-                    st.session_state.site_data[uid].update({"Picked up":"x"}); st.session_state.pickup_index += 1; auto_save(); st.rerun()

@@ -3,3 +3,4 @@ streamlit
 tzdata
 openpyxl
 streamlit-geolocation
+Pillow

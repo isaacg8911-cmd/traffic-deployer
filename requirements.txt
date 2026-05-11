@@ -8,3 +8,8 @@ streamlit
 pandas
 openpyxl
 xlrd
+streamlit
+pandas
+openpyxl
+folium
+streamlit-folium

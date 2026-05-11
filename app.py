@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.16 Absolute", layout="centered")
+st.set_page_config(page_title="Live Wire V51.17 Precision", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -80,28 +80,20 @@ def auto_save():
 
 def process_upload(est_configs, excel_files, m_type):
     excel_data = {}
-    
-    # 1. ABSOLUTE EXCEL SCRAPER
     for f in excel_files:
         try:
-            # Attempt normal read
             if f.name.lower().endswith('.csv'):
                 df = pd.read_csv(f, encoding='latin-1')
             else:
                 try:
                     df = pd.read_excel(f)
                 except:
-                    # Fallback: Scrape binary for numbers and coords
                     raw = f.getvalue().decode('latin-1', errors='ignore')
-                    # Grab potential site numbers
                     sids = re.findall(r'\b\d{4,5}\b', raw)
-                    # Grab potential coords
                     lats = re.findall(r'33\.\d{4,}', raw)
                     lons = re.findall(r'-11[78]\.\d{4,}', raw)
-                    # Simple zip if counts match, else we need the DF
                     df = pd.DataFrame({'Site': sids, 'LAT': lats[:len(sids)], 'LON': lons[:len(sids)]})
             
-            # Find the best columns
             lat_c = next((c for c in df.columns if 'lat' in c.lower()), None)
             lon_c = next((c for c in df.columns if 'lon' in c.lower()), None)
             id_c = next((c for c in df.columns if any(x in c.lower() for x in ['site', 'tds', 'id'])), df.columns[0])
@@ -116,16 +108,12 @@ def process_upload(est_configs, excel_files, m_type):
 
     if not excel_data: return False, 0
 
-    # 2. MATCH WITH MAP
     final_list = []
     for cfg in est_configs:
         raw_map = cfg['file'].getvalue().decode('latin-1', errors='ignore')
         for sid, data in excel_data.items():
             if sid in raw_map:
-                final_list.append({
-                    "id": sid, "lat_start": data['lat'], "lon_start": data['lon'],
-                    "sheet": cfg['label'], "street": data['street']
-                })
+                final_list.append({"id": sid, "lat_start": data['lat'], "lon_start": data['lon'], "sheet": cfg['label'], "street": data['street']})
 
     if final_list:
         df_final = pd.DataFrame(final_list).drop_duplicates(subset=['id', 'sheet'])
@@ -147,7 +135,7 @@ def process_upload(est_configs, excel_files, m_type):
 
 # --- UI ---
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 Live Wire Absolute")
+    st.title("🚦 Live Wire Precision")
     restore_file = st.file_uploader("🔄 RESTORE (.JSON)", type=["json"])
     if restore_file and st.button("🔓 LOAD"):
         data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
@@ -167,12 +155,22 @@ else:
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
     with tab1:
         st.success(f"STOPS: {len(st.session_state.optimized_route)}")
-        map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF"}]
+        # --- MAP PINS: SHRUNK 25% ---
+        map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF", "size": 15}]
         for s in st.session_state.optimized_route:
             sd = st.session_state.site_data[s['uid']]
             done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
-            map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": "#00FF00" if done else "#FFA500"})
-        st.map(pd.DataFrame(map_points), color="color")
+            # Color logic + small dots
+            map_points.append({
+                "lat": sd['LAT'], 
+                "lon": sd['LON'], 
+                "color": "#00FF00" if done else "#FFA500",
+                "size": 8  # 1/4 smaller than previous versions
+            })
+        
+        # Displaying with auto-centering
+        st.map(pd.DataFrame(map_points), color="color", size="size")
+
         for idx, s in enumerate(st.session_state.optimized_route):
             sd = st.session_state.site_data[s['uid']]
             done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
@@ -187,7 +185,7 @@ else:
         if cur < len(st.session_state.optimized_route):
             s = st.session_state.optimized_route[cur]; sd = st.session_state.site_data[s['uid']]
             st.subheader(f"#{cur+1}: Site {sd['Site']}")
-            st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
+            st.link_button("🚗 SINGLE NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
             batch = [f"{st.session_state.site_data[bs['uid']]['LAT']},{st.session_state.site_data[bs['uid']]['LON']}" for bs in st.session_state.optimized_route[cur:cur+9] if st.session_state.site_data[bs['uid']]['Installed'] != "x"]
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV {len(batch)}", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             loc = streamlit_geolocation()

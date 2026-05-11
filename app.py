@@ -5,12 +5,15 @@ import json
 import io
 import time
 import os
+import math
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
+from PIL import Image
+from PIL.ExifTags import TAGS, GPSTAGS
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V38 Auto-Compass", layout="centered")
+st.set_page_config(page_title="Live Wire V42 Auto-Matcher", layout="centered")
 
 st.markdown("""
     <style>
@@ -64,7 +67,15 @@ def get_ca_time():
     if now.minute > 0: now += timedelta(hours=1)
     return now.strftime("%H00"), now.strftime("%Y-%m-%d")
 
-# --- V38 SLIDING PIN DISTANCE MATH ---
+def get_bearing(lat1, lon1, lat2, lon2):
+    if abs(lat1 - lat2) < 0.00001 and abs(lon1 - lon2) < 0.00001: return "n" 
+    dLon = math.radians(lon2 - lon1)
+    lat1_r, lat2_r = math.radians(lat1), math.radians(lat2)
+    y = math.sin(dLon) * math.cos(lat2_r)
+    x = math.cos(lat1_r) * math.sin(lat2_r) - math.sin(lat1_r) * math.cos(lat2_r) * math.cos(dLon)
+    bearing = (math.degrees(math.atan2(y, x)) + 360) % 360
+    return "n" if (315 <= bearing <= 360) or (0 <= bearing < 45) or (135 <= bearing < 225) else "e"
+
 def get_closest_point_on_segment(px, py, ax, ay, bx, by):
     dx, dy = bx - ax, by - ay
     if dx == 0 and dy == 0: return ax, ay
@@ -72,7 +83,42 @@ def get_closest_point_on_segment(px, py, ax, ay, bx, by):
     t = max(0.0, min(1.0, t))
     return ax + t * dx, ay + t * dy
 
-# --- V38 BULLETPROOF ROSETTA STONE & AUTO-COMPASS ENGINE ---
+def find_col(df, keywords):
+    for kw in keywords:
+        for c in df.columns:
+            if kw in c: return c
+    return None
+
+# --- V42 PHOTO GPS EXTRACTION ---
+def get_decimal_from_dms(dms, ref):
+    try:
+        degrees, minutes, seconds = float(dms[0]), float(dms[1]), float(dms[2])
+        decimal = degrees + (minutes / 60.0) + (seconds / 3600.0)
+        if ref in ['S', 'W']: decimal = -decimal
+        return decimal
+    except: return None
+
+def extract_gps_from_image(image_bytes):
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        exif_data = img._getexif()
+        if not exif_data: return None, None
+        
+        gps_info = {}
+        for tag, value in exif_data.items():
+            decoded = TAGS.get(tag, tag)
+            if decoded == "GPSInfo":
+                for t in value:
+                    sub_decoded = GPSTAGS.get(t, t)
+                    gps_info[sub_decoded] = value[t]
+        
+        if "GPSLatitude" in gps_info and "GPSLongitude" in gps_info:
+            lat = get_decimal_from_dms(gps_info["GPSLatitude"], gps_info.get("GPSLatitudeRef", "N"))
+            lon = get_decimal_from_dms(gps_info["GPSLongitude"], gps_info.get("GPSLongitudeRef", "W"))
+            return lat, lon
+    except: pass
+    return None, None
+
 def process_upload(est_configs, data_files, m_type):
     all_raw_master = []
     valid_uids_for_mission = set()
@@ -91,13 +137,13 @@ def process_upload(est_configs, data_files, m_type):
             master_df = pd.concat(dfs, ignore_index=True)
             master_df.columns = [str(c).strip().lower() for c in master_df.columns]
             
-            id_col = next((c for c in master_df.columns if 'tds' in c or 'site' in c or 'id' in c), None)
-            lat1_col = next((c for c in master_df.columns if 'begin_lat' in c or 'lat' in c), None)
-            lon1_col = next((c for c in master_df.columns if 'begin_lon' in c or 'lon' in c), None)
-            lat2_col = next((c for c in master_df.columns if 'end_lat' in c), lat1_col)
-            lon2_col = next((c for c in master_df.columns if 'end_lon' in c), lon1_col)
-            lanes_col = next((c for c in master_df.columns if 'lane' in c), None)
-            street_col = next((c for c in master_df.columns if 'street' in c), None)
+            id_col = find_col(master_df, ['tds', 'site', 'id'])
+            lat1_col = find_col(master_df, ['begin_lat', 'lat1', 'lat'])
+            lon1_col = find_col(master_df, ['begin_lon', 'lon1', 'lon'])
+            lat2_col = find_col(master_df, ['end_lat', 'lat2'])
+            lon2_col = find_col(master_df, ['end_lon', 'lon2'])
+            lanes_col = find_col(master_df, ['lane'])
+            street_col = find_col(master_df, ['street', 'road', 'name'])
             
             if id_col and lat1_col and lon1_col:
                 for _, row in master_df.iterrows():
@@ -109,8 +155,8 @@ def process_upload(est_configs, data_files, m_type):
                             try:
                                 csv_lookup[sid] = {
                                     'lat_start': float(row[lat1_col]), 'lon_start': float(row[lon1_col]),
-                                    'lat_end': float(row[lat2_col]) if pd.notna(row[lat2_col]) else float(row[lat1_col]),
-                                    'lon_end': float(row[lon2_col]) if pd.notna(row[lon2_col]) else float(row[lon1_col]),
+                                    'lat_end': float(row[lat2_col]) if lat2_col and pd.notna(row[lat2_col]) else float(row[lat1_col]),
+                                    'lon_end': float(row[lon2_col]) if lon2_col and pd.notna(row[lon2_col]) else float(row[lon1_col]),
                                     'lanes': int(float(row[lanes_col])) if lanes_col and pd.notna(row[lanes_col]) else 1,
                                     'street': str(row[street_col]) if street_col and pd.notna(row[street_col]) else ""
                                 }
@@ -186,20 +232,14 @@ def process_upload(est_configs, data_files, m_type):
         
         installed_status = "x" if is_pickup else ""
         
-        # V38 AUTO-COMPASS CALCULATION
         for s in final_route:
-            # Calculate the vertical spread vs horizontal spread of the street segment
-            lat_diff = abs(s['lat_end'] - s['lat_start'])
-            lon_diff = abs(s['lon_end'] - s['lon_start']) * 0.83 # Adjusted for SoCal Longitude curvature
-            
-            # If the vertical distance is greater than the horizontal, it's a North/South street (n). Otherwise, East/West (e).
-            s['auto_dir'] = "n" if lat_diff > lon_diff else "e"
+            s['auto_dir'] = get_bearing(s['lat_start'], s['lon_start'], s['lat_end'], s['lon_end'])
         
         st.session_state.optimized_route = final_route
         st.session_state.active_files = [c['label'] for c in est_configs]
         st.session_state.site_data = {
             s['uid']: {"Date":"","Time":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"",
-                      "Directions": s['auto_dir'], # V38 PRE-FILL INJECTION
+                      "Directions": s['auto_dir'], 
                       "Lanes":s.get('lanes', 1),"Street":s.get('street', ""),"Notes":"","Installed":installed_status,
                       "Picked up":"","LAT":s['nav_lat'],"LON":s['nav_lon'],"Skipped":False,"Sheet":s['sheet']} for s in final_route
         }
@@ -255,7 +295,8 @@ if not st.session_state.get("optimized_route"):
 # ==========================================
 else:
     st.title("🚦 Field Ops Dashboard")
-    tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
+    # V42: Added the new PHOTOS tab
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📸 PHOTOS", "📊 EXCEL"])
 
     with tab1:
         st.success(f"MISSION: {st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")
@@ -325,16 +366,12 @@ else:
                     live_lat, live_lon = loc['latitude'], loc['longitude']
                     st.success(f"✅ GPS Locked: {live_lat}, {live_lon}")
                 
-                with st.form(key=f"f_v38_{uid}"):
+                with st.form(key=f"f_v42_{uid}"):
                     c1, c2 = st.columns(2)
-                    
-                    # V38 AUTO-COMPASS DROPDOWN
-                    # Reads the mathematically calculated direction and pre-selects it for you.
                     dir_options = ["n","e","s","w"]
                     current_dir = sd.get("Directions", "n")
                     idx = dir_options.index(current_dir) if current_dir in dir_options else 0
                     with c1: dr = st.selectbox("DIR", dir_options, index=idx)
-                    
                     with c2: ln = st.number_input("LANES", min_value=1, value=int(sd.get("Lanes", 1)))
                     ser = st.text_input("SERIAL #", value=sd["Serial"])
                     nt = st.text_input("NOTES", value=sd["Notes"])
@@ -404,7 +441,40 @@ else:
                         st.session_state.pickup_index -= 1; auto_save(); st.rerun()
                 else: st.balloons(); st.success("🏁 ALL EQUIPMENT SECURED.")
 
+    # --- V42 NEW PHOTO MATCHER TAB ---
     with tab4:
+        st.markdown("### 📸 PHOTO MATCHER")
+        st.info("Upload unlabelled installation photos. The app will extract their hidden GPS data and tell you exactly which Site ID they belong to.")
+        
+        uploaded_photos = st.file_uploader("Drop .JPG or .JPEG photos here", type=["jpg", "jpeg"], accept_multiple_files=True)
+        
+        if uploaded_photos:
+            if st.button("🔍 ANALYZE PHOTOS", use_container_width=True):
+                for photo in uploaded_photos:
+                    bytes_data = photo.getvalue()
+                    p_lat, p_lon = extract_gps_from_image(bytes_data)
+                    
+                    if p_lat and p_lon:
+                        # Find the closest matching site mathematically
+                        best_site = None
+                        best_street = ""
+                        best_dist = float('inf')
+                        
+                        for uid, sd in st.session_state.site_data.items():
+                            dist = (p_lat - sd['LAT'])**2 + (p_lon - sd['LON'])**2
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_site = sd['Site']
+                                best_street = sd.get('Street', '')
+                        
+                        if best_site:
+                            st.success(f"**{photo.name}** ➡️ **SITE {best_site}** ({best_street})")
+                        else:
+                            st.warning(f"**{photo.name}**: Has GPS, but couldn't match to a route site.")
+                    else:
+                        st.error(f"**{photo.name}**: No GPS data found. (Ensure Location Services was ON when taking the photo).")
+
+    with tab5:
         all_d = [d for d in st.session_state.site_data.values() if d["Installed"] == "x" or d.get("Skipped")]
         if all_d:
             try:

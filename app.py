@@ -8,7 +8,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # --- CORE CONFIG ---
-st.set_page_config(page_title="Live Wire V51.43 Clean", layout="centered")
+st.set_page_config(page_title="Live Wire V51.44 Pure-Direct", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -46,17 +46,23 @@ def process_data(est_configs, excel_files):
     excel_map = {}
     for f in excel_files:
         try:
+            # Universal Reader for CSV and Excel
             df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
+            
+            # Direct Column Matching
             lat_c = next((c for c in df.columns if 'lat' in str(c).lower()), None)
             lon_c = next((c for c in df.columns if 'lon' in str(c).lower()), None)
             id_c = next((c for c in df.columns if any(x in str(c).lower() for x in ['site', 'tds', 'id'])), df.columns[0])
+            
             for _, row in df.iterrows():
                 sid = str(row[id_c]).split('.')[0].strip()
                 if sid.isdigit():
                     try:
+                        # Grab the exact Excel coordinate
                         v1, v2 = float(row[lat_c]), float(row[lon_c])
-                        lat = v1 if (32.0 < v1 < 36.0) else (v2 if (32.0 < v2 < 36.0) else v1)
-                        lon = v2 if (-120.0 < v2 < -114.0) else (v1 if (-120.0 < v1 < -114.0) else v2)
+                        # Basic safety flip to ensure Lat is ~33 and Lon is ~-117
+                        lat = v1 if (30.0 < v1 < 40.0) else v2
+                        lon = v2 if (-125.0 < v2 < -110.0) else v1
                         excel_map[sid] = {"lat": lat, "lon": lon, "street": str(row.get('Street', f'Site {sid}'))}
                     except: continue
         except: pass
@@ -67,20 +73,25 @@ def process_data(est_configs, excel_files):
         for sid, data in excel_map.items():
             if sid in raw_map:
                 uid = f"{cfg['label']}_{sid}".replace(" ", "_")
+                # NO SNAPPING: Use Excel GPS as the only navigation anchor
                 final_raw.append({"id": sid, "uid": uid, "lat": data['lat'], "lon": data['lon'], "street": data['street']})
     
     if final_raw:
+        # Standard Path Optimization
         curr = HOME_COORDS
         route, rem = [], list(final_raw)
         while rem:
             nxt = min(rem, key=lambda x: (curr[0]-x['lat'])**2 + (curr[1]-x['lon'])**2)
             route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
+        
         st.session_state.site_data = {s['uid']: {**s, "Installed": False} for s in route}
-        st.session_state.optimized_route = route; auto_save(); st.rerun()
+        st.session_state.optimized_route = route
+        st.session_state.current_index = 0
+        auto_save(); st.rerun()
 
 # --- UI ---
 if not st.session_state.optimized_route:
-    st.title("🚦 Live Wire: Sync")
+    st.title("🚦 Live Wire: Direct Sync")
     ex = st.file_uploader("1️⃣ Excel List", accept_multiple_files=True)
     maps = st.file_uploader("2️⃣ Map Files (.EST)", accept_multiple_files=True)
     if ex and maps and st.button("🚀 SYNC & DRIVE"):
@@ -88,7 +99,7 @@ if not st.session_state.optimized_route:
 else:
     st.title("📁 Active Manifest")
     
-    # Simple Map Manifest (Standard Dots)
+    # Simple Map Manifest
     map_df = pd.DataFrame([{"lat": sd['lat'], "lon": sd['lon'], "color": "#00FF00" if sd['Installed'] else "#FFA500", "size": 6} 
                            for sd in st.session_state.site_data.values()])
     st.map(map_df, color="color", size="size")
@@ -118,10 +129,10 @@ else:
             
         if idx > 0:
             if st.button("⬅️ PREVIOUS STOP"):
-                st.session_state.current_index -= 1; auto_save(); st.rerun()
+                st.session_index -= 1; auto_save(); st.rerun()
     else:
-        st.success("🏁 All sites installed. Shift Complete!")
+        st.success("🏁 Shift Complete!")
 
-    if st.button("🗑️ RESET SYSTEM"):
+    if st.button("🗑️ RESET"):
         if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
         st.session_state.optimized_route = []; st.rerun()

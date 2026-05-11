@@ -1,6 +1,6 @@
 import streamlit as st
 import re
-import pd as pd
+import pandas as pd
 import json
 import io
 import time
@@ -92,7 +92,7 @@ if "init" not in st.session_state:
 
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 
-# V50: Upgraded Clock to log Exact Seconds for Chronological Sorting
+# Upgraded Clock to log Exact Seconds for Chronological Sorting
 def get_ca_time():
     now = datetime.now(ZoneInfo("America/Los_Angeles"))
     exact_t = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -295,7 +295,6 @@ if not st.session_state.get("optimized_route"):
                 data = json.loads(restore_file.getvalue())
                 for k in data: st.session_state[k] = data[k]
                 
-                # Auto-build Pick-Up itinerary and default to Chronological
                 installed_sites = [sd for uid, sd in st.session_state.site_data.items() if sd.get("Installed") == "x"]
                 st.session_state.pickup_itinerary = sorted(installed_sites, key=lambda x: x.get('ExactTime', ''))
                 st.session_state.last_sort_mode = "⏳ Chronological (Install Order)"
@@ -477,11 +476,9 @@ else:
             else: st.balloons(); st.success("🏁 INSTALLATION COMPLETED.")
 
     with tab3:
-        # V50 DUAL-ROUTING TOGGLE
         st.markdown("### 🗺️ ROUTING STRATEGY")
         sort_mode = st.radio("Pick-Up Order:", ["⏳ Chronological (Install Order)", "🚀 Fastest Route (Optimized)"], horizontal=True, index=0 if st.session_state.get("last_sort_mode") == "⏳ Chronological (Install Order)" else 1)
         
-        # Recalculate Pick-Up itinerary instantly if the switch is flipped
         if sort_mode != st.session_state.get("last_sort_mode"):
             base_itin = st.session_state.get("pickup_itinerary", [])
             if sort_mode == "⏳ Chronological (Install Order)":

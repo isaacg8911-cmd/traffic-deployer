@@ -11,7 +11,7 @@ from streamlit_folium import st_folium
 import folium
 
 # --- CORE CONFIG ---
-st.set_page_config(page_title="Live Wire V51.30 Stable-Plot", layout="centered")
+st.set_page_config(page_title="Live Wire V51.31 Pre-Tested", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -27,24 +27,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- SESSION SAFETY GATE ---
-# This block prevents the AttributeError by ensuring all keys exist immediately
 if "init" not in st.session_state:
-    # Default values
     st.session_state.active_files = []
     st.session_state.optimized_route = []
     st.session_state.site_data = {}
     st.session_state.current_index = 0
-    st.session_state.plotting_mode = True # Default to True so the plotter is ready
+    st.session_state.plotting_mode = True 
     
-    # Try to restore from backup
     if os.path.exists(BACKUP_FILE):
         try:
             with open(BACKUP_FILE, "r") as f:
                 data = json.load(f)
-                for k, v in data.items(): 
-                    st.session_state[k] = v
-        except: 
-            pass
+                for k, v in data.items(): st.session_state[k] = v
+        except: pass
     st.session_state.init = True
 
 def auto_save():
@@ -55,8 +50,7 @@ def auto_save():
         "current_index": st.session_state.current_index,
         "plotting_mode": st.session_state.plotting_mode
     }
-    with open(BACKUP_FILE, "w") as f: 
-        json.dump(payload, f)
+    with open(BACKUP_FILE, "w") as f: json.dump(payload, f)
 
 def process_data(est_configs, excel_files):
     excel_data = {}
@@ -73,8 +67,7 @@ def process_data(est_configs, excel_files):
                     lat = v1 if (32.0 < v1 < 36.0) else (v2 if (32.0 < v2 < 36.0) else v1)
                     lon = v2 if (-120.0 < v2 < -114.0) else (v1 if (-120.0 < v1 < -114.0) else v2)
                     excel_data[sid] = {"lat": lat, "lon": lon, "street": str(row.get('Street', f'Site {sid}'))}
-        except: 
-            pass
+        except: pass
 
     final_raw = []
     for cfg in est_configs:
@@ -84,14 +77,18 @@ def process_data(est_configs, excel_files):
                 uid = f"{cfg['label']}_{sid}"
                 final_raw.append({"id": sid, "uid": uid, "lat": data['lat'], "lon": data['lon'], "sheet": cfg['label'], "street": data['street']})
     
+    if not final_raw:
+        st.error("No matches found between Excel and Maps.")
+        return
+
     st.session_state.optimized_route = final_raw
     st.session_state.site_data = {s['uid']: {**s, "Installed": False} for s in final_raw}
     st.session_state.active_files = [c['label'] for c in est_configs]
     st.session_state.plotting_mode = True
     auto_save()
+    st.rerun()
 
 # --- UI LOGIC ---
-# Check if we have a route yet. If not, show the upload screen.
 if not st.session_state.optimized_route:
     st.title("🚦 Live Wire: Data Sync")
     ex = st.file_uploader("1️⃣ DATA (Excel/CSV)", accept_multiple_files=True)
@@ -99,59 +96,44 @@ if not st.session_state.optimized_route:
     if ex and maps and st.button("🚀 INITIAL SYNC"):
         configs = [{"file": f, "label": f"Day {i+1}"} for i, f in enumerate(maps)]
         process_data(configs, ex)
-        st.rerun()
 
-# If we have a route, check if we are still in "Plotting" mode or "Driving" mode.
 elif st.session_state.plotting_mode:
     st.title("🎯 Tactical Plotter")
-    st.info("Tap the Satellite map to fix dead-ends. Select a site, tap the road, and click relocate.")
-    
     options = [s['uid'] for s in st.session_state.optimized_route]
     target_uid = st.selectbox("Select Site to Verify:", options)
     sd = st.session_state.site_data[target_uid]
 
-    # --- SATELLITE PLOTTER MAP ---
     m = folium.Map(location=[sd['lat'], sd['lon']], zoom_start=18, tiles=None)
     folium.TileLayer(
         tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attr='Esri',
-        name='Satellite',
-        overlay=False,
-        control=True
+        attr='Esri', name='Satellite', overlay=False, control=True
     ).add_to(m)
     
-    folium.Marker(
-        [sd['lat'], sd['lon']], 
-        icon=folium.Icon(color='orange', icon='location-dot', prefix='fa')
-    ).add_to(m)
-    
-    map_data = st_folium(m, height=450, width=700)
+    folium.Marker([sd['lat'], sd['lon']], icon=folium.Icon(color='orange')).add_to(m)
+    map_data = st_folium(m, height=450, width=700, key="plotter_map")
 
     if map_data and map_data.get("last_clicked"):
         new_coords = map_data["last_clicked"]
         if st.button(f"Relocate Site {sd['id']} to Tapped Spot"):
             st.session_state.site_data[target_uid]['lat'] = new_coords['lat']
             st.session_state.site_data[target_uid]['lon'] = new_coords['lng']
-            for s in st.session_state.optimized_route:
+            # Mirror the update to the route list
+            for i, s in enumerate(st.session_state.optimized_route):
                 if s['uid'] == target_uid:
-                    s['lat'], s['lon'] = new_coords['lat'], new_coords['lng']
-            st.success(f"Site {sd['id']} Moved!")
-            auto_save()
-            time.sleep(0.5)
-            st.rerun()
+                    st.session_state.optimized_route[i]['lat'] = new_coords['lat']
+                    st.session_state.optimized_route[i]['lon'] = new_coords['lng']
+            st.success("Moved!")
+            auto_save(); time.sleep(0.5); st.rerun()
 
-    st.divider()
     if st.button("🏁 LOCK ALL SITES & START ROUTE", use_container_width=True):
         st.session_state.plotting_mode = False
-        # Final Optimization
         curr = HOME_COORDS
         new_route, rem = [], list(st.session_state.optimized_route)
         while rem:
             nxt = min(rem, key=lambda x: (curr[0]-x['lat'])**2 + (curr[1]-x['lon'])**2)
             new_route.append(nxt); curr = (nxt['lat'], nxt['lon']); rem.remove(nxt)
         st.session_state.optimized_route = new_route
-        auto_save()
-        st.rerun()
+        auto_save(); st.rerun()
 
 else:
     # --- DRIVING MODE ---
@@ -160,25 +142,15 @@ else:
     if idx < len(st.session_state.optimized_route):
         active = st.session_state.optimized_route[idx]
         sd = st.session_state.site_data[active['uid']]
-        
         st.subheader(f"Stop {idx+1}: Site {sd['id']}")
-        st.write(f"📍 {sd['street']}")
-        
-        st.link_button("🚗 NAVIGATE TO PLOTTED SPOT", f"https://www.google.com/maps/search/?api=1&query={sd['lat']},{sd['lon']}", use_container_width=True)
-        
+        st.link_button("🚗 NAVIGATE", f"https://www.google.com/maps/search/?api=1&query={sd['lat']},{sd['lon']}", use_container_width=True)
         if st.button("✅ MARK INSTALLED", use_container_width=True):
             st.session_state.site_data[active['uid']]['Installed'] = True
             st.session_state.current_index += 1
-            auto_save()
-            st.rerun()
-    else:
-        st.success("Shift Complete!")
+            auto_save(); st.rerun()
     
-    if st.button("🗑️ CLEAR & RESET"):
-        if os.path.exists(BACKUP_FILE): 
-            os.remove(BACKUP_FILE)
+    if st.button("🗑️ RESET"):
+        if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
         st.session_state.optimized_route = []
-        st.session_state.site_data = {}
-        st.session_state.current_index = 0
         st.session_state.plotting_mode = True
         st.rerun()

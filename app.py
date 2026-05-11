@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 
 # --- CORE CONFIG ---
-st.set_page_config(page_title="Live Wire V51.47 Continuous Flow", layout="centered")
+st.set_page_config(page_title="Live Wire V51.48 Inner-Node", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -22,7 +22,6 @@ st.markdown("""
         font-weight: bold; border-radius: 8px; height: 3.5em; width: 100%;
     }
     .stInfo { background-color: #111 !important; border: 1px solid #FFD700 !important; color: white !important; }
-    [data-testid="stMetricValue"] { color: #FFD700 !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -40,15 +39,21 @@ def auto_save():
     payload = {"optimized_route": st.session_state.optimized_route, "site_data": st.session_state.site_data, "current_index": st.session_state.current_index}
     with open(BACKUP_FILE, "w") as f: json.dump(payload, f)
 
-def get_5_nodes(p1, p2):
+def get_inner_nodes(p1, p2):
+    """Returns only the 3 points BETWEEN the start and end."""
     lat1, lon1 = p1
     lat2, lon2 = p2
     mid = ((lat1 + lat2) / 2, (lon1 + lon2) / 2)
     q1 = ((lat1 + mid[0]) / 2, (lon1 + mid[1]) / 2)
     q2 = ((mid[0] + lat2) / 2, (mid[1] + lon2) / 2)
-    return [p1, q1, mid, q2, p2]
+    # ONLY return the internal nodes to avoid dead-end boundaries
+    return [q1, mid, q2]
 
 def process_data(est_configs, excel_files):
+    # ATOMIC RESET: Wipe state to force a clean manifest update
+    st.session_state.optimized_route = []
+    st.session_state.site_data = {}
+    
     excel_map = {}
     for f in excel_files:
         try:
@@ -76,11 +81,11 @@ def process_data(est_configs, excel_files):
                     if 32.0 < val < 36.0: m_lat = val
                     if -120.0 < val < -114.0: m_lon = val
                 
-                nodes = get_5_nodes((ex_lat, ex_lon), (m_lat, m_lon))
-                final_pool.append({"id": sid, "uid": f"{cfg['label']}_{sid}", "nodes": nodes, "street": street})
+                # ONLY grab the 3 inner nodes
+                inner_nodes = get_inner_nodes((ex_lat, ex_lon), (m_lat, m_lon))
+                final_pool.append({"id": sid, "uid": f"{cfg['label']}_{sid}", "nodes": inner_nodes, "street": street})
 
     if final_pool:
-        # CONTINUOUS FLOW ROUTING (Starts at first available match)
         curr = HOME_COORDS
         route = []
         while final_pool:
@@ -97,19 +102,20 @@ def process_data(est_configs, excel_files):
             final_pool.remove(best_site)
             
         st.session_state.site_data = {s['uid']: {**s, "Installed": False} for s in route}
-        st.session_state.optimized_route = route; st.session_state.current_index = 0
+        st.session_state.optimized_route = route
+        st.session_state.current_index = 0
         auto_save(); st.rerun()
 
 # --- UI ---
 if not st.session_state.optimized_route:
-    st.title("🚦 Live Wire: Best-Flow Sync")
+    st.title("🚦 Live Wire: Inner-Node Sync")
     ex = st.file_uploader("1️⃣ Excel List", accept_multiple_files=True)
     maps = st.file_uploader("2️⃣ Map Files (.EST)", accept_multiple_files=True)
-    if ex and maps and st.button("🚀 OPTIMIZE 5-NODE CONTINUOUS FLOW"):
+    if ex and maps and st.button("🚀 SYNC CLEAN FLOW"):
         process_data([{"file": f, "label": f"Day {i+1}"} for i, f in enumerate(maps)], ex)
 else:
     st.title("📁 Manifest Control")
-    view_mode = st.radio("View Mode:", ["Map", "List"], horizontal=True)
+    view_mode = st.radio("View:", ["Map", "List"], horizontal=True)
 
     if view_mode == "Map":
         map_df = pd.DataFrame([{"lat": sd['lat'], "lon": sd['lon'], "color": "#00FF00" if sd['Installed'] else "#FFA500", "size": 6} 
@@ -117,7 +123,7 @@ else:
         st.map(map_df, color="color", size="size")
     else:
         list_view = [{"Stop": i+1, "Site": sd['id'], "Street": sd['street'], "Status": "Done" if sd['Installed'] else "Pending"} 
-                     for i, s in enumerate(st.session_state.optimized_route) if (sd := st.session_state.site_data[s['uid']])]
+                     for i, s in enumerate(st.session_state.optimized_route) if (sd := st.session_state.site_data.get(s['uid']))]
         st.table(list_view)
     
     st.divider()
@@ -128,14 +134,14 @@ else:
         sd = st.session_state.site_data.get(active['uid'])
         
         st.subheader(f"Stop {idx+1}: Site {sd['id']}")
-        st.info(f"**Street:** {sd['street']}")
+        st.info(f"📍 **{sd['street']}**")
         
-        st.link_button("🚗 NAVIGATE", f"https://www.google.com/maps/search/?api=1&query={sd['lat']},{sd['lon']}", use_container_width=True)
+        st.link_button("🚗 NAVIGATE (INTERNAL NODE)", f"https://www.google.com/maps/search/?api=1&query={sd['lat']},{sd['lon']}", use_container_width=True)
         
         batch = [f"{st.session_state.site_data[s['uid']]['lat']},{st.session_state.site_data[s['uid']]['lon']}" 
                  for s in st.session_state.optimized_route[idx:idx+9] if not st.session_state.site_data[s['uid']]['Installed']]
         if len(batch) > 1:
-            st.link_button(f"🗺️ BATCH NAV {len(batch)}", f"https://www.google.com/maps/dir/{'/'.join(batch)}", use_container_width=True)
+            st.link_button(f"🗺️ BATCH NAV NEXT {len(batch)}", f"https://www.google.com/maps/dir/{'/'.join(batch)}", use_container_width=True)
 
         if st.button("✅ MARK INSTALLED", use_container_width=True):
             st.session_state.site_data[active['uid']]['Installed'] = True

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.22 Stability", layout="centered")
+st.set_page_config(page_title="Live Wire V51.59 Absolute Stability", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -79,29 +79,65 @@ def auto_save():
             json.dump(payload, f)
     except: pass
 
-def get_quad_points(lat1, lon1, lat2, lon2):
-    mid_lat, mid_lon = (lat1 + lat2) / 2, (lon1 + lon2) / 2
-    q1_lat, q1_lon = (lat1 + mid_lat) / 2, (lon1 + mid_lon) / 2
-    q2_lat, q2_lon = (mid_lat + lat2) / 2, (mid_lon + lon2) / 2
-    return [(lat1, lon1), (q1_lat, q1_lon), (mid_lat, mid_lon), (q2_lat, q2_lon), (lat2, lon2)]
+def get_inner_nodes(lat1, lon1, lat2, lon2):
+    # If the file only has one point, just use it
+    if pd.isna(lat2) or pd.isna(lon2) or (lat1 == lat2 and lon1 == lon2):
+        return [(lat1, lon1)]
+    
+    # Calculate exactly 25%, 50%, and 75% between the Begin and End points
+    q1_lat = lat1 + 0.25 * (lat2 - lat1)
+    q1_lon = lon1 + 0.25 * (lon2 - lon1)
+    
+    mid_lat = lat1 + 0.50 * (lat2 - lat1)
+    mid_lon = lon1 + 0.50 * (lon2 - lon1)
+    
+    q2_lat = lat1 + 0.75 * (lat2 - lat1)
+    q2_lon = lon1 + 0.75 * (lon2 - lon1)
+    
+    # Exclude the dead-ends entirely.
+    return [(q1_lat, q1_lon), (mid_lat, mid_lon), (q2_lat, q2_lon)]
 
 def process_upload(est_configs, excel_files, m_type):
+    # ATOMIC RESET
+    st.session_state.optimized_route = []
+    st.session_state.site_data = {}
+    
     excel_data = {}
     for f in excel_files:
         try:
             df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
-            lat_c = next((c for c in df.columns if 'lat' in c.lower()), None)
-            lon_c = next((c for c in df.columns if 'lon' in c.lower()), None)
-            id_c = next((c for c in df.columns if any(x in c.lower() for x in ['site', 'tds', 'id'])), df.columns[0])
-            if lat_c and lon_c:
+            
+            # Find the ID column
+            id_c = next((c for c in df.columns if any(x in c.lower() for x in ['tds', 'site', 'id'])), df.columns[0])
+            
+            # Find Begin coordinates
+            b_lat_c = next((c for c in df.columns if 'begin_lat' in c.lower()), next((c for c in df.columns if 'lat' in c.lower()), None))
+            b_lon_c = next((c for c in df.columns if 'begin_lon' in c.lower()), next((c for c in df.columns if 'lon' in c.lower()), None))
+            
+            # Find End coordinates (if they exist in the file)
+            e_lat_c = next((c for c in df.columns if 'end_lat' in c.lower()), None)
+            e_lon_c = next((c for c in df.columns if 'end_lon' in c.lower()), None)
+
+            if b_lat_c and b_lon_c:
                 for _, row in df.iterrows():
                     sid = str(row[id_c]).split('.')[0].strip()
                     if sid.isdigit():
-                        v1, v2 = float(row[lat_c]), float(row[lon_c])
-                        lat = v1 if (32.0 < v1 < 36.0) else (v2 if (32.0 < v2 < 36.0) else None)
-                        lon = v2 if (-121.0 < v2 < -114.0) else (v1 if (-120.0 < v1 < -114.0) else None)
-                        if lat and lon:
-                            excel_data[sid] = {"lat": lat, "lon": lon, "street": str(row.get('Street', f'Site {sid}'))}
+                        try:
+                            b_lat, b_lon = float(row[b_lat_c]), float(row[b_lon_c])
+                            
+                            # Grab End points if they exist in the row, otherwise fallback to Begin points
+                            e_lat, e_lon = b_lat, b_lon
+                            if e_lat_c and e_lon_c and pd.notna(row[e_lat_c]) and pd.notna(row[e_lon_c]):
+                                e_lat, e_lon = float(row[e_lat_c]), float(row[e_lon_c])
+                            
+                            # Verify valid California GPS limits
+                            if 30.0 < b_lat < 40.0 and -125.0 < b_lon < -110.0:
+                                # Generate the 3 safe inner nodes using pure Excel data
+                                nodes = get_inner_nodes(b_lat, b_lon, e_lat, e_lon)
+                                street_name = str(row.get('Street', f'Site {sid}'))
+                                excel_data[sid] = {"nodes": nodes, "street": street_name}
+                        except:
+                            pass
         except: pass
 
     if not excel_data: return False, 0
@@ -110,14 +146,19 @@ def process_upload(est_configs, excel_files, m_type):
     for cfg in est_configs:
         raw_map = cfg['file'].getvalue().decode('latin-1', errors='ignore')
         for sid, data in excel_data.items():
-            if sid in raw_map:
-                gps_matches = re.findall(r'(-?\d{2,3}\.\d{3,})', raw_map[raw_map.find(sid):raw_map.find(sid)+2500])
-                m_lat, m_lon = data['lat'], data['lon']
-                for val in [float(x) for x in gps_matches]:
-                    if 32.0 < val < 36.0: m_lat = val
-                    if -121.0 < val < -114.0: m_lon = val
-                nodes = get_quad_points(data['lat'], data['lon'], m_lat, m_lon)
-                final_raw.append({"id": sid, "uid": f"{cfg['label']}_{sid}", "nodes": nodes, "sheet": cfg['label'], "street": data['street']})
+            
+            # Strict boundary check so Site '23' doesn't match '2335'
+            match = re.search(r'\b' + re.escape(sid) + r'\b', raw_map)
+            
+            if match:
+                # WE DO NOT PULL GPS FROM THE .EST FILE ANYMORE. JUST ADD THE EXCEL DATA.
+                final_raw.append({
+                    "id": sid, 
+                    "uid": f"{cfg['label']}_{sid}", 
+                    "nodes": data['nodes'], 
+                    "sheet": cfg['label'], 
+                    "street": data['street']
+                })
 
     if final_raw:
         master_route, curr = [], HOME_COORDS
@@ -128,6 +169,7 @@ def process_upload(est_configs, excel_files, m_type):
                     d = (curr[0]-node[0])**2 + (curr[1]-node[1])**2
                     if d < best_dist:
                         best_dist, best_site, best_node = d, site, node
+            
             best_site['nav_lat'], best_site['nav_lon'] = best_node
             master_route.append(best_site)
             curr = best_node
@@ -155,7 +197,7 @@ if not st.session_state.get("optimized_route"):
         if st.button("🚀 SYNC STABLE"):
             success, count = process_upload(configs, excel_files, m_type)
             if success: st.success(f"Locked {count} sites."); time.sleep(1); st.rerun()
-            else: st.error("Sync error.")
+            else: st.error("Sync error. No matching sites found.")
 else:
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
@@ -167,7 +209,7 @@ else:
         for s in st.session_state.optimized_route:
             sd = st.session_state.site_data[s['uid']]
             done = sd.get("Installed") == "x" or sd.get("Picked up") == "x"
-            # FIX: Bulletproof coordinate access for old backups
+            # Bulletproof coordinate loading
             safe_lat = sd.get('LAT', sd.get('lat'))
             safe_lon = sd.get('LON', sd.get('lon'))
             if safe_lat and safe_lon:
@@ -190,15 +232,12 @@ else:
         if cur < len(st.session_state.optimized_route):
             s = st.session_state.optimized_route[cur]
             sd = st.session_state.site_data[s['uid']]
-            
-            # FIX: Bulletproof coordinate access
             safe_lat = sd.get('LAT', sd.get('lat'))
             safe_lon = sd.get('LON', sd.get('lon'))
             
             st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
             st.link_button("🚗 NAV TO BEST NODE", f"https://www.google.com/maps/search/?api=1&query={safe_lat},{safe_lon}", use_container_width=True)
             
-            # FIX: Bulletproof batch access
             batch = []
             for bs in st.session_state.optimized_route[cur:cur+9]:
                 bsd = st.session_state.site_data[bs['uid']]
@@ -207,9 +246,8 @@ else:
                     b_lon = bsd.get('LON', bsd.get('lon'))
                     if b_lat and b_lon:
                         batch.append(f"{b_lat},{b_lon}")
-            
-            if len(batch) > 1: 
-                st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
+                        
+            if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             
             loc = streamlit_geolocation()
             with st.form(f"f_{cur}"):
@@ -231,18 +269,12 @@ else:
             p_idx = st.session_state.pickup_index
             if p_idx < len(itin):
                 s = itin[p_idx]
-                
-                # FIX: Bulletproof coordinate access
                 p_lat = s.get('LAT', s.get('lat'))
                 p_lon = s.get('LON', s.get('lon'))
-                
                 st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                 st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={p_lat},{p_lon}", use_container_width=True)
                 if st.button("✅ SECURED", use_container_width=True):
-                    st.session_state.site_data[s['UID']]["Picked up"] = "x"
-                    st.session_state.pickup_index += 1
-                    auto_save()
-                    st.rerun()
+                    st.session_state.site_data[s['UID']]["Picked up"] = "x"; st.session_state.pickup_index += 1; auto_save(); st.rerun()
                     
     with tab4:
         all_d = [d for d in st.session_state.site_data.values() if d.get("Installed") == "x"]

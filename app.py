@@ -117,7 +117,6 @@ def process_upload(est_configs, excel_files, m_type):
                     if 32.0 < val < 36.0: m_lat = val
                     if -121.0 < val < -114.0: m_lon = val
                 nodes = get_quad_points(data['lat'], data['lon'], m_lat, m_lon)
-                # FIX: Add unique identifier using sheet label
                 final_raw.append({"id": sid, "uid": f"{cfg['label']}_{sid}", "nodes": nodes, "sheet": cfg['label'], "street": data['street']})
 
     if final_raw:
@@ -161,30 +160,57 @@ else:
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
+    
     with tab1:
         st.success(f"STOPS: {len(st.session_state.optimized_route)}")
         map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF", "size": 12}]
         for s in st.session_state.optimized_route:
             sd = st.session_state.site_data[s['uid']]
-            done = sd["Installed"] == "x" or sd.get("Picked up") == "x"
-            map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": "#00FF00" if done else "#FFA500", "size": 8})
-        st.map(pd.DataFrame(map_points), color="color", size="size")
+            done = sd.get("Installed") == "x" or sd.get("Picked up") == "x"
+            # FIX: Bulletproof coordinate access for old backups
+            safe_lat = sd.get('LAT', sd.get('lat'))
+            safe_lon = sd.get('LON', sd.get('lon'))
+            if safe_lat and safe_lon:
+                map_points.append({"lat": safe_lat, "lon": safe_lon, "color": "#00FF00" if done else "#FFA500", "size": 8})
+        
+        if map_points:
+            st.map(pd.DataFrame(map_points), color="color", size="size")
+            
         for idx, s in enumerate(st.session_state.optimized_route):
             sd = st.session_state.site_data[s['uid']]
-            done = sd["Installed"] == "x" or sd.get("Picked up") == "x"
-            if st.button(f"{'✅' if done else '🟠'} Stop {idx+1}: {sd['Site']}", key=f"m_{idx}", use_container_width=True):
+            done = sd.get("Installed") == "x" or sd.get("Picked up") == "x"
+            if st.button(f"{'✅' if done else '🟠'} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{idx}", use_container_width=True):
                 st.session_state.current_index = idx; st.rerun()
         if st.button("🗑️ RESET"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.session_state.optimized_route = []; st.rerun()
+            
     with tab2:
         cur = st.session_state.current_index
         if cur < len(st.session_state.optimized_route):
-            s = st.session_state.optimized_route[cur]; sd = st.session_state.site_data[s['uid']]
-            st.subheader(f"#{cur+1}: Site {sd['Site']}")
-            st.link_button("🚗 NAV TO BEST NODE", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
-            batch = [f"{st.session_state.site_data[bs['uid']]['LAT']},{st.session_state.site_data[bs['uid']]['LON']}" for bs in st.session_state.optimized_route[cur:cur+9] if st.session_state.site_data[bs['uid']]['Installed'] != "x"]
-            if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
+            s = st.session_state.optimized_route[cur]
+            sd = st.session_state.site_data[s['uid']]
+            
+            # FIX: Bulletproof coordinate access
+            safe_lat = sd.get('LAT', sd.get('lat'))
+            safe_lon = sd.get('LON', sd.get('lon'))
+            
+            st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
+            st.link_button("🚗 NAV TO BEST NODE", f"https://www.google.com/maps/search/?api=1&query={safe_lat},{safe_lon}", use_container_width=True)
+            
+            # FIX: Bulletproof batch access
+            batch = []
+            for bs in st.session_state.optimized_route[cur:cur+9]:
+                bsd = st.session_state.site_data[bs['uid']]
+                if bsd.get('Installed') != "x":
+                    b_lat = bsd.get('LAT', bsd.get('lat'))
+                    b_lon = bsd.get('LON', bsd.get('lon'))
+                    if b_lat and b_lon:
+                        batch.append(f"{b_lat},{b_lon}")
+            
+            if len(batch) > 1: 
+                st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
+            
             loc = streamlit_geolocation()
             with st.form(f"f_{cur}"):
                 dr = st.selectbox("DIR", ["n","e","s","w"])
@@ -192,19 +218,33 @@ else:
                 ser, nt = st.text_input("SERIAL #"), st.text_input("NOTES")
                 if st.form_submit_button("✅ COMPLETE", use_container_width=True):
                     _, d, et = get_ca_time()
-                    st.session_state.site_data[s['uid']].update({"Date":d, "ExactTime":et, "Directions":dr, "Serial":ser, "Lanes":ln, "Notes":nt, "Installed":"x", "LAT":loc['latitude'] if loc and loc.get('latitude') else sd['LAT'], "LON":loc['longitude'] if loc and loc.get('longitude') else sd['LON']})
+                    st.session_state.site_data[s['uid']].update({
+                        "Date":d, "ExactTime":et, "Directions":dr, "Serial":ser, "Lanes":ln, "Notes":nt, "Installed":"x", 
+                        "LAT":loc['latitude'] if loc and loc.get('latitude') else safe_lat, 
+                        "LON":loc['longitude'] if loc and loc.get('longitude') else safe_lon
+                    })
                     st.session_state.current_index += 1; auto_save(); st.rerun()
+                    
     with tab3:
         itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
         if itin:
             p_idx = st.session_state.pickup_index
             if p_idx < len(itin):
                 s = itin[p_idx]
-                st.subheader(f"PICK-UP #{p_idx+1}: Site {s['Site']}")
-                st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
+                
+                # FIX: Bulletproof coordinate access
+                p_lat = s.get('LAT', s.get('lat'))
+                p_lon = s.get('LON', s.get('lon'))
+                
+                st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
+                st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={p_lat},{p_lon}", use_container_width=True)
                 if st.button("✅ SECURED", use_container_width=True):
-                    st.session_state.site_data[s['UID']]["Picked up"] = "x"; st.session_state.pickup_index += 1; auto_save(); st.rerun()
+                    st.session_state.site_data[s['UID']]["Picked up"] = "x"
+                    st.session_state.pickup_index += 1
+                    auto_save()
+                    st.rerun()
+                    
     with tab4:
-        all_d = [d for d in st.session_state.site_data.values() if d["Installed"] == "x"]
+        all_d = [d for d in st.session_state.site_data.values() if d.get("Installed") == "x"]
         if all_d:
             st.download_button("📊 DOWNLOAD EXCEL", pd.DataFrame(all_d).to_csv(index=False), "Report.csv", use_container_width=True)

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.20 Iron Dome", layout="centered")
+st.set_page_config(page_title="Live Wire V51.21 Quad-Node", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -78,11 +78,19 @@ def auto_save():
             json.dump(payload, f)
     except: pass
 
+def get_quad_points(lat1, lon1, lat2, lon2):
+    """Generates 5 nodes between two GPS points for high-res routing."""
+    mid_lat, mid_lon = (lat1 + lat2) / 2, (lon1 + lon2) / 2
+    q1_lat, q1_lon = (lat1 + mid_lat) / 2, (lon1 + mid_lon) / 2
+    q2_lat, q2_lon = (mid_lat + lat2) / 2, (mid_lon + lon2) / 2
+    return [(lat1, lon1), (q1_lat, q1_lon), (mid_lat, mid_lon), (q2_lat, q2_lon), (lat2, lon2)]
+
 def process_upload(est_configs, excel_files, m_type):
     excel_data = {}
     for f in excel_files:
         try:
             df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
+            # Standard SoCal Column Hunter
             lat_c = next((c for c in df.columns if 'lat' in c.lower()), None)
             lon_c = next((c for c in df.columns if 'lon' in c.lower()), None)
             id_c = next((c for c in df.columns if any(x in c.lower() for x in ['site', 'tds', 'id'])), df.columns[0])
@@ -92,75 +100,76 @@ def process_upload(est_configs, excel_files, m_type):
                     sid = str(row[id_c]).split('.')[0].strip()
                     if sid.isdigit():
                         v1, v2 = float(row[lat_c]), float(row[lon_c])
-                        
-                        # --- THE IRON DOME FILTER ---
-                        # Strictly identify which is which. In SoCal, Lon is ALWAYS negative (~-117)
-                        # and Lat is ALWAYS positive (~33).
+                        # Iron Dome Geometry Logic
                         lat = v1 if (32.0 < v1 < 36.0) else (v2 if (32.0 < v2 < 36.0) else None)
                         lon = v2 if (-120.0 < v2 < -114.0) else (v1 if (-120.0 < v1 < -114.0) else None)
-                        
                         if lat and lon:
                             excel_data[sid] = {"lat": lat, "lon": lon, "street": str(row.get('Street', f'Site {sid}'))}
         except: pass
 
     if not excel_data: return False, 0
 
-    final_list = []
+    final_raw = []
     for cfg in est_configs:
         raw_map = cfg['file'].getvalue().decode('latin-1', errors='ignore')
         for sid, data in excel_data.items():
             if sid in raw_map:
-                # Find associated coords in map file block following the site number
+                # Find MapPoint segment coords
                 gps_matches = re.findall(r'(-?\d{2,3}\.\d{3,})', raw_map[raw_map.find(sid):raw_map.find(sid)+2500])
-                
-                # Filter the map points through the same Iron Dome logic
-                valid_lat, valid_lon = data['lat'], data['lon']
+                m_lat, m_lon = data['lat'], data['lon']
                 for val in [float(x) for x in gps_matches]:
-                    if 32.0 < val < 36.0: valid_lat = val
-                    if -120.0 < val < -114.0: valid_lon = val
+                    if 32.0 < val < 36.0: m_lat = val
+                    if -120.0 < val < -114.0: m_lon = val
                 
-                final_list.append({
-                    "id": sid, 
-                    "lat_start": valid_lat, 
-                    "lon_start": valid_lon, 
-                    "sheet": cfg['label'], 
-                    "street": data['street']
-                })
+                # V51.21: Build Quad-Node Array for this site
+                nodes = get_quad_points(data['lat'], data['lon'], m_lat, m_lon)
+                final_raw.append({"id": sid, "nodes": nodes, "sheet": cfg['label'], "street": data['street']})
 
-    if final_list:
-        df_final = pd.DataFrame(final_list).drop_duplicates(subset=['id', 'sheet'])
-        df_final['uid'] = df_final['sheet'] + "_" + df_final['id']
-        master_rem = df_final.to_dict('records')
+    if final_raw:
+        # Optimized Routing using the closest node for every step
         master_route, curr = [], HOME_COORDS
-        
-        while master_rem:
-            nxt = min(master_rem, key=lambda x: (curr[0]-x['lat_start'])**2 + (curr[1]-x['lon_start'])**2)
-            nxt['nav_lat'], nxt['nav_lon'] = nxt['lat_start'], nxt['lon_start']
-            master_route.append(nxt); curr = (nxt['nav_lat'], nxt['nav_lon']); master_rem.remove(nxt)
+        while final_raw:
+            # Find the site whose NEAREST node is closest to current position
+            best_site = None
+            best_dist = float('inf')
+            best_node = None
+            
+            for site in final_raw:
+                for node in site['nodes']:
+                    d = (curr[0]-node[0])**2 + (curr[1]-node[1])**2
+                    if d < best_dist:
+                        best_dist = d
+                        best_site = site
+                        best_node = node
+            
+            best_site['nav_lat'], best_site['nav_lon'] = best_node
+            master_route.append(best_site)
+            curr = best_node
+            final_raw.remove(best_site)
             
         st.session_state.optimized_route = master_route
         st.session_state.active_files = [c['label'] for c in est_configs]
-        st.session_state.site_data = {s['uid']: {"Date":"","Time":"","ExactTime":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"","Directions": "n", "Lanes":2,"Street":s['street'],"Notes":"","Installed":"","Lat_Start":s['lat_start'], "Lon_Start":s['lon_start'],"Lat_End":s['lat_start'], "Lon_End":s['lon_start'],"Picked up":"","LAT":s['nav_lat'],"LON":s['nav_lon'],"Skipped":False,"Sheet":s['sheet']} for s in master_route}
+        st.session_state.site_data = {s['id']: {"Date":"","Time":"","ExactTime":"","Site":s['id'],"UID":s['id'],"Counter":"c1b","Serial":"","Directions": "n", "Lanes":2,"Street":s['street'],"Notes":"","Installed":"","LAT":s['nav_lat'],"LON":s['nav_lon'],"Skipped":False,"Sheet":s['sheet']} for s in master_route}
         st.session_state.mission_type, st.session_state.current_index, st.session_state.pickup_index = m_type, 0, 0
         auto_save(); return True, len(master_route)
     return False, 0
 
 # --- UI ---
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 Live Wire Iron Dome")
+    st.title("🚦 Live Wire Quad-Node")
     restore_file = st.file_uploader("🔄 RESTORE (.JSON)", type=["json"])
     if restore_file and st.button("🔓 LOAD"):
         data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
     st.divider()
     m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
-    excel_files = st.file_uploader("1️⃣ DATA (EXCEL / CSV)", accept_multiple_files=True)
-    up_files = st.file_uploader("2️⃣ MAPS (.EST / .TXT)", accept_multiple_files=True)
+    excel_files = st.file_uploader("1️⃣ EXCEL DATA", accept_multiple_files=True)
+    up_files = st.file_uploader("2️⃣ MAPS (.EST)", accept_multiple_files=True)
     if up_files and excel_files:
-        configs = [{"file": f, "label": st.text_input(f"Day {i+1}:", value=f"Day {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 SYNC CALIFORNIA ONLY"):
+        configs = [{"file": f, "label": st.text_input(f"Map {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
+        if st.button("🚀 SYNC QUAD-NODES"):
             success, count = process_upload(configs, excel_files, m_type)
-            if success: st.success(f"Successfully locked {count} California Sites."); time.sleep(1); st.rerun()
-            else: st.error("No California-bounded coordinates found.")
+            if success: st.success(f"Synced {count} sites with multi-node accuracy."); time.sleep(1); st.rerun()
+            else: st.error("Sync error. Check California coordinates.")
 else:
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
@@ -169,34 +178,46 @@ else:
         st.success(f"STOPS: {len(st.session_state.optimized_route)}")
         map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF", "size": 12}]
         for s in st.session_state.optimized_route:
-            sd = st.session_state.site_data[s['uid']]
-            done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
+            sd = st.session_state.site_data[s['id']]
+            done = sd["Installed"] == "x" or sd.get("Picked up") == "x"
             map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": "#00FF00" if done else "#FFA500", "size": 8})
         st.map(pd.DataFrame(map_points), color="color", size="size")
         for idx, s in enumerate(st.session_state.optimized_route):
-            sd = st.session_state.site_data[s['uid']]
-            done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
+            sd = st.session_state.site_data[s['id']]
+            done = sd["Installed"] == "x" or sd.get("Picked up") == "x"
             if st.button(f"{'✅' if done else '🟠'} Stop {idx+1}: {sd['Site']}", key=f"m_{idx}", use_container_width=True):
                 st.session_state.current_index = idx; st.rerun()
-        st.download_button("💾 DOWNLOAD BACKUP", json.dumps({k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary", "theme"]}), f"LiveWire_Backup.json", use_container_width=True)
         if st.button("🗑️ RESET"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.session_state.optimized_route = []; st.rerun()
     with tab2:
         cur = st.session_state.current_index
         if cur < len(st.session_state.optimized_route):
-            s = st.session_state.optimized_route[cur]; sd = st.session_state.site_data[s['uid']]
-            st.subheader(f"#{cur+1}: Site {sd['Site']}")
-            st.link_button("🚗 SINGLE NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
-            batch = [f"{st.session_state.site_data[bs['uid']]['LAT']},{st.session_state.site_data[bs['uid']]['LON']}" for bs in st.session_state.optimized_route[cur:cur+9] if st.session_state.site_data[bs['uid']]['Installed'] != "x"]
-            if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV {len(batch)}", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
+            s = st.session_state.optimized_route[cur]; sd = st.session_state.site_data[s['id']]
+            st.subheader(f"#{cur+1}: Site {sd['Site']} ({sd['Sheet']})")
+            st.link_button("🚗 NAV TO BEST NODE", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
+            batch = [f"{st.session_state.site_data[bs['id']]['LAT']},{st.session_state.site_data[bs['id']]['LON']}" for bs in st.session_state.optimized_route[cur:cur+9] if st.session_state.site_data[bs['id']]['Installed'] != "x"]
+            if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             loc = streamlit_geolocation()
             with st.form(f"f_{cur}"):
-                c1, c2 = st.columns(2)
-                dr = c1.selectbox("DIR", ["n","e","s","w"])
-                ln = c2.number_input("LANES", min_value=1, value=2)
+                dr = st.selectbox("DIR", ["n","e","s","w"])
+                ln = st.number_input("LANES", min_value=1, value=2)
                 ser, nt = st.text_input("SERIAL #"), st.text_input("NOTES")
                 if st.form_submit_button("✅ COMPLETE", use_container_width=True):
                     _, d, et = get_ca_time()
-                    st.session_state.site_data[s['uid']].update({"Date":d, "ExactTime":et, "Directions":dr, "Serial":ser, "Lanes":ln, "Notes":nt, "Installed":"x", "LAT":loc['latitude'] if loc and loc.get('latitude') else sd['LAT'], "LON":loc['longitude'] if loc and loc.get('longitude') else sd['LON']})
+                    st.session_state.site_data[s['id']].update({"Date":d, "ExactTime":et, "Directions":dr, "Serial":ser, "Lanes":ln, "Notes":nt, "Installed":"x", "LAT":loc['latitude'] if loc and loc.get('latitude') else sd['LAT'], "LON":loc['longitude'] if loc and loc.get('longitude') else sd['LON']})
                     st.session_state.current_index += 1; auto_save(); st.rerun()
+    with tab3:
+        itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
+        if itin:
+            p_idx = st.session_state.pickup_index
+            if p_idx < len(itin):
+                s = itin[p_idx]
+                st.subheader(f"PICK-UP #{p_idx+1}: Site {s['Site']}")
+                st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
+                if st.button("✅ SECURED", use_container_width=True):
+                    st.session_state.site_data[s['Site']]["Picked up"] = "x"; st.session_state.pickup_index += 1; auto_save(); st.rerun()
+    with tab4:
+        all_d = [d for d in st.session_state.site_data.values() if d["Installed"] == "x"]
+        if all_d:
+            st.download_button("📊 DOWNLOAD EXCEL", pd.DataFrame(all_d).to_csv(index=False), "Report.csv", use_container_width=True)

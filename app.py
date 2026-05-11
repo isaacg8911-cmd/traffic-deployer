@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.19 Geofenced", layout="centered")
+st.set_page_config(page_title="Live Wire V51.20 Iron Dome", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -92,11 +92,14 @@ def process_upload(est_configs, excel_files, m_type):
                     sid = str(row[id_c]).split('.')[0].strip()
                     if sid.isdigit():
                         v1, v2 = float(row[lat_c]), float(row[lon_c])
-                        # AUTO-FLIP LOGIC: Ensure Latitude is ~33 and Longitude is ~-117
-                        lat = v1 if 32 < v1 < 42 else v2
-                        lon = v2 if -125 < v2 < -110 else v1
                         
-                        if 32.5 < lat < 35.5 and -121.0 < lon < -114.0:
+                        # --- THE IRON DOME FILTER ---
+                        # Strictly identify which is which. In SoCal, Lon is ALWAYS negative (~-117)
+                        # and Lat is ALWAYS positive (~33).
+                        lat = v1 if (32.0 < v1 < 36.0) else (v2 if (32.0 < v2 < 36.0) else None)
+                        lon = v2 if (-120.0 < v2 < -114.0) else (v1 if (-120.0 < v1 < -114.0) else None)
+                        
+                        if lat and lon:
                             excel_data[sid] = {"lat": lat, "lon": lon, "street": str(row.get('Street', f'Site {sid}'))}
         except: pass
 
@@ -107,18 +110,22 @@ def process_upload(est_configs, excel_files, m_type):
         raw_map = cfg['file'].getvalue().decode('latin-1', errors='ignore')
         for sid, data in excel_data.items():
             if sid in raw_map:
-                # Find associated coords in map file block
-                gps_matches = re.findall(r'(-?\d{2,3}\.\d{4,})', raw_map[raw_map.find(sid):raw_map.find(sid)+2000])
-                points = []
+                # Find associated coords in map file block following the site number
+                gps_matches = re.findall(r'(-?\d{2,3}\.\d{3,})', raw_map[raw_map.find(sid):raw_map.find(sid)+2500])
+                
+                # Filter the map points through the same Iron Dome logic
+                valid_lat, valid_lon = data['lat'], data['lon']
                 for val in [float(x) for x in gps_matches]:
-                    if 32.5 < val < 35.5: points.append(val) # Potentially a Lat
-                    if -121.0 < val < -114.0: points.append(val) # Potentially a Lon
+                    if 32.0 < val < 36.0: valid_lat = val
+                    if -120.0 < val < -114.0: valid_lon = val
                 
-                # Determine point furthest from home for intersection bias
-                p_lat = points[0] if len(points) > 0 else data['lat']
-                p_lon = points[1] if len(points) > 1 else data['lon']
-                
-                final_list.append({"id": sid, "lat_start": p_lat, "lon_start": p_lon, "sheet": cfg['label'], "street": data['street']})
+                final_list.append({
+                    "id": sid, 
+                    "lat_start": valid_lat, 
+                    "lon_start": valid_lon, 
+                    "sheet": cfg['label'], 
+                    "street": data['street']
+                })
 
     if final_list:
         df_final = pd.DataFrame(final_list).drop_duplicates(subset=['id', 'sheet'])
@@ -140,7 +147,7 @@ def process_upload(est_configs, excel_files, m_type):
 
 # --- UI ---
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 Live Wire Geofenced")
+    st.title("🚦 Live Wire Iron Dome")
     restore_file = st.file_uploader("🔄 RESTORE (.JSON)", type=["json"])
     if restore_file and st.button("🔓 LOAD"):
         data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
@@ -150,10 +157,10 @@ if not st.session_state.get("optimized_route"):
     up_files = st.file_uploader("2️⃣ MAPS (.EST / .TXT)", accept_multiple_files=True)
     if up_files and excel_files:
         configs = [{"file": f, "label": st.text_input(f"Day {i+1}:", value=f"Day {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 SYNC SYSTEM"):
+        if st.button("🚀 SYNC CALIFORNIA ONLY"):
             success, count = process_upload(configs, excel_files, m_type)
-            if success: st.success(f"Synced {count} California Sites."); time.sleep(1); st.rerun()
-            else: st.error("No California coordinates found.")
+            if success: st.success(f"Successfully locked {count} California Sites."); time.sleep(1); st.rerun()
+            else: st.error("No California-bounded coordinates found.")
 else:
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()

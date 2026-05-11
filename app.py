@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V45 Interactive", layout="centered")
+st.set_page_config(page_title="Live Wire V46 Verifier", layout="centered")
 
 st.markdown("""
     <style>
@@ -164,9 +164,16 @@ def process_upload(est_configs, data_files, m_type):
                     lats = [c for c in coords if 32.0 < c < 36.0]
                     lons = [c for c in coords if -125.0 < c < -114.0]
                     if lats and lons:
+                        lat1, lon1 = lats[0], lons[0]
+                        lat2, lon2 = lats[-1], lons[-1]
+                        
+                        # V46 Safety Clamp: If EST file scraped a corrupted block that spans >2 miles, ignore the End Point
+                        if abs(lat1 - lat2) > 0.05 or abs(lon1 - lon2) > 0.05:
+                            lat2, lon2 = lat1, lon1
+
                         all_raw_master.append({
-                            "id": sid, "lat_start": lats[0], "lon_start": lons[0],
-                            "lat_end": lats[-1], "lon_end": lons[-1],
+                            "id": sid, "lat_start": lat1, "lon_start": lon1,
+                            "lat_end": lat2, "lon_end": lon2,
                             "sheet": cfg['label'], "lanes": 1, "street": ""
                         })
     
@@ -209,6 +216,8 @@ def process_upload(est_configs, data_files, m_type):
             s['uid']: {"Date":"","Time":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"",
                       "Directions": s['auto_dir'], 
                       "Lanes":s.get('lanes', 1),"Street":s.get('street', ""),"Notes":"","Installed":installed_status,
+                      "Lat_Start":s['lat_start'], "Lon_Start":s['lon_start'],
+                      "Lat_End":s['lat_end'], "Lon_End":s['lon_end'],
                       "Picked up":"","LAT":s['nav_lat'],"LON":s['nav_lon'],"Skipped":False,"Sheet":s['sheet']} for s in final_route
         }
         
@@ -268,7 +277,7 @@ else:
     with tab1:
         st.success(f"MISSION: {st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")
         
-        # V45: Advanced Map Colors (Green = Done, Red = Skipped, Orange = Pending)
+        # V46: Visual Verifier - 3 Dots per Site
         map_points = []
         is_pickup_mode = "PICK-UP" in st.session_state.mission_type
         for s in st.session_state.optimized_route:
@@ -276,14 +285,25 @@ else:
             is_done = sd["Picked up"] == "x" if is_pickup_mode else sd["Installed"] == "x"
             is_skipped = sd.get("Skipped", False)
             
-            if is_done: color = "#00FF00"      # Green
-            elif is_skipped: color = "#FF0000" # Red
-            else: color = "#FFA500"            # Orange
-            map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": color})
+            # Nav Target Color
+            if is_done: color = "#00FF00"      
+            elif is_skipped: color = "#FF0000" 
+            else: color = "#FFA500"            
+            
+            # 1. Main Nav Pin (Large)
+            map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": color, "size": 120})
+            
+            # 2. Begin Pin (Blue, Small)
+            if sd.get('Lat_Start') and sd.get('Lon_Start'):
+                map_points.append({"lat": sd['Lat_Start'], "lon": sd['Lon_Start'], "color": "#0000FF", "size": 30})
+            
+            # 3. End Pin (Red, Small)
+            if sd.get('Lat_End') and sd.get('Lon_End'):
+                map_points.append({"lat": sd['Lat_End'], "lon": sd['Lon_End'], "color": "#FF0000", "size": 30})
         
-        st.map(pd.DataFrame(map_points), color="color", zoom=9)
+        st.map(pd.DataFrame(map_points), color="color", size="size", zoom=9)
+        st.caption("🔵 Begin Point | 🔴 End Point | 🟢/🟠 Nav Target")
         
-        # V45: Interactive Button Manifest
         st.markdown("### 📋 INTERACTIVE MANIFEST")
         st.caption("Tap any stop to instantly lock it in. Then switch to your Install/Pick-Up tab to view it.")
         
@@ -300,11 +320,9 @@ else:
             else:
                 label = f"🟠 STOP {idx+1}: Site {sd['Site']}{street_text}"
 
-            # If you click a list item, it automatically sets the index for the other tabs
             if st.button(label, key=f"manifest_btn_{idx}", use_container_width=True):
                 if is_pickup_mode:
                     try:
-                        # Find where this specific site lives in the pickup itinerary
                         p_idx = next(i for i, pu in enumerate(st.session_state.pickup_itinerary) if pu['UID'] == s['uid'])
                         st.session_state.pickup_index = p_idx
                         auto_save()
@@ -361,7 +379,7 @@ else:
                     live_lat, live_lon = loc['latitude'], loc['longitude']
                     st.success(f"✅ GPS Locked: {live_lat}, {live_lon}")
                 
-                with st.form(key=f"f_v45_{uid}"):
+                with st.form(key=f"f_v46_{uid}"):
                     c1, c2 = st.columns(2)
                     dir_options = ["n","e","s","w"]
                     current_dir = sd.get("Directions", "n")
@@ -435,7 +453,6 @@ else:
                             st.session_state.site_data[uid]["Picked up"] = "x"
                             st.session_state.site_data[uid]["Skipped"] = False
                             st.session_state.site_data[uid]["Notes"] = p_notes.strip(); st.session_state.pickup_index += 1; auto_save(); st.rerun()
-                        # V45: Skipped logic added to Pick-Ups
                         if col_b.form_submit_button("🚨 UNABLE (SKIP)", use_container_width=True):
                             st.session_state.site_data[uid]["Notes"] = f"UNABLE: {p_notes.upper()}"
                             st.session_state.site_data[uid]["Skipped"] = True

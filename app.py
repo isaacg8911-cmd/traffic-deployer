@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.4 De-Duplicator", layout="centered")
+st.set_page_config(page_title="Live Wire V51.6 Column-A Commander", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -59,8 +59,7 @@ def auto_save():
             "mission_type": st.session_state.get("mission_type", "📍 INSTALLATION"),
             "pickup_index": st.session_state.get("pickup_index", 0),
             "pickup_itinerary": st.session_state.get("pickup_itinerary", []),
-            "theme": st.session_state.get("theme", "☁️ Overcast (Standard)"),
-            "last_sort_mode": st.session_state.get("last_sort_mode", "⏳ Chronological (Install Order)")
+            "theme": st.session_state.get("theme", "☁️ Overcast (Standard)")
         }
         with open(BACKUP_FILE, "w") as f:
             json.dump(payload, f)
@@ -78,7 +77,6 @@ if "init" not in st.session_state:
         st.session_state.site_data = {}
         st.session_state.current_index, st.session_state.pickup_index = 0, 0
         st.session_state.mission_type = "📍 INSTALLATION"
-        st.session_state.last_sort_mode = "⏳ Chronological (Install Order)"
     st.session_state.init = True
 
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
@@ -103,61 +101,61 @@ def get_closest_point_on_segment(px, py, ax, ay, bx, by):
     t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / dist_sq))
     return ax + t * dx, ay + t * dy
 
-def process_upload(est_configs, data_files, m_type):
-    all_raw_master, valid_uids_for_mission, is_pickup = [], set(), "PICK-UP" in m_type
-    csv_lookup = {}
+def process_upload(est_configs, excel_files, m_type):
+    all_raw_master = []
+    master_site_ids = []
     
-    if data_files:
-        for f in data_files:
+    # 1. SCAN ALL SHEETS IN ALL EXCEL FILES (Column A Only)
+    if excel_files:
+        for f in excel_files:
             try:
-                df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
-                df.columns = [str(c).strip().lower() for c in df.columns]
-                id_col = next((c for c in df.columns if 'tds' in c or 'site' in c), None)
-                if id_col:
-                    for _, row in df.iterrows():
-                        if pd.notna(row[id_col]):
-                            sid = str(row[id_col]).split('.')[0].strip() # Fixes .0 decimal glitch
-                            if sid.isdigit():
-                                csv_lookup[sid] = {
-                                    'lat_start': float(row.get('begin_lat', row.get('lat1', 0))),
-                                    'lon_start': float(row.get('begin_lon', row.get('lon1', 0))),
-                                    'lat_end': float(row.get('end_lat', row.get('lat2', row.get('begin_lat', 0)))),
-                                    'lon_end': float(row.get('end_lon', row.get('lon2', row.get('begin_lon', 0)))),
-                                    'lanes': int(float(row.get('through_lanes', row.get('lane', 2)))),
-                                    'street': str(row.get('street', ''))
-                                }
-            except: pass
+                if f.name.lower().endswith('.csv'):
+                    df = pd.read_csv(f, encoding='latin-1')
+                    ids = df.iloc[:, 0].dropna().astype(str).str.split('.').str[0].tolist()
+                    master_site_ids.extend([i for i in ids if i.isdigit()])
+                else:
+                    xl = pd.ExcelFile(f)
+                    for sheet_name in xl.sheet_names:
+                        df = xl.parse(sheet_name)
+                        if not df.empty:
+                            ids = df.iloc[:, 0].dropna().astype(str).str.split('.').str[0].tolist()
+                            master_site_ids.extend([i for i in ids if i.isdigit()])
+            except Exception as e:
+                st.error(f"Error reading Excel: {e}")
 
+    master_site_ids = list(set(master_site_ids)) # De-duplicate
+    
+    if not master_site_ids:
+        return False, 0
+
+    # 2. MATCH SITES TO MAP FILES
     for cfg in est_configs:
         try:
             raw_bytes = cfg['file'].getvalue()
             text = re.sub(r'\s+', ' ', raw_bytes.decode('latin-1', errors='ignore').replace('\x00', ' '))
-            # Force distinct ID finding
-            all_found_ids = set(re.findall(r'\b(\d{4,5})\b', text))
             
-            if is_pickup: active_sids = set(re.findall(r'\b(\d{4,5})[^\w\s]*\s*[xX]\b', text, re.IGNORECASE))
-            else: active_sids = set(re.findall(r'\b(\d{4,5})\s+\1\s+', text))
-            
-            # V51.4: Strict Filtering - Only keep IDs that actually exist in the mission pattern
-            for sid in active_sids:
-                valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
-                if sid in csv_lookup:
-                    d = csv_lookup[sid]
-                    all_raw_master.append({"id": sid, "lat_start": d['lat_start'], "lon_start": d['lon_start'], "lat_end": d['lat_end'], "lon_end": d['lon_end'], "sheet": cfg['label'], "lanes": d['lanes'], "street": d['street']})
-                else:
-                    match = re.search(r'\b' + sid + r'\b(.{1,600})', text)
-                    if match:
-                        coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{3,}', match.group(1))]
-                        lats, lons = [c for c in coords if 32.0 < c < 36.0], [c for c in coords if -125.0 < c < -114.0]
-                        if lats and lons:
-                            all_raw_master.append({"id": sid, "lat_start": lats[0], "lon_start": lons[0], "lat_end": lats[-1], "lon_end": lons[-1], "sheet": cfg['label'], "lanes": 2, "street": ""})
-        except: return False, 0
+            for sid in master_site_ids:
+                # Look for the Site Number in the Map Code
+                match = re.search(r'\b' + sid + r'\b(.{1,800})', text)
+                if match:
+                    coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{3,}', match.group(1))]
+                    lats = [c for c in coords if 32.0 < c < 36.0]
+                    lons = [c for c in coords if -125.0 < c < -114.0]
+                    
+                    if lats and lons:
+                        all_raw_master.append({
+                            "id": sid,
+                            "lat_start": lats[0], "lon_start": lons[0],
+                            "lat_end": lats[-1], "lon_end": lons[-1],
+                            "sheet": cfg['label'], "lanes": 2, "street": ""
+                        })
+        except: pass
 
     if all_raw_master:
-        # V51.4: Force Unique Sites Only (Removes the 83-stop ghosting)
         df = pd.DataFrame(all_raw_master).drop_duplicates(subset=['id', 'sheet'])
         df['uid'] = df['sheet'] + "_" + df['id']
         master_rem, master_route, curr = df.to_dict('records'), [], HOME_COORDS
+        
         while master_rem:
             best_nxt, best_dist, best_target = None, float('inf'), None
             for x in master_rem:
@@ -169,35 +167,34 @@ def process_upload(est_configs, data_files, m_type):
         
         st.session_state.optimized_route = master_route
         st.session_state.active_files = [c['label'] for c in est_configs]
-        st.session_state.site_data = {s['uid']: {"Date":"","Time":"","ExactTime":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"","Directions": get_bearing(s['lat_start'], s['lon_start'], s['lat_end'], s['lon_end']), "Lanes":s.get('lanes', 2),"Street":s.get('street', ""),"Notes":"","Installed":"x" if is_pickup else "","Lat_Start":s['lat_start'], "Lon_Start":s['lon_start'],"Lat_End":s['lat_end'], "Lon_End":s['lon_end'],"Picked up":"","LAT":s['nav_lat'],"LON":s['nav_lon'],"Skipped":False,"Sheet":s['sheet']} for s in master_route}
+        st.session_state.site_data = {s['uid']: {"Date":"","Time":"","ExactTime":"","Site":s['id'],"UID":s['uid'],"Counter":"c1b","Serial":"","Directions": get_bearing(s['lat_start'], s['lon_start'], s['lat_end'], s['lon_end']), "Lanes":s.get('lanes', 2),"Street":"","Notes":"","Installed":"","Lat_Start":s['lat_start'], "Lon_Start":s['lon_start'],"Lat_End":s['lat_end'], "Lon_End":s['lon_end'],"Picked up":"","LAT":s['nav_lat'],"LON":s['nav_lon'],"Skipped":False,"Sheet":s['sheet']} for s in master_route}
         st.session_state.mission_type, st.session_state.current_index, st.session_state.pickup_index = m_type, 0, 0
-        if is_pickup: st.session_state.pickup_itinerary = [st.session_state.site_data[s['uid']] for s in master_route]
         auto_save(); return True, len(master_route)
     return False, 0
 
 # --- UI ---
 if not st.session_state.get("optimized_route"):
     st.title("🚦 SECURE UPLOAD")
-    restore_file = st.file_uploader("🔄 RESTORE (.JSON)", type=["json"])
-    if restore_file and st.button("🔓 LOAD"):
+    restore_file = st.file_uploader("🔄 RESTORE PREVIOUS WORK (.JSON)", type=["json"])
+    if restore_file and st.button("🔓 LOAD WORK"):
         try:
-            data = json.loads(restore_file.getvalue())
-            for k, v in data.items(): st.session_state[k] = v
-            st.rerun()
+            data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
         except: st.error("Error")
     st.divider()
     m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
-    data_files = st.file_uploader("1️⃣ DATA (EXCEL/CSV)", accept_multiple_files=True)
-    up_files = st.file_uploader("2️⃣ MAPS (.EST/.TXT)", accept_multiple_files=True)
-    if up_files:
-        configs = [{"file": f, "label": st.text_input(f"Label {i+1}:", value=f"Day {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 SYNC"):
-            success, count = process_upload(configs, data_files, m_type)
-            if success: st.success(f"Locked {count} Unique Sites."); time.sleep(1); st.rerun()
-            else: st.error("No valid data.")
+    excel_files = st.file_uploader("1️⃣ EXCEL / CSV (SITES IN COL A)", accept_multiple_files=True)
+    up_files = st.file_uploader("2️⃣ MAPS (.EST / .TXT)", accept_multiple_files=True)
+    if up_files and excel_files:
+        configs = [{"file": f, "label": st.text_input(f"Label for Map {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
+        if st.button("🚀 SYNC & GENERATE ROUTE"):
+            success, count = process_upload(configs, excel_files, m_type)
+            if success: st.success(f"Locked {count} Sites from Column A."); time.sleep(1); st.rerun()
+            else: st.error("No valid site numbers from Column A found in the Maps.")
 else:
+    st.title("🚦 Field Ops")
     new_theme = st.radio("📱 DISPLAY:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
+    
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
     with tab1:
         st.success(f"{st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")
@@ -207,38 +204,38 @@ else:
             color = "#00FF00" if (sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x") else ("#FF0000" if sd.get("Skipped") else "#FFA500")
             map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": color})
         st.map(pd.DataFrame(map_points), color="color")
-        st.markdown("### 📋 MANIFEST")
         for idx, s in enumerate(st.session_state.optimized_route):
             sd = st.session_state.site_data[s['uid']]
             done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
-            if st.button(f"{'✅' if done else '🟠'} {idx+1}: Site {sd['Site']} {sd.get('Street','')}", key=f"m_{idx}", use_container_width=True):
+            if st.button(f"{'✅' if done else '🟠'} {idx+1}: Site {sd['Site']}", key=f"m_{idx}", use_container_width=True):
                 st.session_state.current_index = idx; st.rerun()
-        st.download_button("💾 DOWNLOAD MASTER SHIFT FILE", json.dumps({k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary", "theme", "last_sort_mode"]}), f"LiveWire_Save.json", use_container_width=True)
-        if st.button("🗑️ CLEAR"):
+        st.download_button("💾 DOWNLOAD MASTER SHIFT FILE", json.dumps({k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary", "theme"]}), f"LiveWire_Save.json", use_container_width=True)
+        if st.button("🗑️ CLEAR & RESET"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.session_state.optimized_route = []; st.rerun()
     with tab2:
         cur = st.session_state.current_index
         if cur < len(st.session_state.optimized_route):
             s = st.session_state.optimized_route[cur]; sd = st.session_state.site_data[s['uid']]
-            st.subheader(f"#{cur+1}: SITE {sd['Site']} | {sd['Street']}")
+            st.subheader(f"#{cur+1}: SITE {sd['Site']}")
             st.link_button("🚗 SINGLE NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
             batch = [f"{st.session_state.site_data[bs['uid']]['LAT']},{st.session_state.site_data[bs['uid']]['LON']}" for bs in st.session_state.optimized_route[cur:cur+9] if st.session_state.site_data[bs['uid']]['Installed'] != "x"]
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV {len(batch)}", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             loc = streamlit_geolocation()
-            if loc and loc.get('latitude'): st.success("✅ GPS ANCHOR READY")
             with st.form(f"f_{cur}"):
                 c1, c2 = st.columns(2)
                 dr = c1.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd["Directions"]))
                 ln = c2.number_input("LANES", min_value=1, value=int(sd["Lanes"]))
                 ser, nt = st.text_input("SERIAL #", value=sd["Serial"]), st.text_input("NOTES", value=sd["Notes"])
                 if st.form_submit_button("✅ COMPLETE", use_container_width=True):
-                    t, d, et = get_ca_time()
-                    st.session_state.site_data[s['uid']].update({"Date":d, "Time":t, "ExactTime":et, "Directions":dr, "Serial":ser, "Lanes":ln, "Notes":nt, "Installed":"x", "LAT":loc['latitude'] if loc and loc.get('latitude') else sd['LAT'], "LON":loc['longitude'] if loc and loc.get('longitude') else sd['LON'], "Skipped":False})
+                    _, d, et = get_ca_time()
+                    st.session_state.site_data[s['uid']].update({"Date":d, "ExactTime":et, "Directions":dr, "Serial":ser, "Lanes":ln, "Notes":nt, "Installed":"x", "LAT":loc['latitude'] if loc and loc.get('latitude') else sd['LAT'], "LON":loc['longitude'] if loc and loc.get('longitude') else sd['LON'], "Skipped":False})
                     st.session_state.current_index += 1; auto_save(); st.rerun()
             if cur > 0 and st.button("⬅️ PREVIOUS"): st.session_state.current_index -= 1; st.rerun()
     with tab3:
-        itin = st.session_state.get("pickup_itinerary", [])
+        if not st.session_state.pickup_itinerary:
+            st.session_state.pickup_itinerary = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
+        itin = st.session_state.pickup_itinerary
         if itin:
             p_idx = st.session_state.pickup_index
             if p_idx < len(itin):

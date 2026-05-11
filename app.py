@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.11 Binary Bridge", layout="centered")
+st.set_page_config(page_title="Live Wire V51.12 Deep Extract", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -99,7 +99,7 @@ def process_upload(est_configs, excel_files, m_type):
     all_raw_master = []
     master_site_ids = []
     
-    # 1. BOSS: Excel Site Numbers
+    # 1. EXCEL SCAN (The Commander)
     if excel_files:
         for f in excel_files:
             try:
@@ -107,7 +107,7 @@ def process_upload(est_configs, excel_files, m_type):
                     df = pd.read_csv(f, encoding='latin-1')
                 else:
                     df = pd.read_excel(f, engine='openpyxl')
-                
+                # Grab clean numbers from first column (a)
                 nums = df.iloc[:, 0].dropna().astype(str).str.replace(r'\.0$', '', regex=True).tolist()
                 master_site_ids.extend([n.strip() for n in nums if n.strip().isdigit()])
             except: pass
@@ -115,24 +115,23 @@ def process_upload(est_configs, excel_files, m_type):
     master_site_ids = sorted(list(set(master_site_ids)))
     if not master_site_ids: return False, 0
 
-    # 2. THE BRIDGE: Binary-Safe Extraction
+    # 2. DEEP EXTRACTION (The Map Harvester)
     for cfg in est_configs:
         try:
             raw_data = cfg['file'].getvalue()
-            # Decode using latin-1 to keep byte integrity, then clean up non-printable
-            raw_text = raw_data.decode('latin-1', errors='ignore')
-            text = "".join([c if ord(c) < 128 else ' ' for c in raw_text])
+            # Preserve byte alignment but clean control chars
+            text = raw_data.decode('latin-1', errors='ignore').replace('\x00', ' ')
             text = re.sub(r'\s+', ' ', text)
             
             for sid in master_site_ids:
-                # Find the ID and scan a wide block (3000 chars) for coordinates
-                match = re.search(r'\b' + sid + r'\b(.{1,3000})', text)
+                # Use a larger scan window (5000 chars) for deep MapPoint encoding
+                match = re.search(r'\b' + sid + r'\b(.{1,5000})', text)
                 if match:
-                    # Look for coordinates with at least 3 decimal places
-                    coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{3,}', match.group(1))]
+                    # Capture everything that looks like a high-precision coordinate
+                    coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{4,}', match.group(1))]
                     
-                    # Broadened SoCal bounds
-                    lats = [c for c in coords if 32.0 < c < 35.5]
+                    # Strict geographical boundary for Southern California (No ghost pins)
+                    lats = [c for c in coords if 32.5 < c < 35.0]
                     lons = [c for c in coords if -121.0 < c < -114.0]
                     
                     if lats and lons:
@@ -165,27 +164,27 @@ def process_upload(est_configs, excel_files, m_type):
         auto_save(); return True, len(master_route)
     return False, 0
 
-# --- UI ---
+# --- UI START ---
 if not st.session_state.get("optimized_route"):
     st.title("🚦 SECURE UPLOAD")
-    restore_file = st.file_uploader("🔄 RESTORE (.JSON)", type=["json"])
+    restore_file = st.file_uploader("🔄 RESTORE PREVIOUS WORK (.JSON)", type=["json"])
     if restore_file and st.button("🔓 LOAD"):
         try:
             data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
-        except: st.error("Error")
+        except: st.error("Restore failed.")
     st.divider()
     m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
-    excel_files = st.file_uploader("1️⃣ EXCEL (COL A SITES)", accept_multiple_files=True)
+    excel_files = st.file_uploader("1️⃣ DATA (COLUMN A LEADERS)", accept_multiple_files=True)
     up_files = st.file_uploader("2️⃣ MAPS (.EST / .TXT)", accept_multiple_files=True)
     if up_files and excel_files:
-        configs = [{"file": f, "label": st.text_input(f"Map Name {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 SYNC SYSTEM"):
-            with st.spinner("Processing binary map data..."):
+        configs = [{"file": f, "label": st.text_input(f"Name Map {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
+        if st.button("🚀 DEEP HARVEST SYNC"):
+            with st.spinner("Extracting coordinates from binary map stream..."):
                 success, count = process_upload(configs, excel_files, m_type)
-                if success: st.success(f"Locked {count} Sites."); time.sleep(1); st.rerun()
-                else: st.error("Coordinates not found in map for these site numbers. Check Column A.")
+                if success: st.success(f"Successfully locked {count} sites."); time.sleep(1); st.rerun()
+                else: st.error("No coordinates found near those site numbers in the Map files.")
 else:
-    st.title("🚦 Field Dashboard")
+    st.title("🚦 Live Wire Dashboard")
     new_theme = st.radio("VISIBILITY:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
     
@@ -201,18 +200,18 @@ else:
         for idx, s in enumerate(st.session_state.optimized_route):
             sd = st.session_state.site_data[s['uid']]
             done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
-            if st.button(f"{'✅' if done else '🟠'} {idx+1}: Site {sd['Site']}", key=f"m_{idx}", use_container_width=True):
+            if st.button(f"{'✅' if done else '🟠'} Stop {idx+1}: {sd['Site']}", key=f"m_{idx}", use_container_width=True):
                 st.session_state.current_index = idx; st.rerun()
         st.download_button("💾 DOWNLOAD BACKUP", json.dumps({k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary", "theme"]}), f"LiveWire_Backup.json", use_container_width=True)
-        if st.button("🗑️ CLEAR"):
+        if st.button("🗑️ RESET ROUTE"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.session_state.optimized_route = []; st.rerun()
     with tab2:
         cur = st.session_state.current_index
         if cur < len(st.session_state.optimized_route):
             s = st.session_state.optimized_route[cur]; sd = st.session_state.site_data[s['uid']]
-            st.subheader(f"#{cur+1}: SITE {sd['Site']}")
-            st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
+            st.subheader(f"#{cur+1}: Site {sd['Site']}")
+            st.link_button("🚗 SINGLE NAV", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
             batch = [f"{st.session_state.site_data[bs['uid']]['LAT']},{st.session_state.site_data[bs['uid']]['LON']}" for bs in st.session_state.optimized_route[cur:cur+9] if st.session_state.site_data[bs['uid']]['Installed'] != "x"]
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV {len(batch)}", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             loc = streamlit_geolocation()
@@ -233,7 +232,7 @@ else:
             p_idx = st.session_state.pickup_index
             if p_idx < len(itin):
                 s = itin[p_idx]; uid = s['UID']
-                st.subheader(f"PICK-UP #{p_idx+1}: SITE {s['Site']}")
+                st.subheader(f"PICK-UP #{p_idx+1}: Site {s['Site']}")
                 st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
                 if st.button("✅ SECURED", use_container_width=True):
                     st.session_state.site_data[uid].update({"Picked up":"x"}); st.session_state.pickup_index += 1; auto_save(); st.rerun()
@@ -246,4 +245,4 @@ else:
                 for sheet_name in st.session_state.active_files:
                     sheet_df = full_df[full_df["Sheet"] == sheet_name]
                     if not sheet_df.empty: sheet_df.to_excel(writer, index=False, sheet_name=sheet_name)
-            st.download_button("📊 DOWNLOAD EXCEL", output.getvalue(), f"Traffic_Precision_Report.xlsx", use_container_width=True)
+            st.download_button("📊 DOWNLOAD EXCEL", output.getvalue(), f"Traffic_Report.xlsx", use_container_width=True)

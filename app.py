@@ -11,12 +11,12 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.2 Precision", layout="centered")
+st.set_page_config(page_title="Live Wire V51.3 Scraper Fix", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
 
-# --- THEME ENGINE (OLED SAVER) ---
+# --- THEME ENGINE ---
 if "theme" not in st.session_state:
     st.session_state.theme = "☁️ Overcast (Standard)"
 
@@ -51,7 +51,7 @@ def set_theme(theme_choice):
         .stTabs [data-baseweb="tab-list"] { background-color: #0A0A0A; border-bottom: 2px solid #333; }
         .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { color: #FFD700 !important; border-bottom-color: #FFD700 !important; }
         input, select, textarea { background-color: #111 !important; color: #FFD700 !important; border: 1px solid #444 !important; }
-        div[data-testid="stMetricValue"] { color: #FFD700 !important; font-size: 2rem !important; }
+        div[data-testid="stMetricValue"] { color: #FFD700 !important; font-size: 2rem !important; font-weight: 900; }
         div[data-testid="stMetricLabel"] { color: #CCCCCC !important; font-weight: bold; }
         </style>
         """
@@ -119,9 +119,6 @@ def find_col(df, keywords):
     for kw in keywords:
         for c in df.columns:
             if kw == c or f"_{kw}" in c or f"{kw}_" in c: return c
-    for kw in keywords:
-        for c in df.columns:
-            if kw in c: return c
     return None
 
 def process_upload(est_configs, data_files, m_type):
@@ -138,20 +135,33 @@ def process_upload(est_configs, data_files, m_type):
             try:
                 master_df = pd.concat(dfs, ignore_index=True)
                 master_df.columns = [str(c).strip().lower() for c in master_df.columns]
-                id_col, lat1_col, lon1_col = find_col(master_df, ['tds', 'site', 'id']), find_col(master_df, ['begin_lat', 'lat1', 'lat']), find_col(master_df, ['begin_lon', 'lon1', 'lon'])
-                lat2_col, lon2_col, lanes_col, street_col = find_col(master_df, ['end_lat', 'lat2']), find_col(master_df, ['end_lon', 'lon2']), find_col(master_df, ['lane']), find_col(master_df, ['street', 'road', 'name'])
+                id_col = find_col(master_df, ['tds', 'site', 'id'])
+                lat1_col = find_col(master_df, ['begin_lat', 'lat1', 'lat'])
+                lon1_col = find_col(master_df, ['begin_lon', 'lon1', 'lon'])
+                lat2_col, lon2_col = find_col(master_df, ['end_lat', 'lat2']), find_col(master_df, ['end_lon', 'lon2'])
+                lanes_col, street_col = find_col(master_df, ['lane', 'through_lanes']), find_col(master_df, ['street', 'road', 'name'])
                 if id_col and lat1_col and lon1_col:
                     for _, row in master_df.iterrows():
                         if pd.notna(row[id_col]):
-                            sid = re.search(r'(\d{4,5})', str(row[id_col]))
-                            if sid:
-                                csv_lookup[sid.group(1)] = {'lat_start': float(row[lat1_col]), 'lon_start': float(row[lon1_col]), 'lat_end': float(row[lat2_col]) if lat2_col and pd.notna(row[lat2_col]) else float(row[lat1_col]), 'lon_end': float(row[lon2_col]) if lon2_col and pd.notna(row[lon2_col]) else float(row[lon1_col]), 'lanes': int(float(row[lanes_col])) if lanes_col and pd.notna(row[lanes_col]) else 2, 'street': str(row[street_col]) if street_col and pd.notna(row[street_col]) else ""}
+                            sid_raw = str(row[id_col]).split('.')[0] # Strip .0 from Excel numbers
+                            sid_match = re.search(r'(\d{4,5})', sid_raw)
+                            if sid_match:
+                                sid = sid_match.group(1)
+                                csv_lookup[sid] = {
+                                    'lat_start': float(row[lat1_col]), 'lon_start': float(row[lon1_col]),
+                                    'lat_end': float(row[lat2_col]) if lat2_col and pd.notna(row[lat2_col]) else float(row[lat1_col]),
+                                    'lon_end': float(row[lon2_col]) if lon2_col and pd.notna(row[lon2_col]) else float(row[lon1_col]),
+                                    'lanes': int(float(row[lanes_col])) if lanes_col and pd.notna(row[lanes_col]) else 2,
+                                    'street': str(row[street_col]) if street_col and pd.notna(row[street_col]) else ""
+                                }
             except: pass
+
     for cfg in est_configs:
         try:
             raw_bytes = cfg['file'].getvalue()
             text = re.sub(r'\s+', ' ', raw_bytes.decode('latin-1', errors='ignore').replace('\x00', ' ').replace('\n', ' ').replace('\r', ' '))
-            base_route_sids = set(re.findall(r'\b(\d{4,5})\s+\1\s+', text))
+            # Stronger pattern for MapPoint codes
+            base_route_sids = set(re.findall(r'\b(\d{4,5})\b', text))
             if is_pickup: active_mission_sids = set(re.findall(r'\b(\d{4,5})[^\w\s]*\s*[xX]\b', text, re.IGNORECASE))
             else: active_mission_sids = base_route_sids
             for sid in active_mission_sids: valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
@@ -212,31 +222,27 @@ if not st.session_state.get("optimized_route"):
         if st.button("🚀 SYNC ROUTE", use_container_width=True):
             success, count = process_upload(configs, data_files, m_type)
             if success: st.success(f"✅ Locked {count} sites."); time.sleep(1); st.rerun()
-            else: st.error("No valid data.")
+            else: st.error("No valid data found. Check tds column in Excel.")
 else:
     new_theme = st.radio("📱 DISPLAY:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: st.session_state.theme = new_theme; auto_save(); st.rerun()
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
     with tab1:
         st.success(f"{st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")
-        map_points = []
-        is_p = "PICK-UP" in st.session_state.mission_type
-        # Add Home with high precision
-        map_points.append({"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF"})
+        map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF"}]
         for s in st.session_state.optimized_route:
             sd = st.session_state.site_data[s['uid']]
-            done = sd["Picked up"] == "x" if is_p else sd["Installed"] == "x"
+            done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
             color = "#00FF00" if done else ("#FF0000" if sd.get("Skipped") else "#FFA500")
             map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": color})
-        # V51.2 Snap to work area logic:
-        st.map(pd.DataFrame(map_points), color="color", zoom=None) # Zoom=None triggers auto-snap to pins
+        st.map(pd.DataFrame(map_points), color="color", zoom=None)
         st.markdown("### 📋 MANIFEST")
         for idx, s in enumerate(st.session_state.optimized_route):
             sd = st.session_state.site_data[s['uid']]
-            done = sd["Picked up"] == "x" if is_p else sd["Installed"] == "x"
+            done = sd["Picked up"] == "x" if "PICK-UP" in st.session_state.mission_type else sd["Installed"] == "x"
             label = f"{'✅' if done else ('🚫' if sd.get('Skipped') else '🟠')} STOP {idx+1}: Site {sd['Site']} {sd.get('Street','')}"
             if st.button(label, key=f"m_{idx}", use_container_width=True):
-                if is_p:
+                if "PICK-UP" in st.session_state.mission_type:
                     try: st.session_state.pickup_index = next(i for i, pu in enumerate(st.session_state.pickup_itinerary) if pu['UID'] == s['uid'])
                     except: pass
                 else: st.session_state.current_index = idx

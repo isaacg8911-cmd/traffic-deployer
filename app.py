@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V50 Dual-Routing", layout="centered")
+st.set_page_config(page_title="Live Wire V51 Max-Batch", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -92,7 +92,6 @@ if "init" not in st.session_state:
 
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 
-# Upgraded Clock to log Exact Seconds for Chronological Sorting
 def get_ca_time():
     now = datetime.now(ZoneInfo("America/Los_Angeles"))
     exact_t = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -422,8 +421,9 @@ else:
                 
                 st.link_button("🚗 SINGLE NAVIGATION", f"https://www.google.com/maps/search/?api=1&query={sd['LAT']},{sd['LON']}", use_container_width=True)
                 
+                # V51 Pushing Batch Routing to Google's Max Limit (9 Stops)
                 batch_coords = []
-                for j in range(cur_idx, min(total_sites, cur_idx + 5)):
+                for j in range(cur_idx, min(total_sites, cur_idx + 9)):
                     bs = st.session_state.optimized_route[j]
                     if st.session_state.site_data[bs['uid']]['Installed'] != "x" and not st.session_state.site_data[bs['uid']].get('Skipped'):
                         batch_coords.append(f"{st.session_state.site_data[bs['uid']]['LAT']},{st.session_state.site_data[bs['uid']]['LON']}")
@@ -442,7 +442,7 @@ else:
                     live_lat, live_lon = loc['latitude'], loc['longitude']
                     st.success(f"✅ GPS Locked: {live_lat}, {live_lon}")
                 
-                with st.form(key=f"f_v50_{uid}"):
+                with st.form(key=f"f_v51_{uid}"):
                     c1, c2 = st.columns(2)
                     dir_options = ["n","e","s","w"]
                     current_dir = sd.get("Directions", "n")
@@ -533,8 +533,9 @@ else:
                     
                     st.link_button("🚗 SINGLE NAVIGATION", f"https://www.google.com/maps/search/?api=1&query={s['LAT']},{s['LON']}", use_container_width=True)
                     
+                    # V51 Max Batch Routing for Pickups (Up to 9 stops)
                     batch_coords_pu = []
-                    for j in range(p_idx, min(len(itinerary), p_idx + 5)):
+                    for j in range(p_idx, min(len(itinerary), p_idx + 9)):
                         bs = itinerary[j]
                         if st.session_state.site_data[bs['UID']]['Picked up'] != "x" and not st.session_state.site_data[bs['UID']].get('Skipped'):
                             batch_coords_pu.append(f"{st.session_state.site_data[bs['UID']]['LAT']},{st.session_state.site_data[bs['UID']]['LON']}")

@@ -11,40 +11,70 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V46 Verifier", layout="centered")
-
-st.markdown("""
-    <style>
-    .stApp { background-color: #0A0A0A; color: #FFFFFF; }
-    h1, h2, h3 { color: #FFD700 !important; font-family: 'Arial Black'; letter-spacing: -1px; }
-    div.stButton > button { 
-        background-color: #1E1E1E; color: #FFD700; border: 2px solid #FFD700; 
-        font-weight: 900; border-radius: 4px; transition: 0.3s;
-    }
-    div.stButton > button:active { transform: scale(0.95); background-color: #FFD700; color: #000; }
-    .stTabs [data-baseweb="tab-list"] { background-color: #0A0A0A; border-bottom: 2px solid #333; }
-    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { color: #FFD700 !important; border-bottom-color: #FFD700 !important; }
-    input, select, textarea { background-color: #111 !important; color: #FFD700 !important; border: 1px solid #444 !important; }
-    div[data-testid="stMetricValue"] { color: #FFD700 !important; font-size: 2rem !important; }
-    div[data-testid="stMetricLabel"] { color: #CCCCCC !important; font-weight: bold; }
-    </style>
-    """, unsafe_allow_html=True)
+st.set_page_config(page_title="Live Wire V48 Adaptive Display", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
 
+# --- THEME ENGINE ---
+if "theme" not in st.session_state:
+    st.session_state.theme = "☁️ Overcast (Standard)"
+
+def set_theme(theme_choice):
+    if theme_choice == "🌞 Bright Sun (OLED Contrast)":
+        # Pixel 9 Extreme Battery Saver Mode: Pitch black + Neon Cyan
+        return """
+        <style>
+        .stApp { background-color: #000000; color: #FFFFFF; }
+        h1, h2, h3 { color: #00FFFF !important; font-family: 'Arial Black'; letter-spacing: -1px; font-weight: 900;}
+        div.stButton > button { 
+            background-color: #000000; color: #00FFFF; border: 3px solid #00FFFF; 
+            font-weight: 900; border-radius: 4px; transition: 0.3s;
+        }
+        div.stButton > button:active { transform: scale(0.95); background-color: #00FFFF; color: #000000; }
+        .stTabs [data-baseweb="tab-list"] { background-color: #000000; border-bottom: 3px solid #333; }
+        .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { color: #00FFFF !important; border-bottom-color: #00FFFF !important; }
+        input, select, textarea { background-color: #000000 !important; color: #00FFFF !important; border: 2px solid #00FFFF !important; font-weight: bold;}
+        div[data-testid="stMetricValue"] { color: #00FFFF !important; font-size: 2rem !important; font-weight: 900; }
+        div[data-testid="stMetricLabel"] { color: #FFFFFF !important; font-weight: bold; }
+        </style>
+        """
+    else:
+        # Standard Gloomy/Classic Mode: Soft dark gray + Gold
+        return """
+        <style>
+        .stApp { background-color: #0A0A0A; color: #FFFFFF; }
+        h1, h2, h3 { color: #FFD700 !important; font-family: 'Arial Black'; letter-spacing: -1px; }
+        div.stButton > button { 
+            background-color: #1E1E1E; color: #FFD700; border: 2px solid #FFD700; 
+            font-weight: 900; border-radius: 4px; transition: 0.3s;
+        }
+        div.stButton > button:active { transform: scale(0.95); background-color: #FFD700; color: #000; }
+        .stTabs [data-baseweb="tab-list"] { background-color: #0A0A0A; border-bottom: 2px solid #333; }
+        .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { color: #FFD700 !important; border-bottom-color: #FFD700 !important; }
+        input, select, textarea { background-color: #111 !important; color: #FFD700 !important; border: 1px solid #444 !important; }
+        div[data-testid="stMetricValue"] { color: #FFD700 !important; font-size: 2rem !important; }
+        div[data-testid="stMetricLabel"] { color: #CCCCCC !important; font-weight: bold; }
+        </style>
+        """
+
+# --- BULLETPROOF SAVING ---
 def auto_save():
-    payload = {
-        "active_files": st.session_state.get("active_files", []),
-        "optimized_route": st.session_state.get("optimized_route", []),
-        "site_data": st.session_state.get("site_data", {}),
-        "current_index": st.session_state.get("current_index", 0),
-        "mission_type": st.session_state.get("mission_type", "📍 INSTALLATION"),
-        "pickup_index": st.session_state.get("pickup_index", 0),
-        "pickup_itinerary": st.session_state.get("pickup_itinerary", [])
-    }
-    with open(BACKUP_FILE, "w") as f:
-        json.dump(payload, f)
+    try:
+        payload = {
+            "active_files": st.session_state.get("active_files", []),
+            "optimized_route": st.session_state.get("optimized_route", []),
+            "site_data": st.session_state.get("site_data", {}),
+            "current_index": st.session_state.get("current_index", 0),
+            "mission_type": st.session_state.get("mission_type", "📍 INSTALLATION"),
+            "pickup_index": st.session_state.get("pickup_index", 0),
+            "pickup_itinerary": st.session_state.get("pickup_itinerary", []),
+            "theme": st.session_state.get("theme", "☁️ Overcast (Standard)")
+        }
+        with open(BACKUP_FILE, "w") as f:
+            json.dump(payload, f)
+    except Exception as e:
+        pass
 
 if "init" not in st.session_state:
     if os.path.exists(BACKUP_FILE):
@@ -60,6 +90,9 @@ if "init" not in st.session_state:
         st.session_state.mission_type = "📍 INSTALLATION"
     st.session_state.init = True
 
+# Apply the theme dynamically
+st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
+
 def get_ca_time():
     now = datetime.now(ZoneInfo("America/Los_Angeles"))
     if now.minute > 0: now += timedelta(hours=1)
@@ -67,21 +100,29 @@ def get_ca_time():
 
 def get_bearing(lat1, lon1, lat2, lon2):
     if abs(lat1 - lat2) < 0.00001 and abs(lon1 - lon2) < 0.00001: return "n" 
-    dLon = math.radians(lon2 - lon1)
-    lat1_r, lat2_r = math.radians(lat1), math.radians(lat2)
-    y = math.sin(dLon) * math.cos(lat2_r)
-    x = math.cos(lat1_r) * math.sin(lat2_r) - math.sin(lat1_r) * math.cos(lat2_r) * math.cos(dLon)
-    bearing = (math.degrees(math.atan2(y, x)) + 360) % 360
-    return "n" if (315 <= bearing <= 360) or (0 <= bearing < 45) or (135 <= bearing < 225) else "e"
+    try:
+        dLon = math.radians(lon2 - lon1)
+        lat1_r, lat2_r = math.radians(lat1), math.radians(lat2)
+        y = math.sin(dLon) * math.cos(lat2_r)
+        x = math.cos(lat1_r) * math.sin(lat2_r) - math.sin(lat1_r) * math.cos(lat2_r) * math.cos(dLon)
+        bearing = (math.degrees(math.atan2(y, x)) + 360) % 360
+        return "n" if (315 <= bearing <= 360) or (0 <= bearing < 45) or (135 <= bearing < 225) else "e"
+    except:
+        return "n"
 
 def get_closest_point_on_segment(px, py, ax, ay, bx, by):
     dx, dy = bx - ax, by - ay
     if dx == 0 and dy == 0: return ax, ay
-    t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
+    dist_sq = dx * dx + dy * dy
+    if dist_sq == 0: return ax, ay
+    t = ((px - ax) * dx + (py - ay) * dy) / dist_sq
     t = max(0.0, min(1.0, t))
     return ax + t * dx, ay + t * dy
 
 def find_col(df, keywords):
+    for kw in keywords:
+        for c in df.columns:
+            if kw == c or f"_{kw}" in c or f"{kw}_" in c: return c
     for kw in keywords:
         for c in df.columns:
             if kw in c: return c
@@ -97,85 +138,92 @@ def process_upload(est_configs, data_files, m_type):
         dfs = []
         for f in data_files:
             try:
-                if f.name.lower().endswith('.csv'): dfs.append(pd.read_csv(f, encoding='latin-1'))
-                else: dfs.append(pd.read_excel(f))
+                if f.name.lower().endswith('.csv'): 
+                    dfs.append(pd.read_csv(f, encoding='latin-1', on_bad_lines='skip'))
+                else: 
+                    dfs.append(pd.read_excel(f))
             except: pass
             
         if dfs:
-            master_df = pd.concat(dfs, ignore_index=True)
-            master_df.columns = [str(c).strip().lower() for c in master_df.columns]
-            
-            id_col = find_col(master_df, ['tds', 'site', 'id'])
-            lat1_col = find_col(master_df, ['begin_lat', 'lat1', 'lat'])
-            lon1_col = find_col(master_df, ['begin_lon', 'lon1', 'lon'])
-            lat2_col = find_col(master_df, ['end_lat', 'lat2'])
-            lon2_col = find_col(master_df, ['end_lon', 'lon2'])
-            lanes_col = find_col(master_df, ['lane'])
-            street_col = find_col(master_df, ['street', 'road', 'name'])
-            
-            if id_col and lat1_col and lon1_col:
-                for _, row in master_df.iterrows():
-                    if pd.notna(row[id_col]):
-                        raw_id = str(row[id_col])
-                        match = re.search(r'(\d{4,5})', raw_id)
-                        if match:
-                            sid = match.group(1)
-                            try:
-                                csv_lookup[sid] = {
-                                    'lat_start': float(row[lat1_col]), 'lon_start': float(row[lon1_col]),
-                                    'lat_end': float(row[lat2_col]) if lat2_col and pd.notna(row[lat2_col]) else float(row[lat1_col]),
-                                    'lon_end': float(row[lon2_col]) if lon2_col and pd.notna(row[lon2_col]) else float(row[lon1_col]),
-                                    'lanes': int(float(row[lanes_col])) if lanes_col and pd.notna(row[lanes_col]) else 1,
-                                    'street': str(row[street_col]) if street_col and pd.notna(row[street_col]) else ""
-                                }
-                            except: pass
+            try:
+                master_df = pd.concat(dfs, ignore_index=True)
+                master_df.columns = [str(c).strip().lower() for c in master_df.columns]
+                
+                id_col = find_col(master_df, ['tds', 'site', 'id'])
+                lat1_col = find_col(master_df, ['begin_lat', 'lat1', 'lat'])
+                lon1_col = find_col(master_df, ['begin_lon', 'lon1', 'lon'])
+                lat2_col = find_col(master_df, ['end_lat', 'lat2'])
+                lon2_col = find_col(master_df, ['end_lon', 'lon2'])
+                lanes_col = find_col(master_df, ['lane'])
+                street_col = find_col(master_df, ['street', 'road', 'name'])
+                
+                if id_col and lat1_col and lon1_col:
+                    for _, row in master_df.iterrows():
+                        if pd.notna(row[id_col]):
+                            raw_id = str(row[id_col])
+                            match = re.search(r'(\d{4,5})', raw_id)
+                            if match:
+                                sid = match.group(1)
+                                try:
+                                    csv_lookup[sid] = {
+                                        'lat_start': float(row[lat1_col]), 'lon_start': float(row[lon1_col]),
+                                        'lat_end': float(row[lat2_col]) if lat2_col and pd.notna(row[lat2_col]) else float(row[lat1_col]),
+                                        'lon_end': float(row[lon2_col]) if lon2_col and pd.notna(row[lon2_col]) else float(row[lon1_col]),
+                                        'lanes': int(float(row[lanes_col])) if lanes_col and pd.notna(row[lanes_col]) else 1,
+                                        'street': str(row[street_col]) if street_col and pd.notna(row[street_col]) else ""
+                                    }
+                                except: pass
+            except: pass
 
     for cfg in est_configs:
-        raw_bytes = cfg['file'].getvalue()
-        text = raw_bytes.decode('latin-1', errors='ignore')
-        
-        clean_text = text.replace('\x00', ' ').replace('\n', ' ').replace('\r', ' ')
-        clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
-        clean_text = re.sub(r'\s+', ' ', clean_text)
-        
-        base_route_sids = set(re.findall(r'\b(\d{4,5})\s+\1\s+', clean_text))
-        
-        if is_pickup:
-            active_mission_sids = set(re.findall(r'\b(\d{4,5})[^\w\s]*\s*[xX]\b', clean_text, re.IGNORECASE))
-        else:
-            active_mission_sids = base_route_sids
+        try:
+            raw_bytes = cfg['file'].getvalue()
+            text = raw_bytes.decode('latin-1', errors='ignore')
             
-        for sid in active_mission_sids:
-            valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
+            clean_text = text.replace('\x00', ' ').replace('\n', ' ').replace('\r', ' ')
+            clean_text = re.sub(r'[^\x20-\x7E]', ' ', clean_text)
+            clean_text = re.sub(r'\s+', ' ', clean_text)
             
-        for sid in base_route_sids.union(active_mission_sids):
-            if sid in csv_lookup:
-                d = csv_lookup[sid]
-                all_raw_master.append({
-                    "id": sid, "lat_start": d['lat_start'], "lon_start": d['lon_start'],
-                    "lat_end": d['lat_end'], "lon_end": d['lon_end'],
-                    "sheet": cfg['label'], "lanes": d['lanes'], "street": d['street']
-                })
+            base_route_sids = set(re.findall(r'\b(\d{4,5})\s+\1\s+', clean_text))
+            
+            if is_pickup:
+                active_mission_sids = set(re.findall(r'\b(\d{4,5})[^\w\s]*\s*[xX]\b', clean_text, re.IGNORECASE))
             else:
-                match = re.search(r'\b' + sid + r'\b(.{1,600})', clean_text)
-                if match:
-                    block = match.group(1)
-                    coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{3,}', block)]
-                    lats = [c for c in coords if 32.0 < c < 36.0]
-                    lons = [c for c in coords if -125.0 < c < -114.0]
-                    if lats and lons:
-                        lat1, lon1 = lats[0], lons[0]
-                        lat2, lon2 = lats[-1], lons[-1]
-                        
-                        # V46 Safety Clamp: If EST file scraped a corrupted block that spans >2 miles, ignore the End Point
-                        if abs(lat1 - lat2) > 0.05 or abs(lon1 - lon2) > 0.05:
-                            lat2, lon2 = lat1, lon1
+                active_mission_sids = base_route_sids
+                
+            for sid in active_mission_sids:
+                valid_uids_for_mission.add(f"{cfg['label']}_{sid}")
+                
+            for sid in base_route_sids.union(active_mission_sids):
+                if sid in csv_lookup:
+                    d = csv_lookup[sid]
+                    all_raw_master.append({
+                        "id": sid, "lat_start": d['lat_start'], "lon_start": d['lon_start'],
+                        "lat_end": d['lat_end'], "lon_end": d['lon_end'],
+                        "sheet": cfg['label'], "lanes": d['lanes'], "street": d['street']
+                    })
+                else:
+                    match = re.search(r'\b' + sid + r'\b(.{1,600})', clean_text)
+                    if match:
+                        block = match.group(1)
+                        coords = [float(x) for x in re.findall(r'-?\d{2,3}\.\d{3,}', block)]
+                        lats = [c for c in coords if 32.0 < c < 36.0]
+                        lons = [c for c in coords if -125.0 < c < -114.0]
+                        if lats and lons:
+                            lat1, lon1 = lats[0], lons[0]
+                            lat2, lon2 = lats[-1], lons[-1]
+                            
+                            if abs(lat1 - lat2) > 0.05 or abs(lon1 - lon2) > 0.05:
+                                lat2, lon2 = lat1, lon1
 
-                        all_raw_master.append({
-                            "id": sid, "lat_start": lat1, "lon_start": lon1,
-                            "lat_end": lat2, "lon_end": lon2,
-                            "sheet": cfg['label'], "lanes": 1, "street": ""
-                        })
+                            all_raw_master.append({
+                                "id": sid, "lat_start": lat1, "lon_start": lon1,
+                                "lat_end": lat2, "lon_end": lon2,
+                                "sheet": cfg['label'], "lanes": 1, "street": ""
+                            })
+        except Exception as e:
+            st.error(f"Error parsing file {cfg['label']}")
+            return False, 0
     
     if all_raw_master:
         df = pd.DataFrame(all_raw_master).groupby(["id", "sheet"]).agg({
@@ -271,13 +319,20 @@ if not st.session_state.get("optimized_route"):
 # STAGE 2: MAIN DASHBOARD
 # ==========================================
 else:
+    # V48 Theme Switcher
+    st.markdown("### 📱 VISIBILITY MODE")
+    new_theme = st.radio("Adjust for lighting conditions:", ["☁️ Overcast (Standard)", "🌞 Bright Sun (OLED Contrast)"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
+    if new_theme != st.session_state.theme:
+        st.session_state.theme = new_theme
+        auto_save()
+        st.rerun()
+
     st.title("🚦 Field Ops Dashboard")
     tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL"])
 
     with tab1:
         st.success(f"MISSION: {st.session_state.mission_type} | {len(st.session_state.optimized_route)} STOPS")
         
-        # V46: Visual Verifier - 3 Dots per Site
         map_points = []
         is_pickup_mode = "PICK-UP" in st.session_state.mission_type
         for s in st.session_state.optimized_route:
@@ -285,24 +340,14 @@ else:
             is_done = sd["Picked up"] == "x" if is_pickup_mode else sd["Installed"] == "x"
             is_skipped = sd.get("Skipped", False)
             
-            # Nav Target Color
             if is_done: color = "#00FF00"      
             elif is_skipped: color = "#FF0000" 
             else: color = "#FFA500"            
             
-            # 1. Main Nav Pin (Large)
-            map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": color, "size": 120})
-            
-            # 2. Begin Pin (Blue, Small)
-            if sd.get('Lat_Start') and sd.get('Lon_Start'):
-                map_points.append({"lat": sd['Lat_Start'], "lon": sd['Lon_Start'], "color": "#0000FF", "size": 30})
-            
-            # 3. End Pin (Red, Small)
-            if sd.get('Lat_End') and sd.get('Lon_End'):
-                map_points.append({"lat": sd['Lat_End'], "lon": sd['Lon_End'], "color": "#FF0000", "size": 30})
+            map_points.append({"lat": sd['LAT'], "lon": sd['LON'], "color": color})
         
-        st.map(pd.DataFrame(map_points), color="color", size="size", zoom=9)
-        st.caption("🔵 Begin Point | 🔴 End Point | 🟢/🟠 Nav Target")
+        st.map(pd.DataFrame(map_points), color="color", zoom=9)
+        st.caption("🟢 Completed | 🔴 Skipped | 🟠 Pending")
         
         st.markdown("### 📋 INTERACTIVE MANIFEST")
         st.caption("Tap any stop to instantly lock it in. Then switch to your Install/Pick-Up tab to view it.")
@@ -337,7 +382,7 @@ else:
         st.markdown("### 🛑 END OF DAY CHECKLIST")
         st.info("⚠️ MUST DO: Download your backup now so Streamlit doesn't wipe your data overnight.")
         
-        payload = {k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary"]}
+        payload = {k: st.session_state.get(k) for k in ["active_files", "optimized_route", "site_data", "current_index", "mission_type", "pickup_index", "pickup_itinerary", "theme"]}
         st.download_button(label="💾 DOWNLOAD ROUTE BACKUP", data=json.dumps(payload), file_name=f"LiveWire_Backup_{datetime.now().strftime('%Y%m%d')}.json", mime="application/json", use_container_width=True)
 
         st.divider()
@@ -379,7 +424,7 @@ else:
                     live_lat, live_lon = loc['latitude'], loc['longitude']
                     st.success(f"✅ GPS Locked: {live_lat}, {live_lon}")
                 
-                with st.form(key=f"f_v46_{uid}"):
+                with st.form(key=f"f_v48_{uid}"):
                     c1, c2 = st.columns(2)
                     dir_options = ["n","e","s","w"]
                     current_dir = sd.get("Directions", "n")

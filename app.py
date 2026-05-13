@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.74 Auto-Login", layout="centered")
+st.set_page_config(page_title="Live Wire V51.75 Formatting Fix", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 
@@ -66,9 +66,8 @@ if "driver_name" not in st.session_state:
                 st.rerun()
             else:
                 st.error("❌ Please enter a name to continue.")
-    st.stop() # Halts app completely until a name is provided
+    st.stop()
 
-# Dynamic Backup File based on logged-in User
 BACKUP_FILE = f"live_wire_backup_{st.session_state.driver_name}.json"
 
 # --- 2. STATE MANAGEMENT ---
@@ -95,7 +94,6 @@ def get_ca_time():
     return now.strftime("%H00"), now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S")
 
 def auto_save():
-    # --- ATOMIC SAVE PROTOCOL (CRASH PROOF) ---
     payload = {
         "active_files": st.session_state.get("active_files", []),
         "optimized_route": st.session_state.get("optimized_route", []),
@@ -211,13 +209,29 @@ def process_upload(est_configs, excel_files, m_type):
             
         st.session_state.optimized_route = best_route
         st.session_state.active_files = [c['label'] for c in est_configs]
+        
+        # Vertically stacked dictionary to prevent copy/paste cutoff
         st.session_state.site_data = {
             s['uid']: {
-                "Date":"", "Time":"", "ExactTime":"", "Site":s['id'], "UID":s['uid'], "Counter":"c1b",
-                "Serial":"", "Directions":"n", "Lanes":2, "Street":s['street'], "Notes":"", "Installed":"",
-                "LAT":s['nav_lat'], "LON":s['nav_lon'], "Skipped":"", "Sheet":s['sheet']
+                "Date": "", 
+                "Time": "", 
+                "ExactTime": "", 
+                "Site": s['id'], 
+                "UID": s['uid'], 
+                "Counter": "c1b",
+                "Serial": "", 
+                "Directions": "n", 
+                "Lanes": 2, 
+                "Street": s['street'], 
+                "Notes": "", 
+                "Installed": "",
+                "LAT": s['nav_lat'], 
+                "LON": s['nav_lon'], 
+                "Skipped": "", 
+                "Sheet": s['sheet']
             } for s in best_route
         }
+        
         st.session_state.mission_type = m_type
         st.session_state.current_index = 0
         st.session_state.pickup_index = 0
@@ -235,12 +249,9 @@ def parse_dictation(text, current_dr, current_ln, current_ser):
     elif "south" in t: dr = "s"
     elif "east" in t: dr = "e"
     elif "west" in t: dr = "w"
-    
-    # Allows numerical values via keyboard or voice
     ln = current_ln
     ln_match = re.search(r'(\d+)\s*lane', t)
     if ln_match: ln = int(ln_match.group(1))
-    
     ser = current_ser
     ser_match = re.search(r'serial.*?(\w+)', t)
     if ser_match: ser = str(ser_match.group(1)).upper()
@@ -382,7 +393,7 @@ else:
                         
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             
-            st.info("🎙️ **VOICE PARSER:** Tap the box, use phone keyboard mic, and speak. Example: *'Facing south, IV lanes, serial 5678, wide road'*")
+            st.info("🎙️ **VOICE PARSER:** Tap the box, use phone keyboard mic, and speak. Example: *'Facing south, 4 lanes, serial 5678, wide road'*")
             dictation = st.text_area("Field Notes / Dictation:")
             
             loc = streamlit_geolocation()
@@ -401,5 +412,112 @@ else:
                     final_lat = loc['latitude'] if loc and loc.get('latitude') else safe_lat
                     final_lon = loc['longitude'] if loc and loc.get('longitude') else safe_lon
                     
+                    # Vertically stacked dictionary to prevent copy/paste cutoff
                     st.session_state.site_data[s['uid']].update({
-                        "Date":d, "ExactTime":et, "Directions":dr, "Serial":str(ser), "Lanes":ln, "N
+                        "Date": d, 
+                        "ExactTime": et, 
+                        "Directions": dr, 
+                        "Serial": str(ser), 
+                        "Lanes": ln, 
+                        "Notes": str(dictation), 
+                        "Installed": "x" if submit_btn else "", 
+                        "Skipped": "x" if skip_btn else "",
+                        "LAT": final_lat, 
+                        "LON": final_lon
+                    })
+                    
+                    if submit_btn:
+                        st.session_state.msg_type = "success"
+                        st.session_state.last_install_msg = f"✅ Site {sd.get('Site', s['id'])} SECURED."
+                    else:
+                        st.session_state.msg_type = "skip"
+                        st.session_state.last_install_msg = f"❌ Site {sd.get('Site', s['id'])} SKIPPED. Reason logged."
+                        
+                    st.session_state.current_index += 1
+                    auto_save()
+                    st.rerun()
+            
+            st.divider()
+            nav1, nav2 = st.columns(2)
+            with nav1:
+                if cur > 0 and st.button("⬅️ PREV STOP", use_container_width=True):
+                    st.session_state.current_index -= 1
+                    st.session_state.last_install_msg = None
+                    auto_save()
+                    st.rerun()
+            with nav2:
+                if cur < len(st.session_state.optimized_route) - 1 and st.button("NEXT ➡️", use_container_width=True):
+                    st.session_state.current_index += 1
+                    st.session_state.last_install_msg = None
+                    auto_save()
+                    st.rerun()
+                    
+    with tab3:
+        itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
+        if itin:
+            view_mode = st.radio("Pick-Up View:", ["Active Route", "Full Manifest List"], horizontal=True)
+            
+            if view_mode == "Full Manifest List":
+                st.dataframe(pd.DataFrame([{
+                    "Site": s["Site"], "Street": s["Street"], "Status": "✅ Done" if s.get("Picked up") == "x" else "⏳ Pending"
+                } for s in itin]), use_container_width=True)
+            else:
+                p_idx = st.session_state.pickup_index
+                if p_idx < len(itin):
+                    if st.session_state.last_pickup_msg:
+                        st.markdown(f"<div class='success-recap'>{st.session_state.last_pickup_msg}</div>", unsafe_allow_html=True)
+                        
+                    s = itin[p_idx]
+                    p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
+                    st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
+                    st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={p_lat},{p_lon}", use_container_width=True)
+                    
+                    if st.button("✅ SECURED", use_container_width=True):
+                        st.session_state.site_data[s['UID']]["Picked up"] = "x"
+                        st.session_state.last_pickup_msg = f"✅ Pick-Up {s.get('Site')} Confirmed."
+                        st.session_state.pickup_index += 1
+                        auto_save()
+                        st.rerun()
+                    
+                    st.divider()
+                    p_nav1, p_nav2 = st.columns(2)
+                    with p_nav1:
+                        if p_idx > 0 and st.button("⬅️ PREV PICK-UP", use_container_width=True):
+                            st.session_state.pickup_index -= 1
+                            st.session_state.last_pickup_msg = None
+                            auto_save()
+                            st.rerun()
+                    with p_nav2:
+                        if p_idx < len(itin) - 1 and st.button("SKIP / NEXT ➡️", use_container_width=True):
+                            st.session_state.pickup_index += 1
+                            st.session_state.last_pickup_msg = None
+                            auto_save()
+                            st.rerun()
+                        
+    with tab4:
+        st.subheader("📋 End of Day Audit")
+        missing_data = []
+        all_d = [d for d in st.session_state.site_data.values() if d.get("Installed") == "x" or d.get("Skipped") == "x"]
+        
+        for d in all_d:
+            if d.get("Installed") == "x":
+                if not d.get("Serial") or str(d.get("Serial")).strip() == "": 
+                    missing_data.append(f"Site {d['Site']}: Missing Serial #")
+                if not d.get("Street") or str(d.get("Street")).lower() == 'nan' or str(d.get("Street")).strip() == "": 
+                    missing_data.append(f"Site {d['Site']}: Missing Street Name")
+                
+        if missing_data:
+            st.error("⚠️ ACTION REQUIRED: You have missing data on installed sites.")
+            for msg in missing_data: st.write(f"- {msg}")
+        elif all_d:
+            st.success("✅ All installed sites have complete data. Ready for export.")
+            
+        if all_d:
+            st.download_button("📊 FINAL SUBMIT (DOWNLOAD EXCEL)", pd.DataFrame(all_d).to_csv(index=False), "Report.csv", use_container_width=True)
+        
+        st.divider()
+        if os.path.exists(BACKUP_FILE):
+            try:
+                with open(BACKUP_FILE, "r") as f: backup_data = f.read()
+                st.download_button("💾 DOWNLOAD BACKUP JSON", backup_data, f"live_wire_backup_{st.session_state.driver_name}.json", mime="application/json", use_container_width=True)
+            except Exception: pass

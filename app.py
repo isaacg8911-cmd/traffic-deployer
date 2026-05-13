@@ -6,13 +6,14 @@ import time
 import os
 import requests
 import folium
+from folium.features import DivIcon
 from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.67 Elite Core", layout="centered")
+st.set_page_config(page_title="Live Wire V51.68 Manifest Overlay", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -74,7 +75,6 @@ def get_ca_time():
     return now.strftime("%H00"), now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S")
 
 def auto_save():
-    # Atomic payload construction
     payload = {
         "active_files": st.session_state.get("active_files", []),
         "optimized_route": st.session_state.get("optimized_route", []),
@@ -91,7 +91,6 @@ def auto_save():
     except Exception: pass
 
 def process_upload(est_configs, excel_files, m_type):
-    # Total wipe of ephemeral state before processing
     st.session_state.optimized_route = []
     st.session_state.site_data = {}
     st.session_state.last_install_msg = None
@@ -114,7 +113,6 @@ def process_upload(est_configs, excel_files, m_type):
                     if sid.isdigit():
                         try:
                             b_lat, b_lon = float(row[b_lat_c]), float(row[b_lon_c])
-                            # Strict CA geographic bounding box
                             if 30.0 < b_lat < 40.0 and -125.0 < b_lon < -110.0:
                                 nodes = [(b_lat, b_lon)]
                                 if e_lat_c and e_lon_c and pd.notna(row[e_lat_c]) and pd.notna(row[e_lon_c]):
@@ -133,7 +131,6 @@ def process_upload(est_configs, excel_files, m_type):
     for cfg in est_configs:
         raw_map = cfg['file'].getvalue().decode('latin-1', errors='ignore')
         for sid, data in excel_data.items():
-            # Strict word boundary match ensures no false positives
             match = re.search(r'\b' + re.escape(sid) + r'\b', raw_map)
             if match:
                 final_raw.append({
@@ -161,8 +158,6 @@ def process_upload(est_configs, excel_files, m_type):
             
         st.session_state.optimized_route = master_route
         st.session_state.active_files = [c['label'] for c in est_configs]
-        
-        # Build comprehensive dictionary up front
         st.session_state.site_data = {
             s['uid']: {
                 "Date":"", "Time":"", "ExactTime":"", "Site":s['id'], "UID":s['uid'], "Counter":"c1b",
@@ -183,20 +178,16 @@ def parse_dictation(text, current_dr, current_ln, current_ser):
         return current_dr, current_ln, current_ser
     
     t = str(text).lower()
-    
-    # Direction logic
     dr = current_dr
     if "north" in t: dr = "n"
     elif "south" in t: dr = "s"
     elif "east" in t: dr = "e"
     elif "west" in t: dr = "w"
     
-    # Lanes logic
     ln = current_ln
     ln_match = re.search(r'(\d+)\s*lane', t)
     if ln_match: ln = int(ln_match.group(1))
     
-    # Serial logic
     ser = current_ser
     ser_match = re.search(r'serial.*?(\w+)', t)
     if ser_match: ser = str(ser_match.group(1)).upper()
@@ -234,7 +225,6 @@ else:
         auto_save()
         st.rerun()
     
-    # --- DAY FILTER SPLIT ---
     available_days = ["All Days"] + st.session_state.active_files
     selected_day = st.selectbox("📅 MISSION FILTER:", available_days)
     
@@ -258,12 +248,23 @@ else:
             if safe_lat and safe_lon:
                 route_coords.append((safe_lat, safe_lon))
                 color = "#FF0000" if skipped else ("#00FF00" if done else "#FFA500")
+                
+                # The Color Dot
                 folium.CircleMarker(
-                    location=(safe_lat, safe_lon), radius=7, color=color, fill=True, fill_color=color, fill_opacity=0.9,
+                    location=(safe_lat, safe_lon), radius=10, color=color, fill=True, fill_color=color, fill_opacity=0.9,
                     popup=f"Stop {idx+1}: Site {sd.get('Site', s['id'])}"
                 ).add_to(m)
+                
+                # --- NEW: THE NUMBERED OVERLAY ---
+                folium.Marker(
+                    location=(safe_lat, safe_lon),
+                    icon=DivIcon(
+                        icon_size=(20,20),
+                        icon_anchor=(10,10),
+                        html=f'<div style="font-size: 10pt; color: black; font-weight: 900; text-align: center; line-height: 20px;">{idx+1}</div>',
+                    )
+                ).add_to(m)
         
-        # Armored OSRM Request
         if len(route_coords) > 1:
             chunk_size = 50
             for i in range(0, len(route_coords) - 1, chunk_size - 1):
@@ -271,14 +272,13 @@ else:
                 coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
                 osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
                 try:
-                    # Strict 3-second timeout to prevent app freezing in dead zones
                     resp = requests.get(osrm_url, timeout=3).json()
                     if resp.get('code') == 'Ok':
                         route_geo = resp['routes'][0]['geometry']['coordinates']
                         route_points = [(lat, lon) for lon, lat in route_geo]
                         folium.PolyLine(route_points, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=4, opacity=0.7).add_to(m)
                 except requests.exceptions.RequestException: 
-                    pass # Fails gracefully if offline
+                    pass 
         
         st_folium(m, height=450, use_container_width=True, returned_objects=[])
             
@@ -310,7 +310,6 @@ else:
             
             st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
             
-            # Editable NaN Street Fix (with type safety)
             display_street = str(sd.get('Street', f"Site {s['id']}"))
             if display_street.lower() == 'nan': display_street = ""
             new_street = st.text_input("📍 STREET NAME (Edit if incorrect):", value=display_street)

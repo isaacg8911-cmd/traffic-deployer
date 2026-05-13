@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.76 Dynamic Origin", layout="centered")
+st.set_page_config(page_title="Live Wire V51.77 Memory Wipe", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -77,7 +77,7 @@ if "init" not in st.session_state:
                 for k, v in data.items(): st.session_state[k] = v
         except Exception: pass
         
-    if "home_coords" not in st.session_state: st.session_state.home_coords = (33.7715, -117.9431) # Default Fallback
+    if "home_coords" not in st.session_state: st.session_state.home_coords = (33.7715, -117.9431) 
     if "optimized_route" not in st.session_state:
         st.session_state.active_files, st.session_state.optimized_route, st.session_state.pickup_itinerary = [], [], []
         st.session_state.site_data = {}
@@ -263,7 +263,8 @@ col_logo, col_logout = st.columns([3, 1])
 with col_logo: st.title(f"🚦 Ops: {st.session_state.driver_name}")
 with col_logout:
     if st.button("LOGOUT", use_container_width=True):
-        del st.session_state.driver_name
+        # NUCLEAR OPTION: Wipes all ghost widgets and cache perfectly
+        st.session_state.clear()
         st.rerun()
 
 if not st.session_state.get("optimized_route"):
@@ -282,7 +283,8 @@ if not st.session_state.get("optimized_route"):
     c_gps, c_man = st.columns([1, 1])
     with c_gps:
         st.write("📍 Tap to snap to current GPS:")
-        loc_start = streamlit_geolocation(key="start_gps")
+        # UNIQUE KEY ATTACHED TO DRIVER NAME
+        loc_start = streamlit_geolocation(key=f"start_gps_{st.session_state.driver_name}")
         if loc_start and loc_start.get('latitude'):
             if loc_start['latitude'] != st.session_state.home_coords[0]:
                 st.session_state.home_coords = (loc_start['latitude'], loc_start['longitude'])
@@ -426,7 +428,9 @@ else:
             st.info("🎙️ **VOICE PARSER:** Tap the box, use phone keyboard mic, and speak. Example: *'Facing south, 4 lanes, serial 5678, wide road'*")
             dictation = st.text_area("Field Notes / Dictation:")
             
-            loc = streamlit_geolocation()
+            # UNIQUE KEY ATTACHED TO SITE UID TO PREVENT LOOP GHOSTING
+            loc = streamlit_geolocation(key=f"loc_{s['uid']}")
+            
             with st.form(f"f_{s['uid']}"):
                 dr_val, ln_val, ser_val = parse_dictation(dictation, sd.get('Directions', 'n'), sd.get('Lanes', 2), str(sd.get('Serial', '')))
                 dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(dr_val))

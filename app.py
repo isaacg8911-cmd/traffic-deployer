@@ -14,10 +14,17 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.70 Cluster Solver", layout="centered")
+st.set_page_config(page_title="Live Wire V51.73 Personal Accounts", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
-BACKUP_FILE = "live_wire_backup.json"
+
+# --- 🔒 INDEPENDENT ACCOUNTS ---
+# Add your coworkers' personal logins here.
+ACCOUNT_CREDENTIALS = {
+    "ISAAC": "admin123",
+    "ALEX": "alex2026",
+    "DRIVER3": "pass3"
+}
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -52,7 +59,28 @@ def set_theme(theme_choice):
 
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 
-# --- STATE MANAGEMENT ---
+# --- 1. PERSONAL LOGIN SCREEN ---
+if "driver_name" not in st.session_state:
+    st.title("🚦 LIVE WIRE: ACCOUNT LOGIN")
+    st.info("Log in to access your personal workspace.")
+    
+    with st.form("login_form"):
+        username_input = st.text_input("USERNAME:").strip().upper()
+        password_input = st.text_input("PASSWORD:", type="password")
+        submitted = st.form_submit_button("🚀 LOGIN", use_container_width=True)
+        
+        if submitted:
+            if username_input in ACCOUNT_CREDENTIALS and ACCOUNT_CREDENTIALS[username_input] == password_input:
+                st.session_state.driver_name = username_input
+                st.rerun()
+            else:
+                st.error("❌ Invalid Username or Password.")
+    st.stop() # Halts app completely until valid login
+
+# Dynamic Backup File based on logged-in User
+BACKUP_FILE = f"live_wire_backup_{st.session_state.driver_name}.json"
+
+# --- 2. STATE MANAGEMENT ---
 if "init" not in st.session_state:
     if os.path.exists(BACKUP_FILE):
         try:
@@ -76,6 +104,7 @@ def get_ca_time():
     return now.strftime("%H00"), now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S")
 
 def auto_save():
+    # --- ATOMIC SAVE PROTOCOL (CRASH PROOF) ---
     payload = {
         "active_files": st.session_state.get("active_files", []),
         "optimized_route": st.session_state.get("optimized_route", []),
@@ -86,14 +115,15 @@ def auto_save():
         "pickup_itinerary": st.session_state.get("pickup_itinerary", []),
         "theme": st.session_state.get("theme", "☁️ Overcast (Standard)")
     }
+    temp_file = BACKUP_FILE + ".tmp"
     try:
-        with open(BACKUP_FILE, "w") as f:
+        with open(temp_file, "w") as f:
             json.dump(payload, f)
+        os.replace(temp_file, BACKUP_FILE)
     except Exception: pass
 
-# --- ELITE CLUSTER SOLVER (SCALED MATH + BRUTE FORCE) ---
+# --- ELITE CLUSTER SOLVER ---
 def calc_scaled_dist(lat1, lon1, lat2, lon2):
-    # Fixes the "Flat Earth Bug" by scaling Longitude for SoCal (cos(33.7) ≈ 0.832)
     return ((lon1 - lon2) * 0.832)**2 + (lat1 - lat2)**2
 
 def calc_total_distance(path):
@@ -107,14 +137,12 @@ def untangle_route(route):
     best_route = list(route)
     best_distance = calc_total_distance(best_route)
     improved = True
-    
     while improved:
         improved = False
         for i in range(len(best_route) - 1):
             for j in range(i + 2, len(best_route) + 1):
                 new_route = best_route[:i] + best_route[i:j][::-1] + best_route[j:]
                 new_distance = calc_total_distance(new_route)
-                
                 if new_distance < best_distance:
                     best_route = new_route
                     best_distance = new_distance
@@ -131,7 +159,6 @@ def process_upload(est_configs, excel_files, m_type):
     for f in excel_files:
         try:
             df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
-            
             id_c = next((c for c in df.columns if any(x in c.lower() for x in ['tds', 'site', 'id'])), df.columns[0])
             b_lat_c = next((c for c in df.columns if 'begin_lat' in c.lower()), next((c for c in df.columns if 'lat' in c.lower()), None))
             b_lon_c = next((c for c in df.columns if 'begin_lon' in c.lower()), next((c for c in df.columns if 'lon' in c.lower()), None))
@@ -150,7 +177,6 @@ def process_upload(est_configs, excel_files, m_type):
                                     e_lat, e_lon = float(row[e_lat_c]), float(row[e_lon_c])
                                     if 30.0 < e_lat < 40.0 and -125.0 < e_lon < -110.0:
                                         nodes.append((e_lat, e_lon))
-                                
                                 street_name = str(row.get('Street', f'Site {sid}'))
                                 excel_data[sid] = {"nodes": nodes, "street": street_name}
                         except Exception: pass
@@ -173,22 +199,17 @@ def process_upload(est_configs, excel_files, m_type):
                 })
 
     if final_raw:
-        # Step 1: Base Nearest Neighbor Route
         master_route, curr = [], HOME_COORDS
         temp_raw = list(final_raw)
         while temp_raw:
-            # Use scaled distance to find truest nearest point
             best_site = min(temp_raw, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nodes'][0][0], x['nodes'][0][1]))
             best_node = min(best_site['nodes'], key=lambda n: calc_scaled_dist(curr[0], curr[1], n[0], n[1]))
-            
             best_site['nav_lat'], best_site['nav_lon'] = best_node
             master_route.append(best_site)
             curr = best_node
             temp_raw.remove(best_site)
             
-        # Step 2: Brute Force Cluster Optimization (20 Random Restarts)
         best_route, best_dist = untangle_route(master_route)
-        
         for _ in range(20):
             shuffled = list(master_route)
             random.shuffle(shuffled)
@@ -213,33 +234,35 @@ def process_upload(est_configs, excel_files, m_type):
         return True, len(best_route)
     return False, 0
 
-# --- ELITE NLP DICTATION PARSER ---
+# --- NLP DICTATION ---
 def parse_dictation(text, current_dr, current_ln, current_ser):
     if not text or pd.isna(text) or str(text).strip() == "": 
         return current_dr, current_ln, current_ser
-    
     t = str(text).lower()
     dr = current_dr
     if "north" in t: dr = "n"
     elif "south" in t: dr = "s"
     elif "east" in t: dr = "e"
     elif "west" in t: dr = "w"
-    
     ln = current_ln
     ln_match = re.search(r'(\d+)\s*lane', t)
     if ln_match: ln = int(ln_match.group(1))
-    
     ser = current_ser
     ser_match = re.search(r'serial.*?(\w+)', t)
     if ser_match: ser = str(ser_match.group(1)).upper()
-    
     return dr, ln, ser
 
 # --- MAIN UI ---
+col_logo, col_logout = st.columns([3, 1])
+with col_logo: st.title(f"🚦 Live Wire: {st.session_state.driver_name}")
+with col_logout:
+    if st.button("LOGOUT", use_container_width=True):
+        del st.session_state.driver_name
+        st.rerun()
+
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 Live Wire Cluster Solver")
-    restore_file = st.file_uploader("🔄 RESTORE", type=["json"])
-    if restore_file and st.button("🔓 LOAD"):
+    restore_file = st.file_uploader("🔄 RESTORE BACKUP", type=["json"])
+    if restore_file and st.button("🔓 LOAD BACKUP"):
         data = json.loads(restore_file.getvalue())
         for k, v in data.items(): st.session_state[k] = v
         st.rerun()
@@ -330,7 +353,7 @@ else:
                 st.session_state.current_index = st.session_state.optimized_route.index(s)
                 st.rerun()
                 
-        if st.button("🗑️ RESET ROUTE"):
+        if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.session_state.optimized_route = []
             st.rerun()
@@ -371,16 +394,13 @@ else:
             loc = streamlit_geolocation()
             with st.form(f"f_{s['uid']}"):
                 dr_val, ln_val, ser_val = parse_dictation(dictation, sd.get('Directions', 'n'), sd.get('Lanes', 2), str(sd.get('Serial', '')))
-                
                 dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(dr_val))
                 ln = st.number_input("LANES", min_value=1, value=int(ln_val))
                 ser = st.text_input("SERIAL #", value=str(ser_val))
                 
                 col_c, col_s = st.columns(2)
-                with col_c:
-                    submit_btn = st.form_submit_button("✅ INSTALL")
-                with col_s:
-                    skip_btn = st.form_submit_button("❌ SKIP")
+                with col_c: submit_btn = st.form_submit_button("✅ INSTALL")
+                with col_s: skip_btn = st.form_submit_button("❌ SKIP")
 
                 if submit_btn or skip_btn:
                     _, d, et = get_ca_time()
@@ -391,8 +411,7 @@ else:
                         "Date":d, "ExactTime":et, "Directions":dr, "Serial":str(ser), "Lanes":ln, "Notes":str(dictation), 
                         "Installed": "x" if submit_btn else "", 
                         "Skipped": "x" if skip_btn else "",
-                        "LAT": final_lat, 
-                        "LON": final_lon
+                        "LAT": final_lat, "LON": final_lon
                     })
                     
                     if submit_btn:
@@ -488,5 +507,5 @@ else:
         if os.path.exists(BACKUP_FILE):
             try:
                 with open(BACKUP_FILE, "r") as f: backup_data = f.read()
-                st.download_button("💾 DOWNLOAD BACKUP JSON", backup_data, "live_wire_backup.json", mime="application/json", use_container_width=True)
+                st.download_button("💾 DOWNLOAD BACKUP JSON", backup_data, f"live_wire_backup_{st.session_state.driver_name}.json", mime="application/json", use_container_width=True)
             except Exception: pass

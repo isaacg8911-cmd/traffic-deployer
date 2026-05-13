@@ -14,9 +14,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.75 Formatting Fix", layout="centered")
-
-HOME_COORDS = (33.7715, -117.9431) 
+st.set_page_config(page_title="Live Wire V51.76 Dynamic Origin", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -78,6 +76,8 @@ if "init" not in st.session_state:
                 data = json.load(f)
                 for k, v in data.items(): st.session_state[k] = v
         except Exception: pass
+        
+    if "home_coords" not in st.session_state: st.session_state.home_coords = (33.7715, -117.9431) # Default Fallback
     if "optimized_route" not in st.session_state:
         st.session_state.active_files, st.session_state.optimized_route, st.session_state.pickup_itinerary = [], [], []
         st.session_state.site_data = {}
@@ -95,6 +95,7 @@ def get_ca_time():
 
 def auto_save():
     payload = {
+        "home_coords": st.session_state.get("home_coords", (33.7715, -117.9431)),
         "active_files": st.session_state.get("active_files", []),
         "optimized_route": st.session_state.get("optimized_route", []),
         "site_data": st.session_state.get("site_data", {}),
@@ -117,7 +118,8 @@ def calc_scaled_dist(lat1, lon1, lat2, lon2):
 
 def calc_total_distance(path):
     if not path: return 0
-    d = calc_scaled_dist(HOME_COORDS[0], HOME_COORDS[1], path[0]['nav_lat'], path[0]['nav_lon'])
+    hc = st.session_state.home_coords
+    d = calc_scaled_dist(hc[0], hc[1], path[0]['nav_lat'], path[0]['nav_lon'])
     for i in range(len(path) - 1):
         d += calc_scaled_dist(path[i]['nav_lat'], path[i]['nav_lon'], path[i+1]['nav_lat'], path[i+1]['nav_lon'])
     return d
@@ -188,7 +190,7 @@ def process_upload(est_configs, excel_files, m_type):
                 })
 
     if final_raw:
-        master_route, curr = [], HOME_COORDS
+        master_route, curr = [], st.session_state.home_coords
         temp_raw = list(final_raw)
         while temp_raw:
             best_site = min(temp_raw, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nodes'][0][0], x['nodes'][0][1]))
@@ -210,7 +212,6 @@ def process_upload(est_configs, excel_files, m_type):
         st.session_state.optimized_route = best_route
         st.session_state.active_files = [c['label'] for c in est_configs]
         
-        # Vertically stacked dictionary to prevent copy/paste cutoff
         st.session_state.site_data = {
             s['uid']: {
                 "Date": "", 
@@ -273,9 +274,37 @@ if not st.session_state.get("optimized_route"):
         st.rerun()
         
     st.divider()
+    
+    # --- DYNAMIC ORIGIN SETUP ---
+    st.subheader("🏠 1. SET STARTING POINT")
+    st.write(f"**Saved Origin:** `{st.session_state.home_coords[0]:.5f}, {st.session_state.home_coords[1]:.5f}`")
+    
+    c_gps, c_man = st.columns([1, 1])
+    with c_gps:
+        st.write("📍 Tap to snap to current GPS:")
+        loc_start = streamlit_geolocation(key="start_gps")
+        if loc_start and loc_start.get('latitude'):
+            if loc_start['latitude'] != st.session_state.home_coords[0]:
+                st.session_state.home_coords = (loc_start['latitude'], loc_start['longitude'])
+                auto_save()
+                st.success("✅ Origin snapped to GPS!")
+                time.sleep(1)
+                st.rerun()
+                
+    with c_man:
+        with st.expander("✏️ Type Manual Origin"):
+            man_lat = st.number_input("Latitude", value=st.session_state.home_coords[0], format="%.5f")
+            man_lon = st.number_input("Longitude", value=st.session_state.home_coords[1], format="%.5f")
+            if st.button("SAVE COORDS", use_container_width=True):
+                st.session_state.home_coords = (man_lat, man_lon)
+                auto_save()
+                st.rerun()
+
+    st.divider()
+    st.subheader("📁 2. UPLOAD DATA")
     m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
-    excel_files = st.file_uploader("1️⃣ EXCEL DATA", accept_multiple_files=True)
-    up_files = st.file_uploader("2️⃣ MAPS (.EST)", accept_multiple_files=True)
+    excel_files = st.file_uploader("EXCEL DATA", accept_multiple_files=True)
+    up_files = st.file_uploader("MAPS (.EST)", accept_multiple_files=True)
     
     if up_files and excel_files:
         configs = [{"file": f, "label": st.text_input(f"Map {i+1} Name (e.g. Day 1):", value=f"Day {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
@@ -304,9 +333,10 @@ else:
     with tab1:
         st.success(f"STOPS IN VIEW: {len(active_route)}")
         
-        m = folium.Map(location=HOME_COORDS, zoom_start=11, tiles="CartoDB dark_matter")
-        folium.Marker(HOME_COORDS, popup="HOME", icon=folium.Icon(color="blue", icon="home")).add_to(m)
-        route_coords = [HOME_COORDS]
+        hc = st.session_state.home_coords
+        m = folium.Map(location=hc, zoom_start=11, tiles="CartoDB dark_matter")
+        folium.Marker(hc, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m)
+        route_coords = [hc]
         
         for idx, s in enumerate(active_route):
             sd = st.session_state.site_data[s['uid']]
@@ -412,18 +442,11 @@ else:
                     final_lat = loc['latitude'] if loc and loc.get('latitude') else safe_lat
                     final_lon = loc['longitude'] if loc and loc.get('longitude') else safe_lon
                     
-                    # Vertically stacked dictionary to prevent copy/paste cutoff
                     st.session_state.site_data[s['uid']].update({
-                        "Date": d, 
-                        "ExactTime": et, 
-                        "Directions": dr, 
-                        "Serial": str(ser), 
-                        "Lanes": ln, 
-                        "Notes": str(dictation), 
+                        "Date":d, "ExactTime":et, "Directions":dr, "Serial":str(ser), "Lanes":ln, "Notes":str(dictation), 
                         "Installed": "x" if submit_btn else "", 
                         "Skipped": "x" if skip_btn else "",
-                        "LAT": final_lat, 
-                        "LON": final_lon
+                        "LAT": final_lat, "LON": final_lon
                     })
                     
                     if submit_btn:

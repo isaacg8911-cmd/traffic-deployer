@@ -12,10 +12,11 @@ from folium.features import DivIcon
 from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.81 Address Locator", layout="centered")
+st.set_page_config(page_title="Live Wire V51.82 Form-Lock", layout="centered")
+
+HOME_COORDS = (33.7715, -117.9431) 
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -279,7 +280,7 @@ if not st.session_state.get("optimized_route"):
         
     st.divider()
     
-    # --- MANUAL ORIGIN SETUP (NO GPS CRASHES) ---
+    # --- MANUAL ORIGIN SETUP (NO HARDWARE SENSORS) ---
     st.subheader("🏠 1. SET STARTING POINT")
     st.write(f"**Current Saved Origin:** `{st.session_state.home_coords[0]:.5f}, {st.session_state.home_coords[1]:.5f}`")
     
@@ -403,7 +404,7 @@ else:
                 st.session_state.current_index = st.session_state.optimized_route.index(s)
                 st.rerun()
                 
-        if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
+        if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)", key="reset_route_btn"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.session_state.optimized_route = []
             st.rerun()
@@ -422,11 +423,6 @@ else:
             
             st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
             
-            display_street = str(sd.get('Street', f"Site {s['id']}"))
-            if display_street.lower() == 'nan': display_street = ""
-            new_street = st.text_input("📍 STREET NAME (Edit if incorrect):", value=display_street)
-            st.session_state.site_data[s['uid']]['Street'] = str(new_street).strip()
-            
             st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/search/?api=1&query={safe_lat},{safe_lon}", use_container_width=True)
             
             batch = []
@@ -438,32 +434,48 @@ else:
                         
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             
-            st.info("🎙️ **VOICE PARSER:** Tap the box, use phone keyboard mic, and speak. Example: *'Facing south, 4 lanes, serial 5678, wide road'*")
-            dictation = st.text_area("Field Notes / Dictation:")
-            
-            # Left the Geolocation widget here purely for logging field coordinates. 
-            # If this also causes crashes, let me know and we will amputate this one too.
-            loc = streamlit_geolocation(key=f"loc_{s['uid']}_{st.session_state.session_id}")
-            
-            with st.form(f"f_{s['uid']}_{st.session_state.session_id}"):
-                dr_val, ln_val, ser_val = parse_dictation(dictation, sd.get('Directions', 'n'), sd.get('Lanes', 2), str(sd.get('Serial', '')))
-                dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(dr_val))
-                ln = st.number_input("LANES", min_value=1, value=int(ln_val))
-                ser = st.text_input("SERIAL #", value=str(ser_val))
+            # --- FORM-LOCK ENGINE (Zero Reruns While Typing) ---
+            with st.form(f"form_{s['uid']}"):
+                st.info("🎙️ **VOICE PARSER:** Type or dictate notes below.")
+                
+                display_street = str(sd.get('Street', f"Site {s['id']}"))
+                if display_street.lower() == 'nan': display_street = ""
+                new_street = st.text_input("📍 STREET NAME:", value=display_street)
+                
+                dictation = st.text_area("📝 Field Notes / Dictation:", value=str(sd.get('Notes', '')))
+                
+                c1, c2, c3 = st.columns(3)
+                with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd.get('Directions', 'n')))
+                with c2: ln = st.number_input("LANES", min_value=1, value=int(sd.get('Lanes', 2)))
+                with c3: ser = st.text_input("SERIAL #", value=str(sd.get('Serial', '')))
                 
                 col_c, col_s = st.columns(2)
                 with col_c: submit_btn = st.form_submit_button("✅ INSTALL")
                 with col_s: skip_btn = st.form_submit_button("❌ SKIP")
 
                 if submit_btn or skip_btn:
+                    old_notes = str(sd.get('Notes', ''))
+                    
+                    # NLP Override Fix: Only parse voice if the dictation text was actually changed
+                    if dictation != old_notes and dictation.strip() != "":
+                        final_dr, final_ln, final_ser = parse_dictation(dictation, dr, ln, ser)
+                    else:
+                        final_dr, final_ln, final_ser = dr, ln, ser
+                        
                     _, d, et = get_ca_time()
-                    final_lat = loc['latitude'] if loc and loc.get('latitude') else safe_lat
-                    final_lon = loc['longitude'] if loc and loc.get('longitude') else safe_lon
                     
                     st.session_state.site_data[s['uid']].update({
-                        "Date": d, "ExactTime": et, "Directions": dr, "Serial": str(ser), "Lanes": ln, 
-                        "Notes": str(dictation), "Installed": "x" if submit_btn else "", "Skipped": "x" if skip_btn else "",
-                        "LAT": final_lat, "LON": final_lon
+                        "Street": str(new_street).strip(),
+                        "Date": d, 
+                        "ExactTime": et, 
+                        "Directions": final_dr, 
+                        "Serial": str(final_ser), 
+                        "Lanes": final_ln, 
+                        "Notes": str(dictation), 
+                        "Installed": "x" if submit_btn else "", 
+                        "Skipped": "x" if skip_btn else "",
+                        "LAT": safe_lat, 
+                        "LON": safe_lon
                     })
                     
                     if submit_btn:
@@ -480,13 +492,13 @@ else:
             st.divider()
             nav1, nav2 = st.columns(2)
             with nav1:
-                if st.button("⬅️ PREV STOP", use_container_width=True):
+                if st.button("⬅️ PREV STOP", use_container_width=True, key=f"prev_{s['uid']}"):
                     st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=-1)
                     st.session_state.last_install_msg = None
                     auto_save()
                     st.rerun()
             with nav2:
-                if st.button("NEXT ➡️", use_container_width=True):
+                if st.button("NEXT ➡️", use_container_width=True, key=f"next_{s['uid']}"):
                     st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=1)
                     st.session_state.last_install_msg = None
                     auto_save()
@@ -512,7 +524,7 @@ else:
                     st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                     st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={p_lat},{p_lon}", use_container_width=True)
                     
-                    if st.button("✅ SECURED", use_container_width=True):
+                    if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
                         st.session_state.site_data[s['UID']]["Picked up"] = "x"
                         st.session_state.last_pickup_msg = f"✅ Pick-Up {s.get('Site')} Confirmed."
                         st.session_state.pickup_index += 1
@@ -522,13 +534,13 @@ else:
                     st.divider()
                     p_nav1, p_nav2 = st.columns(2)
                     with p_nav1:
-                        if p_idx > 0 and st.button("⬅️ PREV PICK-UP", use_container_width=True):
+                        if p_idx > 0 and st.button("⬅️ PREV PICK-UP", use_container_width=True, key=f"p_prev_{s['UID']}"):
                             st.session_state.pickup_index -= 1
                             st.session_state.last_pickup_msg = None
                             auto_save()
                             st.rerun()
                     with p_nav2:
-                        if p_idx < len(itin) - 1 and st.button("SKIP / NEXT ➡️", use_container_width=True):
+                        if p_idx < len(itin) - 1 and st.button("SKIP / NEXT ➡️", use_container_width=True, key=f"p_next_{s['UID']}"):
                             st.session_state.pickup_index += 1
                             st.session_state.last_pickup_msg = None
                             auto_save()

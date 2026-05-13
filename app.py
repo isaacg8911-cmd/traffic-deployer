@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.62 Backup Sync", layout="centered")
+st.set_page_config(page_title="Live Wire V51.64 Recap Build", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -29,6 +29,7 @@ def set_theme(theme_choice):
         .stTabs [data-baseweb="tab-list"] { background-color: #000000; border-bottom: 3px solid #333; }
         input, select, textarea { background-color: #000000 !important; color: #00FFFF !important; border: 2px solid #00FFFF !important; }
         div[data-testid="stMetricValue"] { color: #00FFFF !important; font-weight: 900; }
+        .success-recap { background-color: #003300; border: 2px solid #00FF00; color: #00FF00; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; }
         </style>
         """
     else:
@@ -39,6 +40,7 @@ def set_theme(theme_choice):
         div.stButton > button { background-color: #1E1E1E; color: #FFD700; border: 2px solid #FFD700; font-weight: 900; }
         input, select, textarea { background-color: #111 !important; color: #FFD700 !important; border: 1px solid #444 !important; }
         div[data-testid="stMetricValue"] { color: #FFD700 !important; }
+        .success-recap { background-color: #1E2E1E; border: 2px solid #32CD32; color: #32CD32; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
         </style>
         """
 
@@ -56,6 +58,11 @@ if "init" not in st.session_state:
         st.session_state.site_data = {}
         st.session_state.current_index, st.session_state.pickup_index = 0, 0
         st.session_state.mission_type = "📍 INSTALLATION"
+        
+    # Variables for the Green Recap feature
+    if "last_install_msg" not in st.session_state: st.session_state.last_install_msg = None
+    if "last_pickup_msg" not in st.session_state: st.session_state.last_pickup_msg = None
+        
     st.session_state.init = True
 
 def get_ca_time():
@@ -81,6 +88,8 @@ def auto_save():
 def process_upload(est_configs, excel_files, m_type):
     st.session_state.optimized_route = []
     st.session_state.site_data = {}
+    st.session_state.last_install_msg = None
+    st.session_state.last_pickup_msg = None
     
     excel_data = {}
     for f in excel_files:
@@ -195,6 +204,11 @@ else:
     with tab2:
         cur = st.session_state.current_index
         if cur < len(st.session_state.optimized_route):
+            
+            # --- GREEN RECAP BANNER ---
+            if st.session_state.last_install_msg:
+                st.markdown(f"<div class='success-recap'>{st.session_state.last_install_msg}</div>", unsafe_allow_html=True)
+                
             s = st.session_state.optimized_route[cur]
             sd = st.session_state.site_data[s['uid']]
             safe_lat, safe_lon = sd.get('LAT', sd.get('lat')), sd.get('LON', sd.get('lon'))
@@ -218,31 +232,66 @@ else:
                 ser, nt = st.text_input("SERIAL #"), st.text_input("NOTES")
                 if st.form_submit_button("✅ COMPLETE", use_container_width=True):
                     _, d, et = get_ca_time()
+                    
+                    final_lat = loc['latitude'] if loc and loc.get('latitude') else safe_lat
+                    final_lon = loc['longitude'] if loc and loc.get('longitude') else safe_lon
+                    
                     st.session_state.site_data[s['uid']].update({
                         "Date":d, "ExactTime":et, "Directions":dr, "Serial":ser, "Lanes":ln, "Notes":nt, "Installed":"x", 
-                        "LAT":loc['latitude'] if loc and loc.get('latitude') else safe_lat, 
-                        "LON":loc['longitude'] if loc and loc.get('longitude') else safe_lon
+                        "LAT": final_lat, 
+                        "LON": final_lon
                     })
+                    
+                    # Update the recap message for the next page load
+                    st.session_state.last_install_msg = f"✅ Site {sd.get('Site', s['id'])} Secured at {final_lat:.5f}, {final_lon:.5f}"
+                    
                     st.session_state.current_index += 1; auto_save(); st.rerun()
+            
+            st.divider()
+            nav1, nav2 = st.columns(2)
+            with nav1:
+                if cur > 0 and st.button("⬅️ PREV STOP", use_container_width=True):
+                    st.session_state.current_index -= 1; st.session_state.last_install_msg = None; auto_save(); st.rerun()
+            with nav2:
+                if cur < len(st.session_state.optimized_route) - 1 and st.button("SKIP / NEXT ➡️", use_container_width=True):
+                    st.session_state.current_index += 1; st.session_state.last_install_msg = None; auto_save(); st.rerun()
                     
     with tab3:
         itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
         if itin:
             p_idx = st.session_state.pickup_index
             if p_idx < len(itin):
+                
+                # --- GREEN RECAP BANNER ---
+                if st.session_state.last_pickup_msg:
+                    st.markdown(f"<div class='success-recap'>{st.session_state.last_pickup_msg}</div>", unsafe_allow_html=True)
+                    
                 s = itin[p_idx]
                 p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                 st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                 st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={p_lat},{p_lon}", use_container_width=True)
+                
                 if st.button("✅ SECURED", use_container_width=True):
-                    st.session_state.site_data[s['UID']]["Picked up"] = "x"; st.session_state.pickup_index += 1; auto_save(); st.rerun()
+                    st.session_state.site_data[s['UID']]["Picked up"] = "x"
+                    st.session_state.last_pickup_msg = f"✅ Pick-Up {s.get('Site')} Confirmed."
+                    st.session_state.pickup_index += 1
+                    auto_save()
+                    st.rerun()
+                
+                st.divider()
+                p_nav1, p_nav2 = st.columns(2)
+                with p_nav1:
+                    if p_idx > 0 and st.button("⬅️ PREV PICK-UP", use_container_width=True):
+                        st.session_state.pickup_index -= 1; st.session_state.last_pickup_msg = None; auto_save(); st.rerun()
+                with p_nav2:
+                    if p_idx < len(itin) - 1 and st.button("SKIP / NEXT ➡️", use_container_width=True):
+                        st.session_state.pickup_index += 1; st.session_state.last_pickup_msg = None; auto_save(); st.rerun()
                     
     with tab4:
         all_d = [d for d in st.session_state.site_data.values() if d.get("Installed") == "x"]
         if all_d:
             st.download_button("📊 DOWNLOAD EXCEL", pd.DataFrame(all_d).to_csv(index=False), "Report.csv", use_container_width=True)
         
-        # --- NEW BACKUP DOWNLOAD BUTTON ---
         st.divider()
         if os.path.exists(BACKUP_FILE):
             with open(BACKUP_FILE, "r") as f:

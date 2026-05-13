@@ -4,6 +4,7 @@ import pandas as pd
 import json
 import time
 import os
+import random
 import requests
 import folium
 from folium.features import DivIcon
@@ -13,7 +14,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.69 Untangler", layout="centered")
+st.set_page_config(page_title="Live Wire V51.70 Cluster Solver", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -90,18 +91,20 @@ def auto_save():
             json.dump(payload, f)
     except Exception: pass
 
-# --- ROUTE UNTANGLER (2-OPT ALGORITHM) ---
+# --- ELITE CLUSTER SOLVER (SCALED MATH + BRUTE FORCE) ---
+def calc_scaled_dist(lat1, lon1, lat2, lon2):
+    # Fixes the "Flat Earth Bug" by scaling Longitude for SoCal (cos(33.7) ≈ 0.832)
+    return ((lon1 - lon2) * 0.832)**2 + (lat1 - lat2)**2
+
 def calc_total_distance(path):
     if not path: return 0
-    # Start distance from Home to First Stop
-    d = (HOME_COORDS[0] - path[0]['nav_lat'])**2 + (HOME_COORDS[1] - path[0]['nav_lon'])**2
-    # Add distances between all other stops
+    d = calc_scaled_dist(HOME_COORDS[0], HOME_COORDS[1], path[0]['nav_lat'], path[0]['nav_lon'])
     for i in range(len(path) - 1):
-        d += (path[i]['nav_lat'] - path[i+1]['nav_lat'])**2 + (path[i]['nav_lon'] - path[i+1]['nav_lon'])**2
+        d += calc_scaled_dist(path[i]['nav_lat'], path[i]['nav_lon'], path[i+1]['nav_lat'], path[i+1]['nav_lon'])
     return d
 
 def untangle_route(route):
-    best_route = route
+    best_route = list(route)
     best_distance = calc_total_distance(best_route)
     improved = True
     
@@ -109,7 +112,6 @@ def untangle_route(route):
         improved = False
         for i in range(len(best_route) - 1):
             for j in range(i + 2, len(best_route) + 1):
-                # Reverse the segment to uncross paths
                 new_route = best_route[:i] + best_route[i:j][::-1] + best_route[j:]
                 new_distance = calc_total_distance(new_route)
                 
@@ -117,7 +119,7 @@ def untangle_route(route):
                     best_route = new_route
                     best_distance = new_distance
                     improved = True
-    return best_route
+    return best_route, best_distance
 
 def process_upload(est_configs, excel_files, m_type):
     st.session_state.optimized_route = []
@@ -171,38 +173,44 @@ def process_upload(est_configs, excel_files, m_type):
                 })
 
     if final_raw:
-        # Step 1: Nearest Neighbor Baseline
+        # Step 1: Base Nearest Neighbor Route
         master_route, curr = [], HOME_COORDS
-        while final_raw:
-            best_site, best_dist, best_node = None, float('inf'), None
-            for site in final_raw:
-                for node in site['nodes']:
-                    d = (curr[0]-node[0])**2 + (curr[1]-node[1])**2
-                    if d < best_dist:
-                        best_dist, best_site, best_node = d, site, node
+        temp_raw = list(final_raw)
+        while temp_raw:
+            # Use scaled distance to find truest nearest point
+            best_site = min(temp_raw, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nodes'][0][0], x['nodes'][0][1]))
+            best_node = min(best_site['nodes'], key=lambda n: calc_scaled_dist(curr[0], curr[1], n[0], n[1]))
             
             best_site['nav_lat'], best_site['nav_lon'] = best_node
             master_route.append(best_site)
             curr = best_node
-            final_raw.remove(best_site)
+            temp_raw.remove(best_site)
             
-        # Step 2: The Untangler (2-Opt) Optimization
-        master_route = untangle_route(master_route)
+        # Step 2: Brute Force Cluster Optimization (20 Random Restarts)
+        best_route, best_dist = untangle_route(master_route)
+        
+        for _ in range(20):
+            shuffled = list(master_route)
+            random.shuffle(shuffled)
+            opt_route, opt_dist = untangle_route(shuffled)
+            if opt_dist < best_dist:
+                best_dist = opt_dist
+                best_route = opt_route
             
-        st.session_state.optimized_route = master_route
+        st.session_state.optimized_route = best_route
         st.session_state.active_files = [c['label'] for c in est_configs]
         st.session_state.site_data = {
             s['uid']: {
                 "Date":"", "Time":"", "ExactTime":"", "Site":s['id'], "UID":s['uid'], "Counter":"c1b",
                 "Serial":"", "Directions":"n", "Lanes":2, "Street":s['street'], "Notes":"", "Installed":"",
                 "LAT":s['nav_lat'], "LON":s['nav_lon'], "Skipped":"", "Sheet":s['sheet']
-            } for s in master_route
+            } for s in best_route
         }
         st.session_state.mission_type = m_type
         st.session_state.current_index = 0
         st.session_state.pickup_index = 0
         auto_save()
-        return True, len(master_route)
+        return True, len(best_route)
     return False, 0
 
 # --- ELITE NLP DICTATION PARSER ---
@@ -229,7 +237,7 @@ def parse_dictation(text, current_dr, current_ln, current_ser):
 
 # --- MAIN UI ---
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 Live Wire Untangled")
+    st.title("🚦 Live Wire Cluster Solver")
     restore_file = st.file_uploader("🔄 RESTORE", type=["json"])
     if restore_file and st.button("🔓 LOAD"):
         data = json.loads(restore_file.getvalue())

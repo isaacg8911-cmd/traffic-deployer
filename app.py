@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.68 Manifest Overlay", layout="centered")
+st.set_page_config(page_title="Live Wire V51.69 Untangler", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -51,7 +51,7 @@ def set_theme(theme_choice):
 
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 
-# --- STATE MANAGEMENT (BULLETPROOF INITIALIZATION) ---
+# --- STATE MANAGEMENT ---
 if "init" not in st.session_state:
     if os.path.exists(BACKUP_FILE):
         try:
@@ -89,6 +89,35 @@ def auto_save():
         with open(BACKUP_FILE, "w") as f:
             json.dump(payload, f)
     except Exception: pass
+
+# --- ROUTE UNTANGLER (2-OPT ALGORITHM) ---
+def calc_total_distance(path):
+    if not path: return 0
+    # Start distance from Home to First Stop
+    d = (HOME_COORDS[0] - path[0]['nav_lat'])**2 + (HOME_COORDS[1] - path[0]['nav_lon'])**2
+    # Add distances between all other stops
+    for i in range(len(path) - 1):
+        d += (path[i]['nav_lat'] - path[i+1]['nav_lat'])**2 + (path[i]['nav_lon'] - path[i+1]['nav_lon'])**2
+    return d
+
+def untangle_route(route):
+    best_route = route
+    best_distance = calc_total_distance(best_route)
+    improved = True
+    
+    while improved:
+        improved = False
+        for i in range(len(best_route) - 1):
+            for j in range(i + 2, len(best_route) + 1):
+                # Reverse the segment to uncross paths
+                new_route = best_route[:i] + best_route[i:j][::-1] + best_route[j:]
+                new_distance = calc_total_distance(new_route)
+                
+                if new_distance < best_distance:
+                    best_route = new_route
+                    best_distance = new_distance
+                    improved = True
+    return best_route
 
 def process_upload(est_configs, excel_files, m_type):
     st.session_state.optimized_route = []
@@ -142,6 +171,7 @@ def process_upload(est_configs, excel_files, m_type):
                 })
 
     if final_raw:
+        # Step 1: Nearest Neighbor Baseline
         master_route, curr = [], HOME_COORDS
         while final_raw:
             best_site, best_dist, best_node = None, float('inf'), None
@@ -155,6 +185,9 @@ def process_upload(est_configs, excel_files, m_type):
             master_route.append(best_site)
             curr = best_node
             final_raw.remove(best_site)
+            
+        # Step 2: The Untangler (2-Opt) Optimization
+        master_route = untangle_route(master_route)
             
         st.session_state.optimized_route = master_route
         st.session_state.active_files = [c['label'] for c in est_configs]
@@ -196,7 +229,7 @@ def parse_dictation(text, current_dr, current_ln, current_ser):
 
 # --- MAIN UI ---
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 Live Wire Elite Core")
+    st.title("🚦 Live Wire Untangled")
     restore_file = st.file_uploader("🔄 RESTORE", type=["json"])
     if restore_file and st.button("🔓 LOAD"):
         data = json.loads(restore_file.getvalue())
@@ -249,13 +282,11 @@ else:
                 route_coords.append((safe_lat, safe_lon))
                 color = "#FF0000" if skipped else ("#00FF00" if done else "#FFA500")
                 
-                # The Color Dot
                 folium.CircleMarker(
                     location=(safe_lat, safe_lon), radius=10, color=color, fill=True, fill_color=color, fill_opacity=0.9,
                     popup=f"Stop {idx+1}: Site {sd.get('Site', s['id'])}"
                 ).add_to(m)
                 
-                # --- NEW: THE NUMBERED OVERLAY ---
                 folium.Marker(
                     location=(safe_lat, safe_lon),
                     icon=DivIcon(

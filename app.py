@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.61 Intersection Snapper", layout="centered")
+st.set_page_config(page_title="Live Wire V51.62 Backup Sync", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -79,7 +79,6 @@ def auto_save():
     except: pass
 
 def process_upload(est_configs, excel_files, m_type):
-    # ATOMIC RESET
     st.session_state.optimized_route = []
     st.session_state.site_data = {}
     
@@ -88,7 +87,6 @@ def process_upload(est_configs, excel_files, m_type):
         try:
             df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
             
-            # Find the ID and coordinate columns
             id_c = next((c for c in df.columns if any(x in c.lower() for x in ['tds', 'site', 'id'])), df.columns[0])
             b_lat_c = next((c for c in df.columns if 'begin_lat' in c.lower()), next((c for c in df.columns if 'lat' in c.lower()), None))
             b_lon_c = next((c for c in df.columns if 'begin_lon' in c.lower()), next((c for c in df.columns if 'lon' in c.lower()), None))
@@ -101,22 +99,16 @@ def process_upload(est_configs, excel_files, m_type):
                     if sid.isdigit():
                         try:
                             b_lat, b_lon = float(row[b_lat_c]), float(row[b_lon_c])
-                            
-                            # Verify valid California GPS limits for Begin
                             if 30.0 < b_lat < 40.0 and -125.0 < b_lon < -110.0:
-                                nodes = [(b_lat, b_lon)] # Add the Begin point
-                                
-                                # If End points exist, add them to the options
+                                nodes = [(b_lat, b_lon)]
                                 if e_lat_c and e_lon_c and pd.notna(row[e_lat_c]) and pd.notna(row[e_lon_c]):
                                     e_lat, e_lon = float(row[e_lat_c]), float(row[e_lon_c])
                                     if 30.0 < e_lat < 40.0 and -125.0 < e_lon < -110.0:
-                                        nodes.append((e_lat, e_lon)) # Add the End point
+                                        nodes.append((e_lat, e_lon))
                                 
                                 street_name = str(row.get('Street', f'Site {sid}'))
-                                # Save BOTH exact, verified street points for the engine to test
                                 excel_data[sid] = {"nodes": nodes, "street": street_name}
-                        except:
-                            pass
+                        except: pass
         except: pass
 
     if not excel_data: return False, 0
@@ -125,10 +117,7 @@ def process_upload(est_configs, excel_files, m_type):
     for cfg in est_configs:
         raw_map = cfg['file'].getvalue().decode('latin-1', errors='ignore')
         for sid, data in excel_data.items():
-            
-            # Strict boundary check so Site '23' doesn't match '2335'
             match = re.search(r'\b' + re.escape(sid) + r'\b', raw_map)
-            
             if match:
                 final_raw.append({
                     "id": sid, 
@@ -139,7 +128,6 @@ def process_upload(est_configs, excel_files, m_type):
                 })
 
     if final_raw:
-        # FASTEST ROUTE ALGORITHM: Start home -> test both ends of the street -> pick the nearest -> repeat.
         master_route, curr = [], HOME_COORDS
         while final_raw:
             best_site, best_dist, best_node = None, float('inf'), None
@@ -149,7 +137,6 @@ def process_upload(est_configs, excel_files, m_type):
                     if d < best_dist:
                         best_dist, best_site, best_node = d, site, node
             
-            # Lock in the end of the street that was closest to the truck
             best_site['nav_lat'], best_site['nav_lon'] = best_node
             master_route.append(best_site)
             curr = best_node
@@ -189,8 +176,7 @@ else:
         for s in st.session_state.optimized_route:
             sd = st.session_state.site_data[s['uid']]
             done = sd.get("Installed") == "x" or sd.get("Picked up") == "x"
-            safe_lat = sd.get('LAT', sd.get('lat'))
-            safe_lon = sd.get('LON', sd.get('lon'))
+            safe_lat, safe_lon = sd.get('LAT', sd.get('lat')), sd.get('LON', sd.get('lon'))
             if safe_lat and safe_lon:
                 map_points.append({"lat": safe_lat, "lon": safe_lon, "color": "#00FF00" if done else "#FFA500", "size": 8})
         
@@ -211,8 +197,7 @@ else:
         if cur < len(st.session_state.optimized_route):
             s = st.session_state.optimized_route[cur]
             sd = st.session_state.site_data[s['uid']]
-            safe_lat = sd.get('LAT', sd.get('lat'))
-            safe_lon = sd.get('LON', sd.get('lon'))
+            safe_lat, safe_lon = sd.get('LAT', sd.get('lat')), sd.get('LON', sd.get('lon'))
             
             st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
             st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/search/?api=1&query={safe_lat},{safe_lon}", use_container_width=True)
@@ -221,10 +206,8 @@ else:
             for bs in st.session_state.optimized_route[cur:cur+9]:
                 bsd = st.session_state.site_data[bs['uid']]
                 if bsd.get('Installed') != "x":
-                    b_lat = bsd.get('LAT', bsd.get('lat'))
-                    b_lon = bsd.get('LON', bsd.get('lon'))
-                    if b_lat and b_lon:
-                        batch.append(f"{b_lat},{b_lon}")
+                    b_lat, b_lon = bsd.get('LAT', bsd.get('lat')), bsd.get('LON', bsd.get('lon'))
+                    if b_lat and b_lon: batch.append(f"{b_lat},{b_lon}")
                         
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             
@@ -248,8 +231,7 @@ else:
             p_idx = st.session_state.pickup_index
             if p_idx < len(itin):
                 s = itin[p_idx]
-                p_lat = s.get('LAT', s.get('lat'))
-                p_lon = s.get('LON', s.get('lon'))
+                p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                 st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                 st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={p_lat},{p_lon}", use_container_width=True)
                 if st.button("✅ SECURED", use_container_width=True):
@@ -259,3 +241,10 @@ else:
         all_d = [d for d in st.session_state.site_data.values() if d.get("Installed") == "x"]
         if all_d:
             st.download_button("📊 DOWNLOAD EXCEL", pd.DataFrame(all_d).to_csv(index=False), "Report.csv", use_container_width=True)
+        
+        # --- NEW BACKUP DOWNLOAD BUTTON ---
+        st.divider()
+        if os.path.exists(BACKUP_FILE):
+            with open(BACKUP_FILE, "r") as f:
+                backup_data = f.read()
+            st.download_button("💾 DOWNLOAD BACKUP FILE (.JSON)", backup_data, "live_wire_backup.json", mime="application/json", use_container_width=True)

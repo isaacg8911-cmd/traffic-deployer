@@ -5,12 +5,15 @@ import json
 import io
 import time
 import os
+import requests
+import folium
+from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.64 Recap Build", layout="centered")
+st.set_page_config(page_title="Live Wire V51.65 Street Tracer", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 BACKUP_FILE = "live_wire_backup.json"
@@ -59,7 +62,6 @@ if "init" not in st.session_state:
         st.session_state.current_index, st.session_state.pickup_index = 0, 0
         st.session_state.mission_type = "📍 INSTALLATION"
         
-    # Variables for the Green Recap feature
     if "last_install_msg" not in st.session_state: st.session_state.last_install_msg = None
     if "last_pickup_msg" not in st.session_state: st.session_state.last_pickup_msg = None
         
@@ -160,7 +162,7 @@ def process_upload(est_configs, excel_files, m_type):
 
 # --- UI ---
 if not st.session_state.get("optimized_route"):
-    st.title("🚦 Live Wire Stability")
+    st.title("🚦 Live Wire Street Tracer")
     restore_file = st.file_uploader("🔄 RESTORE", type=["json"])
     if restore_file and st.button("🔓 LOAD"):
         data = json.loads(restore_file.getvalue()); [st.session_state.update({k: v}) for k, v in data.items()]; st.rerun()
@@ -170,7 +172,7 @@ if not st.session_state.get("optimized_route"):
     up_files = st.file_uploader("2️⃣ MAPS (.EST)", accept_multiple_files=True)
     if up_files and excel_files:
         configs = [{"file": f, "label": st.text_input(f"Map {i+1}:", value=f"Map {i+1}", key=f"l_{i}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 SYNC STABLE"):
+        if st.button("🚀 SYNC TACTICAL MAP"):
             success, count = process_upload(configs, excel_files, m_type)
             if success: st.success(f"Locked {count} sites."); time.sleep(1); st.rerun()
             else: st.error("Sync error. No matching sites found.")
@@ -181,16 +183,49 @@ else:
     
     with tab1:
         st.success(f"STOPS: {len(st.session_state.optimized_route)}")
-        map_points = [{"lat": HOME_COORDS[0], "lon": HOME_COORDS[1], "color": "#FFFFFF", "size": 12}]
-        for s in st.session_state.optimized_route:
+        
+        # --- NEW FOLIUM MAP ENGINE ---
+        m = folium.Map(location=HOME_COORDS, zoom_start=11, tiles="CartoDB dark_matter")
+        folium.Marker(HOME_COORDS, popup="HOME", icon=folium.Icon(color="blue", icon="home")).add_to(m)
+        
+        route_coords = [HOME_COORDS]
+        
+        for idx, s in enumerate(st.session_state.optimized_route):
             sd = st.session_state.site_data[s['uid']]
             done = sd.get("Installed") == "x" or sd.get("Picked up") == "x"
             safe_lat, safe_lon = sd.get('LAT', sd.get('lat')), sd.get('LON', sd.get('lon'))
+            
             if safe_lat and safe_lon:
-                map_points.append({"lat": safe_lat, "lon": safe_lon, "color": "#00FF00" if done else "#FFA500", "size": 8})
+                route_coords.append((safe_lat, safe_lon))
+                color = "#00FF00" if done else "#FFA500"
+                folium.CircleMarker(
+                    location=(safe_lat, safe_lon),
+                    radius=7,
+                    color=color,
+                    fill=True,
+                    fill_color=color,
+                    fill_opacity=0.9,
+                    popup=f"Stop {idx+1}: Site {sd.get('Site', s['id'])}"
+                ).add_to(m)
         
-        if map_points:
-            st.map(pd.DataFrame(map_points), color="color", size="size")
+        # --- OSRM STREET TRACING ALGORITHM ---
+        if len(route_coords) > 1:
+            chunk_size = 50 # Break into chunks to respect free API limits
+            for i in range(0, len(route_coords) - 1, chunk_size - 1):
+                chunk = route_coords[i:i + chunk_size]
+                coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
+                osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
+                try:
+                    resp = requests.get(osrm_url, timeout=5).json()
+                    if resp.get('code') == 'Ok':
+                        route_geo = resp['routes'][0]['geometry']['coordinates']
+                        route_points = [(lat, lon) for lon, lat in route_geo]
+                        folium.PolyLine(route_points, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=4, opacity=0.7).add_to(m)
+                except Exception:
+                    pass # If offline or server is busy, fail safely without crashing app
+        
+        st_folium(m, height=450, use_container_width=True, returned_objects=[])
+        # -----------------------------
             
         for idx, s in enumerate(st.session_state.optimized_route):
             sd = st.session_state.site_data[s['uid']]
@@ -205,7 +240,6 @@ else:
         cur = st.session_state.current_index
         if cur < len(st.session_state.optimized_route):
             
-            # --- GREEN RECAP BANNER ---
             if st.session_state.last_install_msg:
                 st.markdown(f"<div class='success-recap'>{st.session_state.last_install_msg}</div>", unsafe_allow_html=True)
                 
@@ -242,9 +276,7 @@ else:
                         "LON": final_lon
                     })
                     
-                    # Update the recap message for the next page load
                     st.session_state.last_install_msg = f"✅ Site {sd.get('Site', s['id'])} Secured at {final_lat:.5f}, {final_lon:.5f}"
-                    
                     st.session_state.current_index += 1; auto_save(); st.rerun()
             
             st.divider()
@@ -262,7 +294,6 @@ else:
             p_idx = st.session_state.pickup_index
             if p_idx < len(itin):
                 
-                # --- GREEN RECAP BANNER ---
                 if st.session_state.last_pickup_msg:
                     st.markdown(f"<div class='success-recap'>{st.session_state.last_pickup_msg}</div>", unsafe_allow_html=True)
                     

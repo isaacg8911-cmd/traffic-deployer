@@ -8,6 +8,7 @@ import random
 import requests
 import folium
 import uuid
+import io
 from folium.features import DivIcon
 from streamlit_folium import st_folium
 from datetime import datetime
@@ -15,7 +16,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.91", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.92", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -81,7 +82,7 @@ if "init" not in st.session_state:
     if "session_id" not in st.session_state: st.session_state.session_id = str(uuid.uuid4())[:8]
     if "home_coords" not in st.session_state: st.session_state.home_coords = (33.7715, -117.9431) 
     if "optimized_route" not in st.session_state:
-        st.session_state.active_files, st.session_state.optimized_route, st.session_state.pickup_itinerary = [], [], []
+        st.session_state.active_files, st.session_state.optimized_route = [], []
         st.session_state.site_data = {}
         st.session_state.current_index, st.session_state.pickup_index = 0, 0
         st.session_state.mission_type = "📍 INSTALLATION"
@@ -105,13 +106,13 @@ def auto_save():
         "mission_type": st.session_state.get("mission_type", "📍 INSTALLATION"),
         "pickup_index": st.session_state.get("pickup_index", 0),
         "pickup_sort_method": st.session_state.get("pickup_sort_method", "🔄 Route Efficiency"),
+        "pickup_target": st.session_state.get("pickup_target", "All Maps (Merged)"),
         "theme": st.session_state.get("theme", "☁️ Overcast (Standard)")
     }
     try:
         with open(BACKUP_FILE, "w") as f:
             json.dump(payload, f, default=str)
-    except Exception as e: 
-        print(f"Save Error: {e}")
+    except Exception: pass
 
 # --- DUAL-ENGINE GEOCODER ---
 def geocode_address(address):
@@ -161,7 +162,7 @@ def untangle_route(route):
                     improved = True
     return best_route, best_distance
 
-def process_upload(est_configs, excel_files, m_type):
+def process_upload(est_configs, excel_files, m_type, route_strategy):
     st.session_state.optimized_route = []
     st.session_state.site_data = {}
     st.session_state.last_install_msg = None
@@ -211,28 +212,60 @@ def process_upload(est_configs, excel_files, m_type):
                 })
 
     if final_raw:
-        master_route, curr = [], st.session_state.home_coords
-        temp_raw = list(final_raw)
-        while temp_raw:
-            best_site = min(temp_raw, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nodes'][0][0], x['nodes'][0][1]))
-            best_node = min(best_site['nodes'], key=lambda n: calc_scaled_dist(curr[0], curr[1], n[0], n[1]))
-            best_site['nav_lat'], best_site['nav_lon'] = best_node
-            master_route.append(best_site)
-            curr = best_node
-            temp_raw.remove(best_site)
-            
-        best_route, best_dist = untangle_route(master_route)
+        global_best_route = []
         
-        restarts = 5 if len(master_route) > 50 else 15
-        for _ in range(restarts):
-            shuffled = list(master_route)
-            random.shuffle(shuffled)
-            opt_route, opt_dist = untangle_route(shuffled)
-            if opt_dist < best_dist:
-                best_dist = opt_dist
-                best_route = opt_route
+        # MULTI-DAY ROUTING ENGINE
+        if route_strategy == "📌 Keep Maps Separate (Day-by-Day)":
+            for cfg in est_configs:
+                sheet_name = cfg['label']
+                sheet_raw = [x for x in final_raw if x['sheet'] == sheet_name]
+                if not sheet_raw: continue
+                
+                # Reset starting coordinates to yard for EACH day
+                master_route, curr = [], st.session_state.home_coords
+                temp_raw = list(sheet_raw)
+                while temp_raw:
+                    best_site = min(temp_raw, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nodes'][0][0], x['nodes'][0][1]))
+                    best_node = min(best_site['nodes'], key=lambda n: calc_scaled_dist(curr[0], curr[1], n[0], n[1]))
+                    best_site['nav_lat'], best_site['nav_lon'] = best_node
+                    master_route.append(best_site)
+                    curr = best_node
+                    temp_raw.remove(best_site)
+                    
+                best_route, best_dist = untangle_route(master_route)
+                restarts = 5 if len(master_route) > 50 else 15
+                for _ in range(restarts):
+                    shuffled = list(master_route)
+                    random.shuffle(shuffled)
+                    opt_route, opt_dist = untangle_route(shuffled)
+                    if opt_dist < best_dist:
+                        best_dist = opt_dist
+                        best_route = opt_route
+                global_best_route.extend(best_route)
+                
+        else: # Merged Mega-Route
+            master_route, curr = [], st.session_state.home_coords
+            temp_raw = list(final_raw)
+            while temp_raw:
+                best_site = min(temp_raw, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nodes'][0][0], x['nodes'][0][1]))
+                best_node = min(best_site['nodes'], key=lambda n: calc_scaled_dist(curr[0], curr[1], n[0], n[1]))
+                best_site['nav_lat'], best_site['nav_lon'] = best_node
+                master_route.append(best_site)
+                curr = best_node
+                temp_raw.remove(best_site)
+                
+            best_route, best_dist = untangle_route(master_route)
+            restarts = 5 if len(master_route) > 50 else 15
+            for _ in range(restarts):
+                shuffled = list(master_route)
+                random.shuffle(shuffled)
+                opt_route, opt_dist = untangle_route(shuffled)
+                if opt_dist < best_dist:
+                    best_dist = opt_dist
+                    best_route = opt_route
+            global_best_route = best_route
             
-        st.session_state.optimized_route = best_route
+        st.session_state.optimized_route = global_best_route
         st.session_state.active_files = [c['label'] for c in est_configs]
         
         st.session_state.site_data = {
@@ -240,14 +273,14 @@ def process_upload(est_configs, excel_files, m_type):
                 "Date": "", "Time": "", "ExactTime": "", "Site": s['id'], "UID": s['uid'], "Counter": "c1b",
                 "Serial": "", "Directions": "n", "Lanes": 2, "Street": s['street'], "Notes": "", "Installed": "",
                 "LAT": s['nav_lat'], "LON": s['nav_lon'], "Skipped": "", "Sheet": s['sheet']
-            } for s in best_route
+            } for s in global_best_route
         }
         
         st.session_state.mission_type = m_type
         st.session_state.current_index = 0
         st.session_state.pickup_index = 0
         auto_save()
-        return True, len(best_route)
+        return True, len(global_best_route)
     return False, 0
 
 # --- NLP DICTATION ---
@@ -287,8 +320,7 @@ col_logo, col_logout = st.columns([3, 1])
 with col_logo: st.title(f"🚦 Ops: {st.session_state.driver_name}")
 with col_logout:
     if st.button("LOGOUT", use_container_width=True):
-        # TRUE SURGICAL LOGOUT: Deletes only user data, leaves widgets alone.
-        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method"]
+        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target"]
         for k in keys_to_wipe:
             if k in st.session_state:
                 del st.session_state[k]
@@ -303,7 +335,6 @@ if not st.session_state.get("optimized_route"):
         
     st.divider()
     
-    # --- TRIFECTA ORIGIN MENU ---
     st.subheader("🏠 1. SET STARTING POINT")
     st.write(f"**Saved Origin:** `{st.session_state.home_coords[0]:.5f}, {st.session_state.home_coords[1]:.5f}`")
     
@@ -352,13 +383,17 @@ if not st.session_state.get("optimized_route"):
     st.divider()
     st.subheader("📁 2. UPLOAD DATA")
     m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
+    
+    # NEW MULTI-DAY UPLOAD TOGGLE
+    r_strat = st.radio("ROUTING STRATEGY:", ["📌 Keep Maps Separate (Day-by-Day)", "🔗 Merge All Maps into One Route"], horizontal=True)
+    
     excel_files = st.file_uploader("EXCEL DATA", accept_multiple_files=True)
     up_files = st.file_uploader("MAPS (.EST)", accept_multiple_files=True)
     
     if up_files and excel_files:
-        configs = [{"file": f, "label": st.text_input(f"Map {i+1} Name (e.g. Day 1):", value=f"Day {i+1}", key=f"l_{i}_{st.session_state.session_id}")} for i, f in enumerate(up_files)]
+        configs = [{"file": f, "label": st.text_input(f"Map {i+1} Name (e.g. Day {i+1}):", value=f"Day {i+1}", key=f"l_{i}_{st.session_state.session_id}")} for i, f in enumerate(up_files)]
         if st.button("🚀 SYNC TACTICAL MAP"):
-            success, count = process_upload(configs, excel_files, m_type)
+            success, count = process_upload(configs, excel_files, m_type, r_strat)
             if success: 
                 st.success(f"Locked {count} sites.")
                 time.sleep(0.5)
@@ -427,7 +462,6 @@ else:
                 except requests.exceptions.RequestException: 
                     pass 
         
-        # KEY ADDED TO PREVENT FLICKER
         st_folium(m, height=450, use_container_width=True, returned_objects=[], key="main_route_map")
             
         for idx, s in enumerate(active_route):
@@ -436,7 +470,7 @@ else:
             skipped = sd.get("Skipped") == "x"
             status_icon = '❌' if skipped else ('✅' if done else '🟠')
             if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
-                st.session_state.current_index = next((i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid']), 0)
+                st.session_state.current_index = next(i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid'])
                 st.rerun()
                 
         if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
@@ -463,13 +497,12 @@ else:
             new_street = st.text_input("📍 STREET NAME (Edit if incorrect):", value=display_street)
             st.session_state.site_data[s['uid']]['Street'] = str(new_street).strip()
             
-            # MODERN GOOGLE MAPS URL
             st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/dir/Current+Location/{safe_lat},{safe_lon}", use_container_width=True)
             
             batch = []
             try:
                 active_idx = next(i for i, route_site in enumerate(active_route) if route_site['uid'] == s['uid'])
-                for bs in active_route[active_idx:active_idx+10]:
+                for bs in active_route[active_idx:active_idx+9]:
                     bsd = st.session_state.site_data[bs['uid']]
                     if bsd.get('Installed') != "x" and bsd.get('Skipped') != "x":
                         b_lat, b_lon = bsd.get('LAT', bsd.get('lat')), bsd.get('LON', bsd.get('lon'))
@@ -478,7 +511,6 @@ else:
                 pass
                         
             if len(batch) > 1: 
-                # MODERN GOOGLE MAPS BATCH URL
                 st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", f"https://www.google.com/maps/dir/Current+Location/{'/'.join(batch)}", use_container_width=True)
             
             with st.form(f"form_{s['uid']}"):
@@ -560,8 +592,26 @@ else:
         if raw_itin:
             st.subheader("♻️ Pick-Up Strategy Engine")
             
-            if "pickup_sort_method" not in st.session_state:
-                st.session_state.pickup_sort_method = "🔄 Route Efficiency"
+            # --- NEW PICK-UP FILTER (Targeting Day 1 vs Day 2) ---
+            if "pickup_target" not in st.session_state: st.session_state.pickup_target = "All Maps (Merged)"
+            
+            available_targets = ["All Maps (Merged)"] + st.session_state.active_files
+            safe_target_index = available_targets.index(st.session_state.pickup_target) if st.session_state.pickup_target in available_targets else 0
+            
+            new_target = st.selectbox("🎯 Select Pick-Up Target:", available_targets, index=safe_target_index)
+            
+            if new_target != st.session_state.pickup_target:
+                st.session_state.pickup_target = new_target
+                st.session_state.pickup_index = 0
+                st.session_state.show_pickup_map = False
+                auto_save()
+                st.rerun()
+                
+            # Filter the list before running the efficiency math
+            if st.session_state.pickup_target != "All Maps (Merged)":
+                raw_itin = [sd for sd in raw_itin if sd.get("Sheet") == st.session_state.pickup_target]
+
+            if "pickup_sort_method" not in st.session_state: st.session_state.pickup_sort_method = "🔄 Route Efficiency"
                 
             new_sort = st.radio("Sort Manifest By:", ["🔄 Route Efficiency", "⏱️ Order Installed"], index=0 if st.session_state.pickup_sort_method == "🔄 Route Efficiency" else 1, horizontal=True)
             
@@ -600,10 +650,10 @@ else:
 
             st.divider()
 
-            if st.button("🗺️ GENERATE PICK-UP MAP MANIFEST", use_container_width=True):
+            if itin and st.button("🗺️ GENERATE PICK-UP MAP MANIFEST", use_container_width=True):
                 st.session_state.show_pickup_map = not st.session_state.get("show_pickup_map", False)
                 
-            if st.session_state.get("show_pickup_map", False):
+            if st.session_state.get("show_pickup_map", False) and itin:
                 st.success(f"TACTICAL PICK-UP MAP: {len(itin)} Secured Sites")
                 m_pickup = folium.Map(location=st.session_state.home_coords, zoom_start=11, tiles="CartoDB dark_matter")
                 folium.Marker(st.session_state.home_coords, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_pickup)
@@ -645,59 +695,61 @@ else:
                 
                 st_folium(m_pickup, height=450, use_container_width=True, returned_objects=[], key="pickup_map_render")
                 st.divider()
+            elif not itin:
+                st.warning("No installed sites found for the selected Pick-Up target.")
 
-            view_mode = st.radio("Pick-Up View:", ["Active Route", "Full Manifest List"], horizontal=True)
-            
-            if view_mode == "Full Manifest List":
-                st.dataframe(pd.DataFrame([{
-                    "Site": s["Site"], "Street": s["Street"], "Status": "✅ Done" if s.get("Picked up") == "x" else "⏳ Pending"
-                } for s in itin]), use_container_width=True)
-            else:
-                p_idx = st.session_state.pickup_index
-                if p_idx < len(itin):
-                    if st.session_state.last_pickup_msg:
-                        st.markdown(f"<div class='success-recap'>{st.session_state.last_pickup_msg}</div>", unsafe_allow_html=True)
-                        
-                    s = itin[p_idx]
-                    p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
-                    st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
-                    
-                    # MODERN GOOGLE MAPS URL
-                    st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/Current+Location/{p_lat},{p_lon}", use_container_width=True)
-                    
-                    if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
-                        st.session_state.site_data[s['UID']]["Picked up"] = "x"
-                        st.session_state.last_pickup_msg = f"✅ Pick-Up {s.get('Site')} Confirmed."
-                        st.session_state.pickup_index += 1
-                        auto_save()
-                        st.rerun()
-                        
-                    if s.get("Picked up") == "x":
-                        if st.button("⏪ UNDO PICK-UP", use_container_width=True):
-                            st.session_state.site_data[s['UID']]["Picked up"] = ""
-                            auto_save()
-                            st.rerun()
-                    
-                    st.divider()
-                    p_nav1, p_nav2 = st.columns(2)
-                    with p_nav1:
-                        if p_idx > 0 and st.button("⬅️ PREV PICK-UP", use_container_width=True, key=f"p_prev_{s['UID']}"):
-                            st.session_state.pickup_index -= 1
-                            st.session_state.last_pickup_msg = None
-                            auto_save()
-                            st.rerun()
-                    with p_nav2:
-                        if p_idx < len(itin) - 1 and st.button("SKIP / NEXT ➡️", use_container_width=True, key=f"p_next_{s['UID']}"):
-                            st.session_state.pickup_index += 1
-                            st.session_state.last_pickup_msg = None
-                            auto_save()
-                            st.rerun()
+            if itin:
+                view_mode = st.radio("Pick-Up View:", ["Active Route", "Full Manifest List"], horizontal=True)
+                
+                if view_mode == "Full Manifest List":
+                    st.dataframe(pd.DataFrame([{
+                        "Site": s["Site"], "Street": s["Street"], "Status": "✅ Done" if s.get("Picked up") == "x" else "⏳ Pending"
+                    } for s in itin]), use_container_width=True)
                 else:
-                    st.success("♻️ ALL PICK-UPS ARE SECURED!")
-                    if p_idx > 0 and st.button("⬅️ REVIEW LAST PICK-UP", use_container_width=True):
-                        st.session_state.pickup_index -= 1
-                        auto_save()
-                        st.rerun()
+                    p_idx = st.session_state.pickup_index
+                    if p_idx < len(itin):
+                        if st.session_state.last_pickup_msg:
+                            st.markdown(f"<div class='success-recap'>{st.session_state.last_pickup_msg}</div>", unsafe_allow_html=True)
+                            
+                        s = itin[p_idx]
+                        p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
+                        st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
+                        
+                        st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/Current+Location/{p_lat},{p_lon}", use_container_width=True)
+                        
+                        if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
+                            st.session_state.site_data[s['UID']]["Picked up"] = "x"
+                            st.session_state.last_pickup_msg = f"✅ Pick-Up {s.get('Site')} Confirmed."
+                            st.session_state.pickup_index += 1
+                            auto_save()
+                            st.rerun()
+                            
+                        if s.get("Picked up") == "x":
+                            if st.button("⏪ UNDO PICK-UP", use_container_width=True):
+                                st.session_state.site_data[s['UID']]["Picked up"] = ""
+                                auto_save()
+                                st.rerun()
+                        
+                        st.divider()
+                        p_nav1, p_nav2 = st.columns(2)
+                        with p_nav1:
+                            if p_idx > 0 and st.button("⬅️ PREV PICK-UP", use_container_width=True, key=f"p_prev_{s['UID']}"):
+                                st.session_state.pickup_index -= 1
+                                st.session_state.last_pickup_msg = None
+                                auto_save()
+                                st.rerun()
+                        with p_nav2:
+                            if p_idx < len(itin) - 1 and st.button("SKIP / NEXT ➡️", use_container_width=True, key=f"p_next_{s['UID']}"):
+                                st.session_state.pickup_index += 1
+                                st.session_state.last_pickup_msg = None
+                                auto_save()
+                                st.rerun()
+                    else:
+                        st.success("♻️ ALL PICK-UPS ARE SECURED!")
+                        if p_idx > 0 and st.button("⬅️ REVIEW LAST PICK-UP", use_container_width=True):
+                            st.session_state.pickup_index -= 1
+                            auto_save()
+                            st.rerun()
                         
     with tab4:
         st.subheader("📋 End of Day Audit")
@@ -718,7 +770,36 @@ else:
             st.success("✅ All installed sites have complete data. Ready for export.")
             
         if all_d:
-            st.download_button("📊 FINAL SUBMIT (DOWNLOAD EXCEL)", pd.DataFrame(all_d).to_csv(index=False), "Report.csv", use_container_width=True)
+            # --- CRASH-PROOF MULTI-SHEET EXCEL EXPORT ---
+            try:
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df_all = pd.DataFrame(all_d)
+                    # Master Tab
+                    df_all.to_excel(writer, sheet_name='Master List', index=False)
+                    # Separate Tabs for Each Day/Map
+                    for sheet in df_all['Sheet'].unique():
+                        df_sheet = df_all[df_all['Sheet'] == sheet]
+                        safe_sheet_name = str(sheet)[:31].replace('[', '').replace(']', '').replace(':', '').replace('*', '').replace('?', '').replace('/', '').replace('\\', '')
+                        df_sheet.to_excel(writer, sheet_name=safe_sheet_name, index=False)
+                        
+                excel_data = output.getvalue()
+                st.download_button(
+                    label="📊 FINAL SUBMIT (DOWNLOAD EXCEL)", 
+                    data=excel_data, 
+                    file_name=f"TDS_Report_{st.session_state.driver_name}.xlsx", 
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                    use_container_width=True
+                )
+            except Exception as e:
+                # Fallback to CSV if the cloud server blocks the Excel library
+                st.warning("Excel Engine blocked by Cloud Server. Generating standard CSV fallback.")
+                st.download_button(
+                    label="📊 FINAL SUBMIT (DOWNLOAD CSV)", 
+                    data=pd.DataFrame(all_d).to_csv(index=False), 
+                    file_name=f"TDS_Report_{st.session_state.driver_name}.csv", 
+                    use_container_width=True
+                )
         
         st.divider()
         if os.path.exists(BACKUP_FILE):

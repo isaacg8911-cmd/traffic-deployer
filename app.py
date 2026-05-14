@@ -13,7 +13,6 @@ from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
-
 # --- ROCK-SOLID CONFIG ---
 st.set_page_config(page_title="Live Wire V51.87 Stable Origin", layout="centered")
 

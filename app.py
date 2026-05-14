@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.88 Pick-Up Manifest", layout="centered")
+st.set_page_config(page_title="Live Wire V51.89 Pick-Up Optimizer", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -104,7 +104,7 @@ def auto_save():
         "current_index": st.session_state.get("current_index", 0),
         "mission_type": st.session_state.get("mission_type", "📍 INSTALLATION"),
         "pickup_index": st.session_state.get("pickup_index", 0),
-        "pickup_itinerary": st.session_state.get("pickup_itinerary", []),
+        "pickup_sort_method": st.session_state.get("pickup_sort_method", "🔄 Route Efficiency"),
         "theme": st.session_state.get("theme", "☁️ Overcast (Standard)")
     }
     try:
@@ -113,7 +113,7 @@ def auto_save():
     except Exception as e: 
         print(f"Save Error: {e}")
 
-# --- DUAL-ENGINE GEOCODER (CLOUD SAFE) ---
+# --- DUAL-ENGINE GEOCODER ---
 def geocode_address(address):
     try:
         url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address={requests.utils.quote(address)}&benchmark=Public_AR_Current&format=json"
@@ -301,14 +301,15 @@ if not st.session_state.get("optimized_route"):
         
     st.divider()
     
-    # --- TRIFECTA ORIGIN MENU ---
+    # --- MANUAL ORIGIN SETUP ---
     st.subheader("🏠 1. SET STARTING POINT")
-    st.write(f"**Saved Origin:** `{st.session_state.home_coords[0]:.5f}, {st.session_state.home_coords[1]:.5f}`")
+    st.write(f"**Current Saved Origin:** `{st.session_state.home_coords[0]:.5f}, {st.session_state.home_coords[1]:.5f}`")
     
     tab_gps, tab_addr, tab_coords = st.tabs(["📍 1-Tap GPS", "🏠 Search Address", "✏️ Manual Coords"])
     
     with tab_gps:
         st.write("Grab your live phone/truck location:")
+        # Completely Keyless execution to guarantee no Cloud crashes
         loc_start = streamlit_geolocation()
         if loc_start and loc_start.get('latitude'):
             current_lat = round(loc_start['latitude'], 4)
@@ -551,9 +552,57 @@ else:
                     
     with tab3:
         # PULL ONLY SITES THAT WERE INSTALLED
-        itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
-        if itin:
-            # --- IDEA 6: PICK-UP MAP MANIFEST BUTTON ---
+        raw_itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
+        
+        if raw_itin:
+            st.subheader("♻️ Pick-Up Strategy Engine")
+            
+            # --- PICK-UP ROUTE OPTIMIZATION TOGGLE ---
+            if "pickup_sort_method" not in st.session_state:
+                st.session_state.pickup_sort_method = "🔄 Route Efficiency"
+                
+            new_sort = st.radio("Sort Manifest By:", ["🔄 Route Efficiency", "⏱️ Order Installed"], index=0 if st.session_state.pickup_sort_method == "🔄 Route Efficiency" else 1, horizontal=True)
+            
+            if new_sort != st.session_state.pickup_sort_method:
+                st.session_state.pickup_sort_method = new_sort
+                st.session_state.pickup_index = 0
+                st.session_state.show_pickup_map = False # Hides old map on change
+                auto_save()
+                st.rerun()
+                
+            # Apply chosen sorting logic
+            if st.session_state.pickup_sort_method == "⏱️ Order Installed":
+                raw_itin.sort(key=lambda x: x.get('ExactTime', ''))
+                itin = raw_itin
+            else:
+                # Runs Nearest Neighbor + 2-Opt specifically for the picked-up sites from the Current Home GPS
+                temp_route = [{'uid': sd['UID'], 'nav_lat': float(sd['LAT']), 'nav_lon': float(sd['LON']), 'sd': sd} for sd in raw_itin]
+                master_route, curr = [], st.session_state.home_coords
+                while temp_route:
+                    best_site = min(temp_route, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nav_lat'], x['nav_lon']))
+                    master_route.append(best_site)
+                    curr = (best_site['nav_lat'], best_site['nav_lon'])
+                    temp_route.remove(best_site)
+                
+                best_route, best_dist = untangle_route(master_route)
+                # Quick 5-restart optimization for rapid field loading
+                for _ in range(5):
+                    shuffled = list(master_route)
+                    random.shuffle(shuffled)
+                    opt_route, opt_dist = untangle_route(shuffled)
+                    if opt_dist < best_dist:
+                        best_dist = opt_dist
+                        best_route = opt_route
+                
+                itin = [site['sd'] for site in best_route]
+                
+            # Safeguard Index Capper if lists change length
+            if st.session_state.pickup_index >= len(itin):
+                st.session_state.pickup_index = max(0, len(itin) - 1)
+
+            st.divider()
+
+            # --- MAP GENERATOR ---
             if st.button("🗺️ GENERATE PICK-UP MAP MANIFEST", use_container_width=True):
                 st.session_state.show_pickup_map = not st.session_state.get("show_pickup_map", False)
                 

@@ -12,9 +12,10 @@ from folium.features import DivIcon
 from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.82 Form-Lock", layout="centered")
+st.set_page_config(page_title="Live Wire V51.83 GPS Origin", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 
@@ -280,40 +281,36 @@ if not st.session_state.get("optimized_route"):
         
     st.divider()
     
-    # --- MANUAL ORIGIN SETUP (NO HARDWARE SENSORS) ---
+    # --- GPS ORIGIN SETUP (ISOLATED TO PREVENT CRASHES) ---
     st.subheader("🏠 1. SET STARTING POINT")
     st.write(f"**Current Saved Origin:** `{st.session_state.home_coords[0]:.5f}, {st.session_state.home_coords[1]:.5f}`")
     
-    tab_addr, tab_coords = st.tabs(["📍 Search Address", "✏️ Enter Coordinates"])
+    c_gps, c_man = st.columns([1, 1])
     
-    with tab_addr:
-        address_input = st.text_input("Enter Starting Address (Home or Dispatch Yard):", placeholder="e.g., 123 Main St, Garden Grove, CA")
-        if st.button("🔍 LOCATE & SAVE ADDRESS", use_container_width=True):
-            if address_input:
-                try:
-                    url = f"https://nominatim.openstreetmap.org/search?format=json&q={requests.utils.quote(address_input)}"
-                    resp = requests.get(url, headers={'User-Agent': 'LiveWire-Ops'}).json()
-                    if resp:
-                        st.session_state.home_coords = (float(resp[0]['lat']), float(resp[0]['lon']))
-                        auto_save()
-                        st.success("✅ Origin Updated!")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("❌ Address not found. Try adding the city and state.")
-                except Exception:
-                    st.error("❌ Network error. Please use the Coordinates tab.")
-
-    with tab_coords:
-        c_lat, c_lon = st.columns(2)
-        with c_lat: man_lat = st.number_input("Latitude", value=st.session_state.home_coords[0], format="%.5f")
-        with c_lon: man_lon = st.number_input("Longitude", value=st.session_state.home_coords[1], format="%.5f")
-        if st.button("💾 SAVE COORDS", use_container_width=True):
-            st.session_state.home_coords = (man_lat, man_lon)
-            auto_save()
-            st.success("✅ Origin Updated!")
-            time.sleep(1)
-            st.rerun()
+    with c_gps:
+        st.write("📍 **1-Tap GPS Grab:**")
+        # Absolutely static key. Only renders on this exact screen.
+        loc_start = streamlit_geolocation(key="master_origin_gps")
+        if loc_start and loc_start.get('latitude'):
+            current_lat = round(loc_start['latitude'], 4)
+            saved_lat = round(st.session_state.home_coords[0], 4)
+            if current_lat != saved_lat:
+                st.session_state.home_coords = (loc_start['latitude'], loc_start['longitude'])
+                auto_save()
+                st.success("✅ Origin snapped to your device GPS!")
+                time.sleep(1)
+                st.rerun()
+                
+    with c_man:
+        with st.expander("✏️ Manual Coordinates (Backup)"):
+            man_lat = st.number_input("Latitude", value=st.session_state.home_coords[0], format="%.5f")
+            man_lon = st.number_input("Longitude", value=st.session_state.home_coords[1], format="%.5f")
+            if st.button("💾 SAVE COORDS", use_container_width=True):
+                st.session_state.home_coords = (man_lat, man_lon)
+                auto_save()
+                st.success("✅ Origin Updated!")
+                time.sleep(1)
+                st.rerun()
 
     st.divider()
     st.subheader("📁 2. UPLOAD DATA")
@@ -404,7 +401,7 @@ else:
                 st.session_state.current_index = st.session_state.optimized_route.index(s)
                 st.rerun()
                 
-        if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)", key="reset_route_btn"):
+        if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
             st.session_state.optimized_route = []
             st.rerun()
@@ -423,6 +420,11 @@ else:
             
             st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
             
+            display_street = str(sd.get('Street', f"Site {s['id']}"))
+            if display_street.lower() == 'nan': display_street = ""
+            new_street = st.text_input("📍 STREET NAME (Edit if incorrect):", value=display_street)
+            st.session_state.site_data[s['uid']]['Street'] = str(new_street).strip()
+            
             st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/search/?api=1&query={safe_lat},{safe_lon}", use_container_width=True)
             
             batch = []
@@ -434,14 +436,9 @@ else:
                         
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             
-            # --- FORM-LOCK ENGINE (Zero Reruns While Typing) ---
+            # Form-Locked Input System
             with st.form(f"form_{s['uid']}"):
                 st.info("🎙️ **VOICE PARSER:** Type or dictate notes below.")
-                
-                display_street = str(sd.get('Street', f"Site {s['id']}"))
-                if display_street.lower() == 'nan': display_street = ""
-                new_street = st.text_input("📍 STREET NAME:", value=display_street)
-                
                 dictation = st.text_area("📝 Field Notes / Dictation:", value=str(sd.get('Notes', '')))
                 
                 c1, c2, c3 = st.columns(3)
@@ -455,8 +452,6 @@ else:
 
                 if submit_btn or skip_btn:
                     old_notes = str(sd.get('Notes', ''))
-                    
-                    # NLP Override Fix: Only parse voice if the dictation text was actually changed
                     if dictation != old_notes and dictation.strip() != "":
                         final_dr, final_ln, final_ser = parse_dictation(dictation, dr, ln, ser)
                     else:

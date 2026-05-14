@@ -13,8 +13,9 @@ from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
+
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.87 Stable Origin", layout="centered")
+st.set_page_config(page_title="Live Wire V51.88 Pick-Up Manifest", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -308,7 +309,6 @@ if not st.session_state.get("optimized_route"):
     
     with tab_gps:
         st.write("Grab your live phone/truck location:")
-        # The true fix: Library does not accept a 'key' parameter. 
         loc_start = streamlit_geolocation()
         if loc_start and loc_start.get('latitude'):
             current_lat = round(loc_start['latitude'], 4)
@@ -550,8 +550,56 @@ else:
                 st.rerun()
                     
     with tab3:
+        # PULL ONLY SITES THAT WERE INSTALLED
         itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
         if itin:
+            # --- IDEA 6: PICK-UP MAP MANIFEST BUTTON ---
+            if st.button("🗺️ GENERATE PICK-UP MAP MANIFEST", use_container_width=True):
+                st.session_state.show_pickup_map = not st.session_state.get("show_pickup_map", False)
+                
+            if st.session_state.get("show_pickup_map", False):
+                st.success(f"TACTICAL PICK-UP MAP: {len(itin)} Secured Sites")
+                m_pickup = folium.Map(location=st.session_state.home_coords, zoom_start=11, tiles="CartoDB dark_matter")
+                folium.Marker(st.session_state.home_coords, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_pickup)
+                
+                pickup_coords = [st.session_state.home_coords]
+                for idx, p_site in enumerate(itin):
+                    p_lat, p_lon = p_site.get('LAT'), p_site.get('LON')
+                    is_picked_up = p_site.get("Picked up") == "x"
+                    color = "#00FF00" if is_picked_up else "#FFA500" 
+                    
+                    if p_lat and p_lon:
+                        pickup_coords.append((p_lat, p_lon))
+                        folium.CircleMarker(
+                            location=(p_lat, p_lon), radius=10, color=color, fill=True, fill_color=color, fill_opacity=0.9,
+                            popup=f"Pick-Up {idx+1}: Site {p_site.get('Site')}"
+                        ).add_to(m_pickup)
+                        
+                        folium.Marker(
+                            location=(p_lat, p_lon),
+                            icon=DivIcon(
+                                icon_size=(20,20), icon_anchor=(10,10),
+                                html=f'<div style="font-size: 10pt; color: black; font-weight: 900; text-align: center; line-height: 20px;">{idx+1}</div>',
+                            )
+                        ).add_to(m_pickup)
+                
+                if len(pickup_coords) > 1:
+                    chunk_size = 50
+                    for i in range(0, len(pickup_coords) - 1, chunk_size - 1):
+                        chunk = pickup_coords[i:i + chunk_size]
+                        coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
+                        osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
+                        try:
+                            resp = requests.get(osrm_url, timeout=3).json()
+                            if resp.get('code') == 'Ok':
+                                route_geo = resp['routes'][0]['geometry']['coordinates']
+                                route_points = [(lat, lon) for lon, lat in route_geo]
+                                folium.PolyLine(route_points, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=4, opacity=0.7).add_to(m_pickup)
+                        except: pass
+                
+                st_folium(m_pickup, height=450, use_container_width=True, returned_objects=[], key="pickup_map_render")
+                st.divider()
+
             view_mode = st.radio("Pick-Up View:", ["Active Route", "Full Manifest List"], horizontal=True)
             
             if view_mode == "Full Manifest List":
@@ -567,7 +615,8 @@ else:
                     s = itin[p_idx]
                     p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                     st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
-                    st.link_button("🚗 NAV", f"https://www.google.com/maps/dir/Current+Location/{p_lat},{p_lon}", use_container_width=True)
+                    
+                    st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/Current+Location/{p_lat},{p_lon}", use_container_width=True)
                     
                     if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
                         st.session_state.site_data[s['UID']]["Picked up"] = "x"
@@ -575,6 +624,12 @@ else:
                         st.session_state.pickup_index += 1
                         auto_save()
                         st.rerun()
+                        
+                    if s.get("Picked up") == "x":
+                        if st.button("⏪ UNDO PICK-UP", use_container_width=True):
+                            st.session_state.site_data[s['UID']]["Picked up"] = ""
+                            auto_save()
+                            st.rerun()
                     
                     st.divider()
                     p_nav1, p_nav2 = st.columns(2)

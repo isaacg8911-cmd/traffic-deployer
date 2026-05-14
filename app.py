@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.85 Ironclad Geocoder", layout="centered")
+st.set_page_config(page_title="Live Wire V51.86 Vanguard Hotfix", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -115,7 +115,6 @@ def auto_save():
 
 # --- DUAL-ENGINE GEOCODER (CLOUD SAFE) ---
 def geocode_address(address):
-    # 1. Try US Census Geocoder (Rock solid for US Street Addresses, blocks nothing)
     try:
         url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address={requests.utils.quote(address)}&benchmark=Public_AR_Current&format=json"
         resp = requests.get(url, timeout=5).json()
@@ -124,7 +123,6 @@ def geocode_address(address):
             return float(matches[0]["coordinates"]["y"]), float(matches[0]["coordinates"]["x"])
     except Exception: pass
     
-    # 2. Try OpenStreetMap (Fallback for cities/zipcodes, uses masked User-Agent to bypass cloud blocks)
     try:
         url = f"https://nominatim.openstreetmap.org/search?format=json&q={requests.utils.quote(address)}"
         headers = {'User-Agent': f'LiveWire-Traffic-Ops-{st.session_state.session_id}/1.0'}
@@ -289,9 +287,11 @@ col_logo, col_logout = st.columns([3, 1])
 with col_logo: st.title(f"🚦 Ops: {st.session_state.driver_name}")
 with col_logout:
     if st.button("LOGOUT", use_container_width=True):
-        keys_to_delete = list(st.session_state.keys())
-        for k in keys_to_delete:
-            del st.session_state[k]
+        # SURGICAL LOGOUT: Removes user data but leaves hardware registry fully intact
+        if "driver_name" in st.session_state: del st.session_state["driver_name"]
+        if "optimized_route" in st.session_state: st.session_state.optimized_route = []
+        if "site_data" in st.session_state: st.session_state.site_data = {}
+        if "init" in st.session_state: del st.session_state["init"]
         st.rerun()
 
 if not st.session_state.get("optimized_route"):
@@ -311,7 +311,8 @@ if not st.session_state.get("optimized_route"):
     
     with tab_gps:
         st.write("Grab your live phone/truck location:")
-        loc_start = streamlit_geolocation(key=f"start_gps_{st.session_state.session_id}")
+        # TRUE STATIC KEY (Zero crash footprint)
+        loc_start = streamlit_geolocation(key="vanguard_gps_sensor")
         if loc_start and loc_start.get('latitude'):
             current_lat = round(loc_start['latitude'], 4)
             saved_lat = round(st.session_state.home_coords[0], 4)
@@ -434,7 +435,7 @@ else:
             done = sd.get("Installed") == "x" or sd.get("Picked up") == "x"
             skipped = sd.get("Skipped") == "x"
             status_icon = '❌' if skipped else ('✅' if done else '🟠')
-            if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
+            if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}", use_container_width=True):
                 st.session_state.current_index = next(i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid'])
                 st.rerun()
                 

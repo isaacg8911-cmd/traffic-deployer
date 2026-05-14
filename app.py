@@ -12,10 +12,9 @@ from folium.features import DivIcon
 from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.83 GPS Origin", layout="centered")
+st.set_page_config(page_title="Live Wire V51.83 Void-Proof", layout="centered")
 
 HOME_COORDS = (33.7715, -117.9431) 
 
@@ -253,6 +252,11 @@ def parse_dictation(text, current_dr, current_ln, current_ser):
 # --- NAVIGATION HELPER ---
 def get_next_valid_index(current_idx, active_uids, direction=1):
     if not active_uids: return current_idx
+    
+    # SAFETY NET: Prevent app crash if current_idx drifted out of bounds
+    if current_idx >= len(st.session_state.optimized_route):
+        current_idx = len(st.session_state.optimized_route) - 1
+        
     current_uid = st.session_state.optimized_route[current_idx]['uid']
     if current_uid in active_uids:
         list_idx = active_uids.index(current_uid)
@@ -281,36 +285,40 @@ if not st.session_state.get("optimized_route"):
         
     st.divider()
     
-    # --- GPS ORIGIN SETUP (ISOLATED TO PREVENT CRASHES) ---
+    # --- MANUAL ORIGIN SETUP ---
     st.subheader("🏠 1. SET STARTING POINT")
     st.write(f"**Current Saved Origin:** `{st.session_state.home_coords[0]:.5f}, {st.session_state.home_coords[1]:.5f}`")
     
-    c_gps, c_man = st.columns([1, 1])
+    tab_addr, tab_coords = st.tabs(["📍 Search Address", "✏️ Enter Coordinates"])
     
-    with c_gps:
-        st.write("📍 **1-Tap GPS Grab:**")
-        # Absolutely static key. Only renders on this exact screen.
-        loc_start = streamlit_geolocation(key="master_origin_gps")
-        if loc_start and loc_start.get('latitude'):
-            current_lat = round(loc_start['latitude'], 4)
-            saved_lat = round(st.session_state.home_coords[0], 4)
-            if current_lat != saved_lat:
-                st.session_state.home_coords = (loc_start['latitude'], loc_start['longitude'])
-                auto_save()
-                st.success("✅ Origin snapped to your device GPS!")
-                time.sleep(1)
-                st.rerun()
-                
-    with c_man:
-        with st.expander("✏️ Manual Coordinates (Backup)"):
-            man_lat = st.number_input("Latitude", value=st.session_state.home_coords[0], format="%.5f")
-            man_lon = st.number_input("Longitude", value=st.session_state.home_coords[1], format="%.5f")
-            if st.button("💾 SAVE COORDS", use_container_width=True):
-                st.session_state.home_coords = (man_lat, man_lon)
-                auto_save()
-                st.success("✅ Origin Updated!")
-                time.sleep(1)
-                st.rerun()
+    with tab_addr:
+        address_input = st.text_input("Enter Starting Address (Home or Dispatch Yard):", placeholder="e.g., 123 Main St, Garden Grove, CA")
+        if st.button("🔍 LOCATE & SAVE ADDRESS", use_container_width=True):
+            if address_input:
+                try:
+                    url = f"https://nominatim.openstreetmap.org/search?format=json&q={requests.utils.quote(address_input)}"
+                    resp = requests.get(url, headers={'User-Agent': 'LiveWire-Ops'}).json()
+                    if resp:
+                        st.session_state.home_coords = (float(resp[0]['lat']), float(resp[0]['lon']))
+                        auto_save()
+                        st.success("✅ Origin Updated!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Address not found. Try adding the city and state.")
+                except Exception:
+                    st.error("❌ Network error. Please use the Coordinates tab.")
+
+    with tab_coords:
+        c_lat, c_lon = st.columns(2)
+        with c_lat: man_lat = st.number_input("Latitude", value=st.session_state.home_coords[0], format="%.5f")
+        with c_lon: man_lon = st.number_input("Longitude", value=st.session_state.home_coords[1], format="%.5f")
+        if st.button("💾 SAVE COORDS", use_container_width=True):
+            st.session_state.home_coords = (man_lat, man_lon)
+            auto_save()
+            st.success("✅ Origin Updated!")
+            time.sleep(1)
+            st.rerun()
 
     st.divider()
     st.subheader("📁 2. UPLOAD DATA")
@@ -398,7 +406,8 @@ else:
             skipped = sd.get("Skipped") == "x"
             status_icon = '❌' if skipped else ('✅' if done else '🟠')
             if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
-                st.session_state.current_index = st.session_state.optimized_route.index(s)
+                # FIX 2: Bulletproof List Matching by UID
+                st.session_state.current_index = next(i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid'])
                 st.rerun()
                 
         if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
@@ -408,8 +417,9 @@ else:
             
     with tab2:
         cur = st.session_state.current_index
+        
+        # FIX 1: The Void Safety Net
         if cur < len(st.session_state.optimized_route):
-            
             if st.session_state.last_install_msg:
                 css_class = "success-recap" if st.session_state.msg_type == "success" else "skip-recap"
                 st.markdown(f"<div class='{css_class}'>{st.session_state.last_install_msg}</div>", unsafe_allow_html=True)
@@ -436,7 +446,6 @@ else:
                         
             if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
             
-            # Form-Locked Input System
             with st.form(f"form_{s['uid']}"):
                 st.info("🎙️ **VOICE PARSER:** Type or dictate notes below.")
                 dictation = st.text_area("📝 Field Notes / Dictation:", value=str(sd.get('Notes', '')))
@@ -498,6 +507,13 @@ else:
                     st.session_state.last_install_msg = None
                     auto_save()
                     st.rerun()
+        else:
+            # THE SAFETY NET: Keeps the app from blanking out on the last stop
+            st.success("🎉 ALL STOPS ON THIS MANIFEST ARE COMPLETED!")
+            if st.button("⬅️ GO BACK TO LAST STOP", use_container_width=True):
+                st.session_state.current_index = len(st.session_state.optimized_route) - 1
+                auto_save()
+                st.rerun()
                     
     with tab3:
         itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
@@ -540,6 +556,13 @@ else:
                             st.session_state.last_pickup_msg = None
                             auto_save()
                             st.rerun()
+                else:
+                    # PICK-UP SAFETY NET
+                    st.success("♻️ ALL PICK-UPS ARE SECURED!")
+                    if p_idx > 0 and st.button("⬅️ REVIEW LAST PICK-UP", use_container_width=True):
+                        st.session_state.pickup_index -= 1
+                        auto_save()
+                        st.rerun()
                         
     with tab4:
         st.subheader("📋 End of Day Audit")

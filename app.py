@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.90", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.91", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -287,9 +287,11 @@ col_logo, col_logout = st.columns([3, 1])
 with col_logo: st.title(f"🚦 Ops: {st.session_state.driver_name}")
 with col_logout:
     if st.button("LOGOUT", use_container_width=True):
-        keys_to_delete = list(st.session_state.keys())
-        for k in keys_to_delete:
-            del st.session_state[k]
+        # TRUE SURGICAL LOGOUT: Deletes only user data, leaves widgets alone.
+        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method"]
+        for k in keys_to_wipe:
+            if k in st.session_state:
+                del st.session_state[k]
         st.rerun()
 
 if not st.session_state.get("optimized_route"):
@@ -425,7 +427,8 @@ else:
                 except requests.exceptions.RequestException: 
                     pass 
         
-        st_folium(m, height=450, use_container_width=True, returned_objects=[])
+        # KEY ADDED TO PREVENT FLICKER
+        st_folium(m, height=450, use_container_width=True, returned_objects=[], key="main_route_map")
             
         for idx, s in enumerate(active_route):
             sd = st.session_state.site_data[s['uid']]
@@ -433,7 +436,7 @@ else:
             skipped = sd.get("Skipped") == "x"
             status_icon = '❌' if skipped else ('✅' if done else '🟠')
             if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
-                st.session_state.current_index = next(i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid'])
+                st.session_state.current_index = next((i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid']), 0)
                 st.rerun()
                 
         if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
@@ -460,12 +463,13 @@ else:
             new_street = st.text_input("📍 STREET NAME (Edit if incorrect):", value=display_street)
             st.session_state.site_data[s['uid']]['Street'] = str(new_street).strip()
             
+            # MODERN GOOGLE MAPS URL
             st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/dir/Current+Location/{safe_lat},{safe_lon}", use_container_width=True)
             
             batch = []
             try:
                 active_idx = next(i for i, route_site in enumerate(active_route) if route_site['uid'] == s['uid'])
-                for bs in active_route[active_idx:active_idx+9]:
+                for bs in active_route[active_idx:active_idx+10]:
                     bsd = st.session_state.site_data[bs['uid']]
                     if bsd.get('Installed') != "x" and bsd.get('Skipped') != "x":
                         b_lat, b_lon = bsd.get('LAT', bsd.get('lat')), bsd.get('LON', bsd.get('lon'))
@@ -474,6 +478,7 @@ else:
                 pass
                         
             if len(batch) > 1: 
+                # MODERN GOOGLE MAPS BATCH URL
                 st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", f"https://www.google.com/maps/dir/Current+Location/{'/'.join(batch)}", use_container_width=True)
             
             with st.form(f"form_{s['uid']}"):
@@ -657,6 +662,7 @@ else:
                     p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                     st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                     
+                    # MODERN GOOGLE MAPS URL
                     st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/Current+Location/{p_lat},{p_lon}", use_container_width=True)
                     
                     if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):

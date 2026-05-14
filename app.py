@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.86 Vanguard Hotfix", layout="centered")
+st.set_page_config(page_title="Live Wire V51.87 Stable Origin", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -287,11 +287,9 @@ col_logo, col_logout = st.columns([3, 1])
 with col_logo: st.title(f"🚦 Ops: {st.session_state.driver_name}")
 with col_logout:
     if st.button("LOGOUT", use_container_width=True):
-        # SURGICAL LOGOUT: Removes user data but leaves hardware registry fully intact
-        if "driver_name" in st.session_state: del st.session_state["driver_name"]
-        if "optimized_route" in st.session_state: st.session_state.optimized_route = []
-        if "site_data" in st.session_state: st.session_state.site_data = {}
-        if "init" in st.session_state: del st.session_state["init"]
+        keys_to_delete = list(st.session_state.keys())
+        for k in keys_to_delete:
+            del st.session_state[k]
         st.rerun()
 
 if not st.session_state.get("optimized_route"):
@@ -311,8 +309,8 @@ if not st.session_state.get("optimized_route"):
     
     with tab_gps:
         st.write("Grab your live phone/truck location:")
-        # TRUE STATIC KEY (Zero crash footprint)
-        loc_start = streamlit_geolocation(key="vanguard_gps_sensor")
+        # The true fix: Library does not accept a 'key' parameter. 
+        loc_start = streamlit_geolocation()
         if loc_start and loc_start.get('latitude'):
             current_lat = round(loc_start['latitude'], 4)
             saved_lat = round(st.session_state.home_coords[0], 4)
@@ -435,7 +433,7 @@ else:
             done = sd.get("Installed") == "x" or sd.get("Picked up") == "x"
             skipped = sd.get("Skipped") == "x"
             status_icon = '❌' if skipped else ('✅' if done else '🟠')
-            if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}", use_container_width=True):
+            if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
                 st.session_state.current_index = next(i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid'])
                 st.rerun()
                 

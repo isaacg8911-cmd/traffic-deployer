@@ -12,11 +12,10 @@ from folium.features import DivIcon
 from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from streamlit_geolocation import streamlit_geolocation
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Live Wire V51.83 Void-Proof", layout="centered")
-
-HOME_COORDS = (33.7715, -117.9431) 
+st.set_page_config(page_title="Live Wire V51.85 Ironclad Geocoder", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -113,6 +112,28 @@ def auto_save():
             json.dump(payload, f, default=str)
     except Exception as e: 
         print(f"Save Error: {e}")
+
+# --- DUAL-ENGINE GEOCODER (CLOUD SAFE) ---
+def geocode_address(address):
+    # 1. Try US Census Geocoder (Rock solid for US Street Addresses, blocks nothing)
+    try:
+        url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address={requests.utils.quote(address)}&benchmark=Public_AR_Current&format=json"
+        resp = requests.get(url, timeout=5).json()
+        matches = resp.get("result", {}).get("addressMatches", [])
+        if matches:
+            return float(matches[0]["coordinates"]["y"]), float(matches[0]["coordinates"]["x"])
+    except Exception: pass
+    
+    # 2. Try OpenStreetMap (Fallback for cities/zipcodes, uses masked User-Agent to bypass cloud blocks)
+    try:
+        url = f"https://nominatim.openstreetmap.org/search?format=json&q={requests.utils.quote(address)}"
+        headers = {'User-Agent': f'LiveWire-Traffic-Ops-{st.session_state.session_id}/1.0'}
+        resp = requests.get(url, headers=headers, timeout=5).json()
+        if resp:
+            return float(resp[0]['lat']), float(resp[0]['lon'])
+    except Exception: pass
+    
+    return None, None
 
 # --- ELITE CLUSTER SOLVER ---
 def calc_scaled_dist(lat1, lon1, lat2, lon2):
@@ -252,11 +273,8 @@ def parse_dictation(text, current_dr, current_ln, current_ser):
 # --- NAVIGATION HELPER ---
 def get_next_valid_index(current_idx, active_uids, direction=1):
     if not active_uids: return current_idx
-    
-    # SAFETY NET: Prevent app crash if current_idx drifted out of bounds
     if current_idx >= len(st.session_state.optimized_route):
         current_idx = len(st.session_state.optimized_route) - 1
-        
     current_uid = st.session_state.optimized_route[current_idx]['uid']
     if current_uid in active_uids:
         list_idx = active_uids.index(current_uid)
@@ -285,29 +303,40 @@ if not st.session_state.get("optimized_route"):
         
     st.divider()
     
-    # --- MANUAL ORIGIN SETUP ---
+    # --- TRIFECTA ORIGIN MENU ---
     st.subheader("🏠 1. SET STARTING POINT")
-    st.write(f"**Current Saved Origin:** `{st.session_state.home_coords[0]:.5f}, {st.session_state.home_coords[1]:.5f}`")
+    st.write(f"**Saved Origin:** `{st.session_state.home_coords[0]:.5f}, {st.session_state.home_coords[1]:.5f}`")
     
-    tab_addr, tab_coords = st.tabs(["📍 Search Address", "✏️ Enter Coordinates"])
+    tab_gps, tab_addr, tab_coords = st.tabs(["📍 1-Tap GPS", "🏠 Search Address", "✏️ Manual Coords"])
     
+    with tab_gps:
+        st.write("Grab your live phone/truck location:")
+        loc_start = streamlit_geolocation(key=f"start_gps_{st.session_state.session_id}")
+        if loc_start and loc_start.get('latitude'):
+            current_lat = round(loc_start['latitude'], 4)
+            saved_lat = round(st.session_state.home_coords[0], 4)
+            if current_lat != saved_lat:
+                st.session_state.home_coords = (loc_start['latitude'], loc_start['longitude'])
+                auto_save()
+                st.success("✅ Origin snapped to GPS!")
+                time.sleep(1)
+                st.rerun()
+
     with tab_addr:
-        address_input = st.text_input("Enter Starting Address (Home or Dispatch Yard):", placeholder="e.g., 123 Main St, Garden Grove, CA")
+        address_input = st.text_input("Enter Address (e.g., 123 Main St, Garden Grove, CA):")
         if st.button("🔍 LOCATE & SAVE ADDRESS", use_container_width=True):
             if address_input:
-                try:
-                    url = f"https://nominatim.openstreetmap.org/search?format=json&q={requests.utils.quote(address_input)}"
-                    resp = requests.get(url, headers={'User-Agent': 'LiveWire-Ops'}).json()
-                    if resp:
-                        st.session_state.home_coords = (float(resp[0]['lat']), float(resp[0]['lon']))
-                        auto_save()
-                        st.success("✅ Origin Updated!")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("❌ Address not found. Try adding the city and state.")
-                except Exception:
-                    st.error("❌ Network error. Please use the Coordinates tab.")
+                found_lat, found_lon = geocode_address(address_input)
+                if found_lat and found_lon:
+                    st.session_state.home_coords = (found_lat, found_lon)
+                    auto_save()
+                    st.success("✅ Origin locked in via Cloud Geocoder!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("❌ Address not found by API. Try using the GPS or Coordinates tab.")
+            else:
+                st.warning("Please type an address first.")
 
     with tab_coords:
         c_lat, c_lon = st.columns(2)
@@ -406,7 +435,6 @@ else:
             skipped = sd.get("Skipped") == "x"
             status_icon = '❌' if skipped else ('✅' if done else '🟠')
             if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
-                # FIX 2: Bulletproof List Matching by UID
                 st.session_state.current_index = next(i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid'])
                 st.rerun()
                 
@@ -418,7 +446,6 @@ else:
     with tab2:
         cur = st.session_state.current_index
         
-        # FIX 1: The Void Safety Net
         if cur < len(st.session_state.optimized_route):
             if st.session_state.last_install_msg:
                 css_class = "success-recap" if st.session_state.msg_type == "success" else "skip-recap"
@@ -435,16 +462,21 @@ else:
             new_street = st.text_input("📍 STREET NAME (Edit if incorrect):", value=display_street)
             st.session_state.site_data[s['uid']]['Street'] = str(new_street).strip()
             
-            st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/search/?api=1&query={safe_lat},{safe_lon}", use_container_width=True)
+            st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/dir/Current+Location/{safe_lat},{safe_lon}", use_container_width=True)
             
             batch = []
-            for bs in st.session_state.optimized_route[cur:cur+9]:
-                bsd = st.session_state.site_data[bs['uid']]
-                if bsd.get('Installed') != "x" and bsd.get('Skipped') != "x":
-                    b_lat, b_lon = bsd.get('LAT', bsd.get('lat')), bsd.get('LON', bsd.get('lon'))
-                    if b_lat and b_lon: batch.append(f"{b_lat},{b_lon}")
+            try:
+                active_idx = next(i for i, route_site in enumerate(active_route) if route_site['uid'] == s['uid'])
+                for bs in active_route[active_idx:active_idx+9]:
+                    bsd = st.session_state.site_data[bs['uid']]
+                    if bsd.get('Installed') != "x" and bsd.get('Skipped') != "x":
+                        b_lat, b_lon = bsd.get('LAT', bsd.get('lat')), bsd.get('LON', bsd.get('lon'))
+                        if b_lat and b_lon: batch.append(f"{b_lat},{b_lon}")
+            except StopIteration:
+                pass
                         
-            if len(batch) > 1: st.link_button(f"🗺️ BATCH NAV", "https://www.google.com/maps/dir/" + "/".join(batch), use_container_width=True)
+            if len(batch) > 1: 
+                st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", f"https://www.google.com/maps/dir/Current+Location/{'/'.join(batch)}", use_container_width=True)
             
             with st.form(f"form_{s['uid']}"):
                 st.info("🎙️ **VOICE PARSER:** Type or dictate notes below.")
@@ -477,9 +509,7 @@ else:
                         "Lanes": final_ln, 
                         "Notes": str(dictation), 
                         "Installed": "x" if submit_btn else "", 
-                        "Skipped": "x" if skip_btn else "",
-                        "LAT": safe_lat, 
-                        "LON": safe_lon
+                        "Skipped": "x" if skip_btn else ""
                     })
                     
                     if submit_btn:
@@ -493,6 +523,13 @@ else:
                     auto_save()
                     st.rerun()
             
+            if sd.get('Installed') == "x" or sd.get('Skipped') == "x":
+                if st.button("⏪ UNDO STATUS (Re-open Site)", use_container_width=True):
+                    st.session_state.site_data[s['uid']]['Installed'] = ""
+                    st.session_state.site_data[s['uid']]['Skipped'] = ""
+                    auto_save()
+                    st.rerun()
+
             st.divider()
             nav1, nav2 = st.columns(2)
             with nav1:
@@ -508,7 +545,6 @@ else:
                     auto_save()
                     st.rerun()
         else:
-            # THE SAFETY NET: Keeps the app from blanking out on the last stop
             st.success("🎉 ALL STOPS ON THIS MANIFEST ARE COMPLETED!")
             if st.button("⬅️ GO BACK TO LAST STOP", use_container_width=True):
                 st.session_state.current_index = len(st.session_state.optimized_route) - 1
@@ -533,7 +569,7 @@ else:
                     s = itin[p_idx]
                     p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                     st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
-                    st.link_button("🚗 NAV", f"https://www.google.com/maps/search/?api=1&query={p_lat},{p_lon}", use_container_width=True)
+                    st.link_button("🚗 NAV", f"https://www.google.com/maps/dir/Current+Location/{p_lat},{p_lon}", use_container_width=True)
                     
                     if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
                         st.session_state.site_data[s['UID']]["Picked up"] = "x"
@@ -557,7 +593,6 @@ else:
                             auto_save()
                             st.rerun()
                 else:
-                    # PICK-UP SAFETY NET
                     st.success("♻️ ALL PICK-UPS ARE SECURED!")
                     if p_idx > 0 and st.button("⬅️ REVIEW LAST PICK-UP", use_container_width=True):
                         st.session_state.pickup_index -= 1

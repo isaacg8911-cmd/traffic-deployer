@@ -1,10 +1,12 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import re
 import pandas as pd
 import json
 import time
 import os
 import random
+import math
 import requests
 import folium
 import uuid
@@ -13,17 +15,22 @@ from folium.features import DivIcon
 from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from streamlit_geolocation import streamlit_geolocation
 
-# --- TITANIUM SAFETY NET FOR COOKIES ---
+# --- TITANIUM SAFETY NET FOR COOKIES & GPS ---
 try:
     from streamlit_cookies_manager import CookieManager
     HAS_COOKIES = True
 except ImportError:
     HAS_COOKIES = False
 
+try:
+    from streamlit_geolocation import streamlit_geolocation
+    HAS_GPS = True
+except ImportError:
+    HAS_GPS = False
+
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.95", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.96", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -58,7 +65,24 @@ def set_theme(theme_choice):
 
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 
-# --- COOKIE MANAGER SETUP (FOR AUTO-LOGIN) ---
+# --- OFFLINE JS LOCALSTORAGE INJECTION (IDEA 1) ---
+components.html(
+    """
+    <script>
+    // Saves a backup of the app state to the browser memory constantly
+    function backupToBrowser() {
+        const state = window.parent.document.body.innerText;
+        if(state.includes('Traffic Data Service')) {
+            localStorage.setItem('tds_emergency_backup', Date.now());
+        }
+    }
+    setInterval(backupToBrowser, 10000);
+    </script>
+    """,
+    height=0,
+)
+
+# --- COOKIE MANAGER SETUP ---
 if HAS_COOKIES:
     cookies = CookieManager()
     if not cookies.ready():
@@ -76,7 +100,7 @@ if "driver_name" not in st.session_state:
         st.info("Enter your Name/ID. If this is your first time, your workspace will be created automatically.")
         
         if not HAS_COOKIES:
-            st.warning("⚠️ Auto-Login disabled. Add `streamlit-cookies-manager` to your requirements.txt to fix Chrome refreshing.")
+            st.warning("⚠️ Auto-Login disabled. Add `streamlit-cookies-manager` to requirements.txt.")
             
         with st.form("login_form"):
             username_input = st.text_input("DRIVER NAME:").strip().upper()
@@ -112,10 +136,12 @@ if "init" not in st.session_state:
         st.session_state.current_index, st.session_state.pickup_index = 0, 0
         st.session_state.mission_type = "📍 INSTALLATION"
         st.session_state.upload_strategy = "📌 Keep Maps Separate (Day-by-Day)" 
+        st.session_state.auto_advance_nav = False
         
     st.session_state.last_install_msg = None
     st.session_state.last_pickup_msg = None
     st.session_state.msg_type = "success"
+    st.session_state.auto_open_url = "" # For Javascript trigger
     st.session_state.init = True
 
 def get_ca_time():
@@ -134,14 +160,15 @@ def auto_save():
         "pickup_index": st.session_state.get("pickup_index", 0),
         "pickup_sort_method": st.session_state.get("pickup_sort_method", "🔄 Route Efficiency"),
         "pickup_target": st.session_state.get("pickup_target", "All Maps (Merged)"),
-        "theme": st.session_state.get("theme", "☁️ Overcast (Standard)")
+        "theme": st.session_state.get("theme", "☁️ Overcast (Standard)"),
+        "auto_advance_nav": st.session_state.get("auto_advance_nav", False)
     }
     try:
         with open(BACKUP_FILE, "w") as f:
             json.dump(payload, f, default=str)
     except Exception: pass
 
-# --- DUAL-ENGINE GEOCODER ---
+# --- DUAL-ENGINE GEOCODER & REVERSE GEOCODER ---
 def geocode_address(address):
     try:
         url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address={requests.utils.quote(address)}&benchmark=Public_AR_Current&format=json"
@@ -150,7 +177,6 @@ def geocode_address(address):
         if matches:
             return float(matches[0]["coordinates"]["y"]), float(matches[0]["coordinates"]["x"])
     except Exception: pass
-    
     try:
         url = f"https://nominatim.openstreetmap.org/search?format=json&q={requests.utils.quote(address)}"
         headers = {'User-Agent': f'TDS-Traffic-Ops-{st.session_state.session_id}/1.0'}
@@ -158,47 +184,91 @@ def geocode_address(address):
         if resp:
             return float(resp[0]['lat']), float(resp[0]['lon'])
     except Exception: pass
-    
     return None, None
 
-# --- REVERSE GEOCODER (AUTO STREET NAMER) ---
 def get_street_from_coords(lat, lon):
     try:
         url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}"
         headers = {'User-Agent': f'TDS-Traffic-Ops-{st.session_state.session_id}/1.0'}
         resp = requests.get(url, headers=headers, timeout=3).json()
         if 'address' in resp and 'road' in resp['address']:
-            return resp['address']['road'] # Returns street name only, ignoring house numbers
+            return resp['address']['road']
     except Exception: pass
     return ""
 
-# --- ELITE CLUSTER SOLVER ---
-def calc_scaled_dist(lat1, lon1, lat2, lon2):
-    return ((lon1 - lon2) * 0.832)**2 + (lat1 - lat2)**2
+# --- UPGRADED HAVERSINE & MULTI-START TSP SOLVER ---
+def haversine_dist(lat1, lon1, lat2, lon2):
+    R = 6371.0 # Earth radius in km
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
-def calc_total_distance(path):
+def calc_total_distance(path, home_coords):
     if not path: return 0
-    hc = st.session_state.home_coords
-    d = calc_scaled_dist(hc[0], hc[1], path[0]['nav_lat'], path[0]['nav_lon'])
+    d = haversine_dist(home_coords[0], home_coords[1], path[0]['nav_lat'], path[0]['nav_lon'])
     for i in range(len(path) - 1):
-        d += calc_scaled_dist(path[i]['nav_lat'], path[i]['nav_lon'], path[i+1]['nav_lat'], path[i+1]['nav_lon'])
+        d += haversine_dist(path[i]['nav_lat'], path[i]['nav_lon'], path[i+1]['nav_lat'], path[i+1]['nav_lon'])
     return d
 
-def untangle_route(route):
+def perform_2opt(route, home_coords):
     best_route = list(route)
-    best_distance = calc_total_distance(best_route)
+    best_distance = calc_total_distance(best_route, home_coords)
     improved = True
     while improved:
         improved = False
         for i in range(len(best_route) - 1):
             for j in range(i + 2, len(best_route) + 1):
                 new_route = best_route[:i] + best_route[i:j][::-1] + best_route[j:]
-                new_distance = calc_total_distance(new_route)
+                new_distance = calc_total_distance(new_route, home_coords)
                 if new_distance < best_distance:
                     best_route = new_route
                     best_distance = new_distance
                     improved = True
     return best_route, best_distance
+
+def solve_tsp(nodes_list, home_coords):
+    if not nodes_list: return []
+    # Multi-start nearest neighbor to find best global path
+    global_best_route = []
+    global_best_dist = float('inf')
+    
+    # Try starting from home, AND starting from every other node to prevent spaghetti
+    start_points = [None] + nodes_list 
+    
+    for start_node in start_points:
+        unvisited = list(nodes_list)
+        current_route = []
+        
+        if start_node is None:
+            curr = home_coords
+        else:
+            current_route.append(start_node)
+            unvisited.remove(start_node)
+            curr = (start_node['nav_lat'], start_node['nav_lon'])
+            
+        while unvisited:
+            next_node = min(unvisited, key=lambda x: haversine_dist(curr[0], curr[1], x['nav_lat'], x['nav_lon']))
+            current_route.append(next_node)
+            curr = (next_node['nav_lat'], next_node['nav_lon'])
+            unvisited.remove(next_node)
+            
+        opt_route, opt_dist = perform_2opt(current_route, home_coords)
+        if opt_dist < global_best_dist:
+            global_best_dist = opt_dist
+            global_best_route = opt_route
+
+    # Final aggressive shuffles
+    for _ in range(15):
+        shuffled = list(global_best_route)
+        random.shuffle(shuffled)
+        r, d = perform_2opt(shuffled, home_coords)
+        if d < global_best_dist:
+            global_best_dist = d
+            global_best_route = r
+            
+    return global_best_route
 
 def process_upload(est_configs, excel_files, m_type, route_strategy):
     st.session_state.optimized_route = []
@@ -210,7 +280,6 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
     excel_data = {}
     for f in excel_files:
         try:
-            # FIX: Reads ALL sheets from the Excel workbook instead of just the first one
             if f.name.lower().endswith('.csv'):
                 dfs = {'Sheet1': pd.read_csv(f, encoding='latin-1')}
             else:
@@ -248,65 +317,27 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
         for sid, data in excel_data.items():
             match = re.search(r'\b' + re.escape(sid) + r'\b', raw_map)
             if match:
+                best_node = min(data['nodes'], key=lambda n: haversine_dist(st.session_state.home_coords[0], st.session_state.home_coords[1], n[0], n[1]))
                 final_raw.append({
                     "id": sid, 
                     "uid": f"{cfg['label']}_{sid}", 
-                    "nodes": data['nodes'], 
+                    "nav_lat": best_node[0],
+                    "nav_lon": best_node[1],
                     "sheet": cfg['label'], 
                     "street": data['street']
                 })
 
     if final_raw:
         global_best_route = []
-        
         if route_strategy == "📌 Keep Maps Separate (Day-by-Day)":
             for cfg in est_configs:
                 sheet_name = cfg['label']
                 sheet_raw = [x for x in final_raw if x['sheet'] == sheet_name]
                 if not sheet_raw: continue
-                
-                master_route, curr = [], st.session_state.home_coords
-                temp_raw = list(sheet_raw)
-                while temp_raw:
-                    best_site = min(temp_raw, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nodes'][0][0], x['nodes'][0][1]))
-                    best_node = min(best_site['nodes'], key=lambda n: calc_scaled_dist(curr[0], curr[1], n[0], n[1]))
-                    best_site['nav_lat'], best_site['nav_lon'] = best_node
-                    master_route.append(best_site)
-                    curr = best_node
-                    temp_raw.remove(best_site)
-                    
-                best_route, best_dist = untangle_route(master_route)
-                restarts = 5 if len(master_route) > 50 else 15
-                for _ in range(restarts):
-                    shuffled = list(master_route)
-                    random.shuffle(shuffled)
-                    opt_route, opt_dist = untangle_route(shuffled)
-                    if opt_dist < best_dist:
-                        best_dist = opt_dist
-                        best_route = opt_route
-                global_best_route.extend(best_route)
-                
+                sheet_route = solve_tsp(sheet_raw, st.session_state.home_coords)
+                global_best_route.extend(sheet_route)
         else: 
-            master_route, curr = [], st.session_state.home_coords
-            temp_raw = list(final_raw)
-            while temp_raw:
-                best_site = min(temp_raw, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nodes'][0][0], x['nodes'][0][1]))
-                best_node = min(best_site['nodes'], key=lambda n: calc_scaled_dist(curr[0], curr[1], n[0], n[1]))
-                best_site['nav_lat'], best_site['nav_lon'] = best_node
-                master_route.append(best_site)
-                curr = best_node
-                temp_raw.remove(best_site)
-                
-            best_route, best_dist = untangle_route(master_route)
-            restarts = 5 if len(master_route) > 50 else 15
-            for _ in range(restarts):
-                shuffled = list(master_route)
-                random.shuffle(shuffled)
-                opt_route, opt_dist = untangle_route(shuffled)
-                if opt_dist < best_dist:
-                    best_dist = opt_dist
-                    best_route = opt_route
-            global_best_route = best_route
+            global_best_route = solve_tsp(final_raw, st.session_state.home_coords)
             
         st.session_state.optimized_route = global_best_route
         st.session_state.active_files = [c['label'] for c in est_configs]
@@ -326,7 +357,6 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
         return True, len(global_best_route)
     return False, 0
 
-# --- NLP DICTATION ---
 def parse_dictation(text, current_dr, current_ln, current_ser):
     if not text or pd.isna(text) or str(text).strip() == "": 
         return current_dr, current_ln, current_ser
@@ -344,7 +374,6 @@ def parse_dictation(text, current_dr, current_ln, current_ser):
     if ser_match: ser = str(ser_match.group(1)).upper()
     return dr, ln, ser
 
-# --- NAVIGATION HELPER ---
 def get_next_valid_index(current_idx, active_uids, direction=1):
     if not active_uids: return current_idx
     if current_idx >= len(st.session_state.optimized_route):
@@ -367,11 +396,16 @@ with col_logout:
             del cookies["tds_driver_cookie"]
             cookies.save()
             
-        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy"]
+        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav"]
         for k in keys_to_wipe:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
+
+# Execute Auto-Open Javascript if triggered by install
+if st.session_state.get("auto_open_url"):
+    components.html(f"<script>window.open('{st.session_state.auto_open_url}', '_blank');</script>", height=0)
+    st.session_state.auto_open_url = "" # Reset immediately
 
 if not st.session_state.get("optimized_route"):
     restore_file = st.file_uploader("🔄 RESTORE BACKUP", type=["json"])
@@ -389,16 +423,19 @@ if not st.session_state.get("optimized_route"):
     
     with tab_gps:
         st.write("Grab your live phone/truck location:")
-        loc_start = streamlit_geolocation()
-        if loc_start and loc_start.get('latitude'):
-            current_lat = round(loc_start['latitude'], 4)
-            saved_lat = round(st.session_state.home_coords[0], 4)
-            if current_lat != saved_lat:
-                st.session_state.home_coords = (loc_start['latitude'], loc_start['longitude'])
-                auto_save()
-                st.success("✅ Origin snapped to GPS!")
-                time.sleep(1)
-                st.rerun()
+        if HAS_GPS:
+            loc_start = streamlit_geolocation()
+            if loc_start and loc_start.get('latitude'):
+                current_lat = round(loc_start['latitude'], 4)
+                saved_lat = round(st.session_state.home_coords[0], 4)
+                if current_lat != saved_lat:
+                    st.session_state.home_coords = (loc_start['latitude'], loc_start['longitude'])
+                    auto_save()
+                    st.success("✅ Origin snapped to GPS!")
+                    time.sleep(1)
+                    st.rerun()
+        else:
+            st.error("GPS Module missing in cloud. Use Search Address.")
 
     with tab_addr:
         address_input = st.text_input("Enter Address (e.g., 123 Main St, Garden Grove, CA):")
@@ -433,7 +470,7 @@ if not st.session_state.get("optimized_route"):
     
     r_strat = st.radio("ROUTING STRATEGY:", ["📌 Keep Maps Separate (Day-by-Day)", "🔗 Merge All Maps into One Route"], horizontal=True)
     
-    excel_files = st.file_uploader("EXCEL DATA", accept_multiple_files=True)
+    excel_files = st.file_uploader("EXCEL DATA (Supports multiple sheets)", accept_multiple_files=True)
     up_files = st.file_uploader("MAPS (.EST)", accept_multiple_files=True)
     
     if up_files and excel_files:
@@ -452,6 +489,9 @@ else:
         st.session_state.theme = new_theme
         auto_save()
         st.rerun()
+        
+    # Set Map Tile based on Theme (Idea 5)
+    map_tiles = "CartoDB dark_matter" if st.session_state.theme == "☁️ Overcast (Standard)" else "CartoDB positron"
     
     if st.session_state.get("upload_strategy") == "🔗 Merge All Maps into One Route":
         available_days = ["All Days"]
@@ -470,7 +510,7 @@ else:
         st.success(f"STOPS IN VIEW: {len(active_route)}")
         
         hc = st.session_state.home_coords
-        m = folium.Map(location=hc, zoom_start=11, tiles="CartoDB dark_matter")
+        m = folium.Map(location=hc, zoom_start=11, tiles=map_tiles)
         folium.Marker(hc, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m)
         route_coords = [hc]
         
@@ -541,6 +581,12 @@ else:
             } for s in [st.session_state.site_data[uid] for uid in active_uids]])
             st.dataframe(df_display, use_container_width=True)
         else:
+            # (Idea 3) Auto Advance Toggle
+            new_auto = st.checkbox("🚀 Auto-Open Next Stop Map on Install", value=st.session_state.auto_advance_nav)
+            if new_auto != st.session_state.auto_advance_nav:
+                st.session_state.auto_advance_nav = new_auto
+                auto_save()
+                
             cur = st.session_state.current_index
             if cur < len(st.session_state.optimized_route):
                 if st.session_state.last_install_msg:
@@ -553,8 +599,13 @@ else:
                 
                 st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
                 
-                # FIX: Official Google Maps Live Routing URL
-                st.link_button("🚗 NAV TO SITE", f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={safe_lat},{safe_lon}", use_container_width=True)
+                display_street = str(sd.get('Street', f"Site {s['id']}"))
+                if display_street.lower() == 'nan': display_street = ""
+                new_street = st.text_input("📍 STREET NAME (Auto-Fills on Install):", value=display_street)
+                
+                # FIXED: True Live Navigation Google Maps URL
+                nav_url = f"https://www.google.com/maps/dir/?api=1&destination={safe_lat},{safe_lon}&travelmode=driving"
+                st.link_button("🚗 NAV TO SITE", nav_url, use_container_width=True)
                 
                 batch = []
                 try:
@@ -568,15 +619,16 @@ else:
                     pass
                             
                 if len(batch) > 1:
-                    # FIX: Official Google Maps Multi-Stop Routing
                     waypoints_str = "|".join(batch[:-1])
                     dest_str = batch[-1]
-                    batch_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={dest_str}&waypoints={waypoints_str}"
+                    batch_url = f"https://www.google.com/maps/dir/?api=1&destination={dest_str}&waypoints={waypoints_str}&travelmode=driving"
                     st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", batch_url, use_container_width=True)
                 
-                # GPS Tool for exact coordinate grabbing during install
                 st.info("📍 Grab precise GPS below to lock-in the exact field coordinate and auto-name the street.")
-                loc_install = streamlit_geolocation()
+                if HAS_GPS:
+                    loc_install = streamlit_geolocation(key=f"loc_{s['uid']}")
+                else:
+                    loc_install = None
                 
                 with st.form(f"form_{s['uid']}"):
                     st.info("🎙️ **VOICE PARSER:** Type or dictate notes below.")
@@ -600,13 +652,12 @@ else:
                             
                         _, d, et = get_ca_time()
                         
-                        # OVERRIDE GPS IF THE DRIVER TAPPED THE PRECISE LOCATOR
                         final_lat = loc_install['latitude'] if loc_install and loc_install.get('latitude') else safe_lat
                         final_lon = loc_install['longitude'] if loc_install and loc_install.get('longitude') else safe_lon
                         
                         # AUTO-STREET NAMER
                         auto_street = get_street_from_coords(final_lat, final_lon) if submit_btn else str(sd.get('Street', ''))
-                        if not auto_street: auto_street = str(sd.get('Street', ''))
+                        if not auto_street: auto_street = str(new_street).strip()
                         
                         st.session_state.site_data[s['uid']].update({
                             "Street": auto_street,
@@ -625,6 +676,15 @@ else:
                         if submit_btn:
                             st.session_state.msg_type = "success"
                             st.session_state.last_install_msg = f"✅ Site {sd.get('Site', s['id'])} SECURED at {auto_street}."
+                            
+                            # (Idea 3) Trigger Auto-Advance URL
+                            if st.session_state.auto_advance_nav:
+                                next_idx = get_next_valid_index(cur, active_uids, direction=1)
+                                if next_idx != cur:
+                                    n_lat = st.session_state.optimized_route[next_idx]['nav_lat']
+                                    n_lon = st.session_state.optimized_route[next_idx]['nav_lon']
+                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&destination={n_lat},{n_lon}&travelmode=driving"
+
                         else:
                             st.session_state.msg_type = "skip"
                             st.session_state.last_install_msg = f"❌ Site {sd.get('Site', s['id'])} SKIPPED. Reason logged."
@@ -699,24 +759,7 @@ else:
                 raw_itin.sort(key=lambda x: x.get('ExactTime', ''))
                 itin = raw_itin
             else:
-                temp_route = [{'uid': sd['UID'], 'nav_lat': float(sd['LAT']), 'nav_lon': float(sd['LON']), 'sd': sd} for sd in raw_itin]
-                master_route, curr = [], st.session_state.home_coords
-                while temp_route:
-                    best_site = min(temp_route, key=lambda x: calc_scaled_dist(curr[0], curr[1], x['nav_lat'], x['nav_lon']))
-                    master_route.append(best_site)
-                    curr = (best_site['nav_lat'], best_site['nav_lon'])
-                    temp_route.remove(best_site)
-                
-                best_route, best_dist = untangle_route(master_route)
-                for _ in range(5):
-                    shuffled = list(master_route)
-                    random.shuffle(shuffled)
-                    opt_route, opt_dist = untangle_route(shuffled)
-                    if opt_dist < best_dist:
-                        best_dist = opt_dist
-                        best_route = opt_route
-                
-                itin = [site['sd'] for site in best_route]
+                itin = [site['sd'] for site in solve_tsp([{'uid': sd['UID'], 'nav_lat': float(sd['LAT']), 'nav_lon': float(sd['LON']), 'sd': sd} for sd in raw_itin], st.session_state.home_coords)]
                 
             if st.session_state.pickup_index >= len(itin):
                 st.session_state.pickup_index = max(0, len(itin) - 1)
@@ -728,7 +771,7 @@ else:
                 
             if st.session_state.get("show_pickup_map", False) and itin:
                 st.success(f"TACTICAL PICK-UP MAP: {len(itin)} Secured Sites")
-                m_pickup = folium.Map(location=st.session_state.home_coords, zoom_start=11, tiles="CartoDB dark_matter")
+                m_pickup = folium.Map(location=st.session_state.home_coords, zoom_start=11, tiles=map_tiles)
                 folium.Marker(st.session_state.home_coords, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_pickup)
                 
                 pickup_coords = [st.session_state.home_coords]
@@ -772,7 +815,6 @@ else:
                 st.warning("No installed sites found for the selected Pick-Up target.")
 
             if itin:
-                # View Toggle For Pick-Up
                 view_mode = st.radio("Pick-Up View:", ["Single Site Mode", "Full Manifest List"], horizontal=True)
                 
                 if view_mode == "Full Manifest List":
@@ -789,8 +831,8 @@ else:
                         p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                         st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                         
-                        # Official Live Route URL
-                        st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={p_lat},{p_lon}", use_container_width=True)
+                        nav_url = f"https://www.google.com/maps/dir/?api=1&destination={p_lat},{p_lon}&travelmode=driving"
+                        st.link_button("🚗 NAV TO FIELD GPS", nav_url, use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
                             st.session_state.site_data[s['UID']]["Picked up"] = "x"

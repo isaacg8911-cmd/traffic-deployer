@@ -23,7 +23,7 @@ except ImportError:
     HAS_COOKIES = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.94", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.95", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -62,13 +62,12 @@ st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 if HAS_COOKIES:
     cookies = CookieManager()
     if not cookies.ready():
-        st.stop() # Wait for cookies to load
+        st.stop()
 else:
-    cookies = {} # Dummy dictionary if library is missing so app doesn't crash
+    cookies = {}
 
 # --- 1. AUTO-PROVISIONING LOGIN SCREEN ---
 if "driver_name" not in st.session_state:
-    # Check if a cookie exists from a previous suspended Chrome session
     if HAS_COOKIES and "tds_driver_cookie" in cookies and cookies["tds_driver_cookie"]:
         st.session_state.driver_name = cookies["tds_driver_cookie"]
         st.rerun()
@@ -76,7 +75,6 @@ if "driver_name" not in st.session_state:
         st.title("🚦 TRAFFIC DATA SERVICE")
         st.info("Enter your Name/ID. If this is your first time, your workspace will be created automatically.")
         
-        # Show a small warning if cookies aren't installed so you know why auto-login isn't working
         if not HAS_COOKIES:
             st.warning("⚠️ Auto-Login disabled. Add `streamlit-cookies-manager` to your requirements.txt to fix Chrome refreshing.")
             
@@ -87,7 +85,6 @@ if "driver_name" not in st.session_state:
             if submitted:
                 if username_input:
                     st.session_state.driver_name = username_input
-                    # Set the tracking cookie so Chrome remembers who you are
                     if HAS_COOKIES:
                         cookies["tds_driver_cookie"] = username_input
                         cookies.save()
@@ -164,6 +161,17 @@ def geocode_address(address):
     
     return None, None
 
+# --- REVERSE GEOCODER (AUTO STREET NAMER) ---
+def get_street_from_coords(lat, lon):
+    try:
+        url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}"
+        headers = {'User-Agent': f'TDS-Traffic-Ops-{st.session_state.session_id}/1.0'}
+        resp = requests.get(url, headers=headers, timeout=3).json()
+        if 'address' in resp and 'road' in resp['address']:
+            return resp['address']['road'] # Returns street name only, ignoring house numbers
+    except Exception: pass
+    return ""
+
 # --- ELITE CLUSTER SOLVER ---
 def calc_scaled_dist(lat1, lon1, lat2, lon2):
     return ((lon1 - lon2) * 0.832)**2 + (lat1 - lat2)**2
@@ -202,28 +210,34 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
     excel_data = {}
     for f in excel_files:
         try:
-            df = pd.read_csv(f, encoding='latin-1') if f.name.lower().endswith('.csv') else pd.read_excel(f)
-            id_c = next((c for c in df.columns if any(x in c.lower() for x in ['tds', 'site', 'id'])), df.columns[0])
-            b_lat_c = next((c for c in df.columns if 'begin_lat' in c.lower()), next((c for c in df.columns if 'lat' in c.lower()), None))
-            b_lon_c = next((c for c in df.columns if 'begin_lon' in c.lower()), next((c for c in df.columns if 'lon' in c.lower()), None))
-            e_lat_c = next((c for c in df.columns if 'end_lat' in c.lower()), None)
-            e_lon_c = next((c for c in df.columns if 'end_lon' in c.lower()), None)
+            # FIX: Reads ALL sheets from the Excel workbook instead of just the first one
+            if f.name.lower().endswith('.csv'):
+                dfs = {'Sheet1': pd.read_csv(f, encoding='latin-1')}
+            else:
+                dfs = pd.read_excel(f, sheet_name=None)
+                
+            for s_name, df in dfs.items():
+                id_c = next((c for c in df.columns if any(x in c.lower() for x in ['tds', 'site', 'id'])), df.columns[0])
+                b_lat_c = next((c for c in df.columns if 'begin_lat' in c.lower()), next((c for c in df.columns if 'lat' in c.lower()), None))
+                b_lon_c = next((c for c in df.columns if 'begin_lon' in c.lower()), next((c for c in df.columns if 'lon' in c.lower()), None))
+                e_lat_c = next((c for c in df.columns if 'end_lat' in c.lower()), None)
+                e_lon_c = next((c for c in df.columns if 'end_lon' in c.lower()), None)
 
-            if b_lat_c and b_lon_c:
-                for _, row in df.iterrows():
-                    sid = str(row[id_c]).split('.')[0].strip()
-                    if sid.isdigit():
-                        try:
-                            b_lat, b_lon = float(row[b_lat_c]), float(row[b_lon_c])
-                            if 30.0 < b_lat < 40.0 and -125.0 < b_lon < -110.0:
-                                nodes = [(b_lat, b_lon)]
-                                if e_lat_c and e_lon_c and pd.notna(row[e_lat_c]) and pd.notna(row[e_lon_c]):
-                                    e_lat, e_lon = float(row[e_lat_c]), float(row[e_lon_c])
-                                    if 30.0 < e_lat < 40.0 and -125.0 < e_lon < -110.0:
-                                        nodes.append((e_lat, e_lon))
-                                street_name = str(row.get('Street', f'Site {sid}'))
-                                excel_data[sid] = {"nodes": nodes, "street": street_name}
-                        except Exception: pass
+                if b_lat_c and b_lon_c:
+                    for _, row in df.iterrows():
+                        sid = str(row[id_c]).split('.')[0].strip()
+                        if sid.isdigit():
+                            try:
+                                b_lat, b_lon = float(row[b_lat_c]), float(row[b_lon_c])
+                                if 30.0 < b_lat < 40.0 and -125.0 < b_lon < -110.0:
+                                    nodes = [(b_lat, b_lon)]
+                                    if e_lat_c and e_lon_c and pd.notna(row[e_lat_c]) and pd.notna(row[e_lon_c]):
+                                        e_lat, e_lon = float(row[e_lat_c]), float(row[e_lon_c])
+                                        if 30.0 < e_lat < 40.0 and -125.0 < e_lon < -110.0:
+                                            nodes.append((e_lat, e_lon))
+                                    street_name = str(row.get('Street', f'Site {sid}'))
+                                    excel_data[sid] = {"nodes": nodes, "street": street_name}
+                            except Exception: pass
         except Exception: pass
 
     if not excel_data: return False, 0
@@ -516,112 +530,136 @@ else:
             st.rerun()
             
     with tab2:
-        cur = st.session_state.current_index
+        # NEW: Install List / Single View Toggle
+        install_view = st.radio("Install View:", ["Single Site Mode", "Full Manifest List"], horizontal=True)
         
-        if cur < len(st.session_state.optimized_route):
-            if st.session_state.last_install_msg:
-                css_class = "success-recap" if st.session_state.msg_type == "success" else "skip-recap"
-                st.markdown(f"<div class='{css_class}'>{st.session_state.last_install_msg}</div>", unsafe_allow_html=True)
-                
-            s = st.session_state.optimized_route[cur]
-            sd = st.session_state.site_data[s['uid']]
-            safe_lat, safe_lon = sd.get('LAT', sd.get('lat')), sd.get('LON', sd.get('lon'))
-            
-            st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
-            
-            display_street = str(sd.get('Street', f"Site {s['id']}"))
-            if display_street.lower() == 'nan': display_street = ""
-            new_street = st.text_input("📍 STREET NAME (Edit if incorrect):", value=display_street)
-            st.session_state.site_data[s['uid']]['Street'] = str(new_street).strip()
-            
-            st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/dir/Current+Location/{safe_lat},{safe_lon}", use_container_width=True)
-            
-            batch = []
-            try:
-                active_idx = next(i for i, route_site in enumerate(active_route) if route_site['uid'] == s['uid'])
-                for bs in active_route[active_idx:active_idx+9]:
-                    bsd = st.session_state.site_data[bs['uid']]
-                    if bsd.get('Installed') != "x" and bsd.get('Skipped') != "x":
-                        b_lat, b_lon = bsd.get('LAT', bsd.get('lat')), bsd.get('LON', bsd.get('lon'))
-                        if b_lat and b_lon: batch.append(f"{b_lat},{b_lon}")
-            except StopIteration:
-                pass
-                        
-            if len(batch) > 1: 
-                st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", f"https://www.google.com/maps/dir/Current+Location/{'/'.join(batch)}", use_container_width=True)
-            
-            with st.form(f"form_{s['uid']}"):
-                st.info("🎙️ **VOICE PARSER:** Type or dictate notes below.")
-                dictation = st.text_area("📝 Field Notes / Dictation:", value=str(sd.get('Notes', '')))
-                
-                c1, c2, c3 = st.columns(3)
-                with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd.get('Directions', 'n')))
-                with c2: ln = st.number_input("LANES", min_value=1, value=int(sd.get('Lanes', 2)))
-                with c3: ser = st.text_input("SERIAL #", value=str(sd.get('Serial', '')))
-                
-                col_c, col_s = st.columns(2)
-                with col_c: submit_btn = st.form_submit_button("✅ INSTALL")
-                with col_s: skip_btn = st.form_submit_button("❌ SKIP")
-
-                if submit_btn or skip_btn:
-                    old_notes = str(sd.get('Notes', ''))
-                    if dictation != old_notes and dictation.strip() != "":
-                        final_dr, final_ln, final_ser = parse_dictation(dictation, dr, ln, ser)
-                    else:
-                        final_dr, final_ln, final_ser = dr, ln, ser
-                        
-                    _, d, et = get_ca_time()
-                    
-                    st.session_state.site_data[s['uid']].update({
-                        "Street": str(new_street).strip(),
-                        "Date": d, 
-                        "ExactTime": et, 
-                        "Directions": final_dr, 
-                        "Serial": str(final_ser), 
-                        "Lanes": final_ln, 
-                        "Notes": str(dictation), 
-                        "Installed": "x" if submit_btn else "", 
-                        "Skipped": "x" if skip_btn else ""
-                    })
-                    
-                    if submit_btn:
-                        st.session_state.msg_type = "success"
-                        st.session_state.last_install_msg = f"✅ Site {sd.get('Site', s['id'])} SECURED."
-                    else:
-                        st.session_state.msg_type = "skip"
-                        st.session_state.last_install_msg = f"❌ Site {sd.get('Site', s['id'])} SKIPPED. Reason logged."
-                        
-                    st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=1)
-                    auto_save()
-                    st.rerun()
-            
-            if sd.get('Installed') == "x" or sd.get('Skipped') == "x":
-                if st.button("⏪ UNDO STATUS (Re-open Site)", use_container_width=True):
-                    st.session_state.site_data[s['uid']]['Installed'] = ""
-                    st.session_state.site_data[s['uid']]['Skipped'] = ""
-                    auto_save()
-                    st.rerun()
-
-            st.divider()
-            nav1, nav2 = st.columns(2)
-            with nav1:
-                if st.button("⬅️ PREV STOP", use_container_width=True, key=f"prev_{s['uid']}"):
-                    st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=-1)
-                    st.session_state.last_install_msg = None
-                    auto_save()
-                    st.rerun()
-            with nav2:
-                if st.button("NEXT ➡️", use_container_width=True, key=f"next_{s['uid']}"):
-                    st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=1)
-                    st.session_state.last_install_msg = None
-                    auto_save()
-                    st.rerun()
+        if install_view == "Full Manifest List":
+            df_display = pd.DataFrame([{
+                "Site": s["Site"], 
+                "Street": s["Street"], 
+                "Status": "✅ Installed" if s.get("Installed") == "x" else ("❌ Skipped" if s.get("Skipped") == "x" else "⏳ Pending")
+            } for s in [st.session_state.site_data[uid] for uid in active_uids]])
+            st.dataframe(df_display, use_container_width=True)
         else:
-            st.success("🎉 ALL STOPS ON THIS MANIFEST ARE COMPLETED!")
-            if st.button("⬅️ GO BACK TO LAST STOP", use_container_width=True):
-                st.session_state.current_index = len(st.session_state.optimized_route) - 1
-                auto_save()
-                st.rerun()
+            cur = st.session_state.current_index
+            if cur < len(st.session_state.optimized_route):
+                if st.session_state.last_install_msg:
+                    css_class = "success-recap" if st.session_state.msg_type == "success" else "skip-recap"
+                    st.markdown(f"<div class='{css_class}'>{st.session_state.last_install_msg}</div>", unsafe_allow_html=True)
+                    
+                s = st.session_state.optimized_route[cur]
+                sd = st.session_state.site_data[s['uid']]
+                safe_lat, safe_lon = sd.get('LAT', sd.get('lat')), sd.get('LON', sd.get('lon'))
+                
+                st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
+                
+                # FIX: Official Google Maps Live Routing URL
+                st.link_button("🚗 NAV TO SITE", f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={safe_lat},{safe_lon}", use_container_width=True)
+                
+                batch = []
+                try:
+                    active_idx = next(i for i, route_site in enumerate(active_route) if route_site['uid'] == s['uid'])
+                    for bs in active_route[active_idx:active_idx+9]:
+                        bsd = st.session_state.site_data[bs['uid']]
+                        if bsd.get('Installed') != "x" and bsd.get('Skipped') != "x":
+                            b_lat, b_lon = bsd.get('LAT', bsd.get('lat')), bsd.get('LON', bsd.get('lon'))
+                            if b_lat and b_lon: batch.append(f"{b_lat},{b_lon}")
+                except StopIteration:
+                    pass
+                            
+                if len(batch) > 1:
+                    # FIX: Official Google Maps Multi-Stop Routing
+                    waypoints_str = "|".join(batch[:-1])
+                    dest_str = batch[-1]
+                    batch_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={dest_str}&waypoints={waypoints_str}"
+                    st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", batch_url, use_container_width=True)
+                
+                # GPS Tool for exact coordinate grabbing during install
+                st.info("📍 Grab precise GPS below to lock-in the exact field coordinate and auto-name the street.")
+                loc_install = streamlit_geolocation()
+                
+                with st.form(f"form_{s['uid']}"):
+                    st.info("🎙️ **VOICE PARSER:** Type or dictate notes below.")
+                    dictation = st.text_area("📝 Field Notes / Dictation:", value=str(sd.get('Notes', '')))
+                    
+                    c1, c2, c3 = st.columns(3)
+                    with c1: dr = st.selectbox("DIR", ["n","e","s","w"], index=["n","e","s","w"].index(sd.get('Directions', 'n')))
+                    with c2: ln = st.number_input("LANES", min_value=1, value=int(sd.get('Lanes', 2)))
+                    with c3: ser = st.text_input("SERIAL #", value=str(sd.get('Serial', '')))
+                    
+                    col_c, col_s = st.columns(2)
+                    with col_c: submit_btn = st.form_submit_button("✅ INSTALL")
+                    with col_s: skip_btn = st.form_submit_button("❌ SKIP")
+
+                    if submit_btn or skip_btn:
+                        old_notes = str(sd.get('Notes', ''))
+                        if dictation != old_notes and dictation.strip() != "":
+                            final_dr, final_ln, final_ser = parse_dictation(dictation, dr, ln, ser)
+                        else:
+                            final_dr, final_ln, final_ser = dr, ln, ser
+                            
+                        _, d, et = get_ca_time()
+                        
+                        # OVERRIDE GPS IF THE DRIVER TAPPED THE PRECISE LOCATOR
+                        final_lat = loc_install['latitude'] if loc_install and loc_install.get('latitude') else safe_lat
+                        final_lon = loc_install['longitude'] if loc_install and loc_install.get('longitude') else safe_lon
+                        
+                        # AUTO-STREET NAMER
+                        auto_street = get_street_from_coords(final_lat, final_lon) if submit_btn else str(sd.get('Street', ''))
+                        if not auto_street: auto_street = str(sd.get('Street', ''))
+                        
+                        st.session_state.site_data[s['uid']].update({
+                            "Street": auto_street,
+                            "Date": d, 
+                            "ExactTime": et, 
+                            "Directions": final_dr, 
+                            "Serial": str(final_ser), 
+                            "Lanes": final_ln, 
+                            "Notes": str(dictation), 
+                            "Installed": "x" if submit_btn else "", 
+                            "Skipped": "x" if skip_btn else "",
+                            "LAT": final_lat,
+                            "LON": final_lon
+                        })
+                        
+                        if submit_btn:
+                            st.session_state.msg_type = "success"
+                            st.session_state.last_install_msg = f"✅ Site {sd.get('Site', s['id'])} SECURED at {auto_street}."
+                        else:
+                            st.session_state.msg_type = "skip"
+                            st.session_state.last_install_msg = f"❌ Site {sd.get('Site', s['id'])} SKIPPED. Reason logged."
+                            
+                        st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=1)
+                        auto_save()
+                        st.rerun()
+                
+                if sd.get('Installed') == "x" or sd.get('Skipped') == "x":
+                    if st.button("⏪ UNDO STATUS (Re-open Site)", use_container_width=True):
+                        st.session_state.site_data[s['uid']]['Installed'] = ""
+                        st.session_state.site_data[s['uid']]['Skipped'] = ""
+                        auto_save()
+                        st.rerun()
+
+                st.divider()
+                nav1, nav2 = st.columns(2)
+                with nav1:
+                    if st.button("⬅️ PREV STOP", use_container_width=True, key=f"prev_{s['uid']}"):
+                        st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=-1)
+                        st.session_state.last_install_msg = None
+                        auto_save()
+                        st.rerun()
+                with nav2:
+                    if st.button("NEXT ➡️", use_container_width=True, key=f"next_{s['uid']}"):
+                        st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=1)
+                        st.session_state.last_install_msg = None
+                        auto_save()
+                        st.rerun()
+            else:
+                st.success("🎉 ALL STOPS ON THIS MANIFEST ARE COMPLETED!")
+                if st.button("⬅️ GO BACK TO LAST STOP", use_container_width=True):
+                    st.session_state.current_index = len(st.session_state.optimized_route) - 1
+                    auto_save()
+                    st.rerun()
                     
     with tab3:
         raw_itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
@@ -734,7 +772,8 @@ else:
                 st.warning("No installed sites found for the selected Pick-Up target.")
 
             if itin:
-                view_mode = st.radio("Pick-Up View:", ["Active Route", "Full Manifest List"], horizontal=True)
+                # View Toggle For Pick-Up
+                view_mode = st.radio("Pick-Up View:", ["Single Site Mode", "Full Manifest List"], horizontal=True)
                 
                 if view_mode == "Full Manifest List":
                     st.dataframe(pd.DataFrame([{
@@ -750,7 +789,8 @@ else:
                         p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                         st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                         
-                        st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/Current+Location/{p_lat},{p_lon}", use_container_width=True)
+                        # Official Live Route URL
+                        st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={p_lat},{p_lon}", use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
                             st.session_state.site_data[s['UID']]["Picked up"] = "x"
@@ -809,11 +849,16 @@ else:
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df_all = pd.DataFrame(all_d)
-                    df_all.to_excel(writer, sheet_name='Master List', index=False)
+                    
+                    # SCRUB EXCEL COLUMNS: Drop UID and Sheet from final export
+                    df_clean = df_all.drop(columns=['UID', 'Sheet'], errors='ignore')
+                    df_clean.to_excel(writer, sheet_name='Master List', index=False)
+                    
                     for sheet in df_all['Sheet'].unique():
-                        df_sheet = df_all[df_all['Sheet'] == sheet]
+                        df_sheet = df_all[df_all['Sheet'] == sheet].copy()
+                        df_sheet_clean = df_sheet.drop(columns=['UID', 'Sheet'], errors='ignore')
                         safe_sheet_name = str(sheet)[:31].replace('[', '').replace(']', '').replace(':', '').replace('*', '').replace('?', '').replace('/', '').replace('\\', '')
-                        df_sheet.to_excel(writer, sheet_name=safe_sheet_name, index=False)
+                        df_sheet_clean.to_excel(writer, sheet_name=safe_sheet_name, index=False)
                         
                 excel_data = output.getvalue()
                 st.download_button(
@@ -825,9 +870,10 @@ else:
                 )
             except Exception as e:
                 st.warning("Excel Engine blocked by Cloud Server. Generating standard CSV fallback.")
+                df_csv = pd.DataFrame(all_d).drop(columns=['UID', 'Sheet'], errors='ignore')
                 st.download_button(
                     label="📊 FINAL SUBMIT (DOWNLOAD CSV)", 
-                    data=pd.DataFrame(all_d).to_csv(index=False), 
+                    data=df_csv.to_csv(index=False), 
                     file_name=f"TDS_Report_{st.session_state.driver_name}.csv", 
                     use_container_width=True
                 )

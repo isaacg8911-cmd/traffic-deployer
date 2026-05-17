@@ -47,7 +47,6 @@ def set_theme(theme_choice):
         div[data-testid="stMetricValue"] { color: #00FFFF !important; font-weight: 900; }
         .success-recap { background-color: #003300; border: 2px solid #00FF00; color: #00FF00; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
         .skip-recap { background-color: #330000; border: 2px solid #FF0000; color: #FF0000; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
-        .list-card { background-color: #111; border: 1px solid #00FFFF; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
         </style>
         """
     else:
@@ -60,7 +59,6 @@ def set_theme(theme_choice):
         div[data-testid="stMetricValue"] { color: #FFD700 !important; }
         .success-recap { background-color: #1E2E1E; border: 2px solid #32CD32; color: #32CD32; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
         .skip-recap { background-color: #2E1E1E; border: 2px solid #FF4500; color: #FF4500; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
-        .list-card { background-color: #1a1a1a; border: 1px solid #444; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
         </style>
         """
 
@@ -118,7 +116,7 @@ if "driver_name" not in st.session_state:
 
 BACKUP_FILE = f"tds_backup_{st.session_state.driver_name}.json"
 
-# --- 2. MASTER STATE SANITIZER ---
+# --- 2. MASTER STATE SANITIZER (CRASH PREVENTION) ---
 if "init" not in st.session_state:
     if os.path.exists(BACKUP_FILE):
         try:
@@ -147,8 +145,7 @@ defaults = {
     "auto_open_url": "",
     "pickup_target": "All Maps (Merged)",
     "pickup_sort_method": "🔄 Route Efficiency",
-    "install_view_toggle": "Single Site Mode", # View State Trackers
-    "pickup_view_toggle": "Single Site Mode",
+    "show_pickup_map": False,
     "last_processed_click": None,
     "map_center": None, 
     "map_zoom": None,   
@@ -170,15 +167,6 @@ def auto_save():
         with open(BACKUP_FILE, "w") as f:
             json.dump(payload, f, default=str)
     except Exception: pass
-
-def render_backup_button(suffix):
-    """Reusable function to place the backup button securely at the bottom of any tab."""
-    st.divider()
-    if os.path.exists(BACKUP_FILE):
-        try:
-            with open(BACKUP_FILE, "r") as f: backup_data = f.read()
-            st.download_button("💾 DOWNLOAD BACKUP JSON", backup_data, f"tds_backup_{st.session_state.driver_name}.json", mime="application/json", use_container_width=True, key=f"bkp_btn_{suffix}")
-        except Exception: pass
 
 def get_map_bounds(nodes, home_coords):
     if not nodes: return None
@@ -346,7 +334,7 @@ with col_logout:
             del cookies["tds_driver_cookie"]
             cookies.save()
             
-        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav", "auto_open_url", "routing_phase", "raw_nodes", "manual_sequence", "last_processed_click", "map_center", "map_zoom", "install_view_toggle", "pickup_view_toggle"]
+        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav", "auto_open_url", "routing_phase", "raw_nodes", "manual_sequence", "last_processed_click", "map_center", "map_zoom"]
         for k in keys_to_wipe:
             if k in st.session_state:
                 del st.session_state[k]
@@ -435,7 +423,7 @@ if st.session_state.routing_phase == "upload":
             else: 
                 st.error("Sync error. No matching sites found.")
 
-# --- DRAFTING PHASE (LIVE TAPPING ENGINE WITH SMART INSERTION) ---
+# --- DRAFTING PHASE (LIVE TAPPING ENGINE) ---
 elif st.session_state.routing_phase == "drafting":
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: 
@@ -512,10 +500,8 @@ elif st.session_state.routing_phase == "drafting":
             if clicked_uid and min_dist < 0.2:
                 if clicked_uid not in st.session_state.manual_sequence:
                     st.session_state.manual_sequence.append(clicked_uid)
-                    
                     st.session_state.map_center = [click_lat, click_lon]
                     st.session_state.map_zoom = 14 
-                    
                     auto_save()
                     st.rerun()
 
@@ -698,7 +684,6 @@ elif st.session_state.routing_phase == "finalized":
             status_icon = '❌' if skipped else ('✅' if done else '🟠')
             if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
                 st.session_state.current_index = next((i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid']), 0)
-                st.session_state.install_view_toggle = "Single Site Mode" # Force into single view when clicked from route map
                 st.rerun()
                 
         if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
@@ -710,34 +695,15 @@ elif st.session_state.routing_phase == "finalized":
             st.rerun()
             
     with tab2:
-        # PROGRESS BAR
-        installed_count = sum(1 for s in active_route if st.session_state.site_data[s['uid']].get("Installed") == "x" or st.session_state.site_data[s['uid']].get("Skipped") == "x")
-        total_active = len(active_route)
-        if total_active > 0:
-            st.progress(installed_count / total_active, text=f"Install Progress: {installed_count} / {total_active} Sites")
-
-        install_view = st.radio("Install View:", ["Single Site Mode", "Full Manifest List"], key="install_view_toggle", horizontal=True)
+        install_view = st.radio("Install View:", ["Single Site Mode", "Full Manifest List"], horizontal=True)
         
-        if st.session_state.install_view_toggle == "Full Manifest List":
-            st.markdown("### 📋 Active Manifest")
-            for idx, s in enumerate(active_route):
-                sd = st.session_state.site_data[s['uid']]
-                status = "✅ Installed" if sd.get("Installed") == "x" else ("❌ Skipped" if sd.get("Skipped") == "x" else "⏳ Pending")
-                
-                with st.container():
-                    st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
-                    c1, c2, c3 = st.columns([1, 3, 1])
-                    c1.write(f"**{status}**")
-                    c2.write(f"Stop {idx+1}: **Site {sd.get('Site')}** \n{sd.get('Street', 'Unknown Street')}")
-                    
-                    # HOT-LINK BUTTON: Jumps directly to this site's card
-                    if c3.button("🔍 OPEN", key=f"jump_inst_{s['uid']}", use_container_width=True):
-                        st.session_state.current_index = next((i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid']), 0)
-                        st.session_state.install_view_toggle = "Single Site Mode"
-                        st.rerun()
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    
-            render_backup_button("install")
+        if install_view == "Full Manifest List":
+            df_display = pd.DataFrame([{
+                "Site": s["Site"], 
+                "Street": s["Street"], 
+                "Status": "✅ Installed" if s.get("Installed") == "x" else ("❌ Skipped" if s.get("Skipped") == "x" else "⏳ Pending")
+            } for s in [st.session_state.site_data[uid] for uid in active_uids]])
+            st.dataframe(df_display, use_container_width=True)
         else:
             new_auto = st.checkbox("🚀 Auto-Open Next Stop Map on Install", value=st.session_state.auto_advance_nav)
             if new_auto != st.session_state.auto_advance_nav:
@@ -760,7 +726,8 @@ elif st.session_state.routing_phase == "finalized":
                 if display_street.lower() == 'nan': display_street = ""
                 new_street = st.text_input("📍 STREET NAME (Auto-Fills on Install):", value=display_street)
                 
-                nav_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
+                # --- ACTUAL, CORRECT GOOGLE MAPS SECURE NAVIGATION URL ---
+                nav_url = f"https://www.google.com/maps/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
                 st.link_button("🚗 NAV TO SITE", nav_url, use_container_width=True)
                 
                 batch = []
@@ -777,7 +744,8 @@ elif st.session_state.routing_phase == "finalized":
                 if len(batch) > 1:
                     waypoints_str = "|".join(batch[:-1])
                     dest_str = batch[-1]
-                    batch_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
+                    # --- SECURE BATCH WAYPOINT LINK ---
+                    batch_url = f"https://www.google.com/maps/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
                     st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", batch_url, use_container_width=True)
                 
                 st.info("📍 Grab precise GPS below to lock-in the exact field coordinate and auto-name the street.")
@@ -837,7 +805,8 @@ elif st.session_state.routing_phase == "finalized":
                                 if next_idx != cur:
                                     n_lat = st.session_state.optimized_route[next_idx]['nav_lat']
                                     n_lon = st.session_state.optimized_route[next_idx]['nav_lon']
-                                    st.session_state.auto_open_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
+                                    # --- SECURE AUTO-OPEN LINK ---
+                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
 
                         else:
                             st.session_state.msg_type = "skip"
@@ -868,15 +837,12 @@ elif st.session_state.routing_phase == "finalized":
                         st.session_state.last_install_msg = None
                         auto_save()
                         st.rerun()
-                        
             else:
                 st.success("🎉 ALL STOPS ON THIS MANIFEST ARE COMPLETED!")
                 if st.button("⬅️ GO BACK TO LAST STOP", use_container_width=True):
                     st.session_state.current_index = len(st.session_state.optimized_route) - 1
                     auto_save()
                     st.rerun()
-            
-            render_backup_button("install_bottom")
                     
     with tab3:
         raw_itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
@@ -916,11 +882,6 @@ elif st.session_state.routing_phase == "finalized":
                 
             if st.session_state.pickup_index >= len(itin):
                 st.session_state.pickup_index = max(0, len(itin) - 1)
-                
-            # PROGRESS BAR
-            picked_count = sum(1 for sd in itin if sd.get("Picked up") == "x")
-            if len(itin) > 0:
-                st.progress(picked_count / len(itin), text=f"Pick-Up Progress: {picked_count} / {len(itin)} Sites")
 
             st.divider()
 
@@ -977,26 +938,12 @@ elif st.session_state.routing_phase == "finalized":
                 st.warning("No installed sites found for the selected Pick-Up target.")
 
             if itin:
-                pickup_view = st.radio("Pick-Up View:", ["Single Site Mode", "Full Manifest List"], key="pickup_view_toggle", horizontal=True)
+                view_mode = st.radio("Pick-Up View:", ["Single Site Mode", "Full Manifest List"], horizontal=True)
                 
-                if st.session_state.pickup_view_toggle == "Full Manifest List":
-                    st.markdown("### 📋 Pick-Up Manifest")
-                    for p_idx, s in enumerate(itin):
-                        status = "✅ Done" if s.get("Picked up") == "x" else "⏳ Pending"
-                        
-                        with st.container():
-                            st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
-                            c1, c2, c3 = st.columns([1, 3, 1])
-                            c1.write(f"**{status}**")
-                            c2.write(f"Pick-Up {p_idx+1}: **Site {s.get('Site')}** \n{s.get('Street', 'Unknown Street')}")
-                            
-                            # HOT-LINK BUTTON: Jumps directly to this Pick-Up
-                            if c3.button("🔍 OPEN", key=f"jump_pickup_{s['UID']}", use_container_width=True):
-                                st.session_state.pickup_index = p_idx
-                                st.session_state.pickup_view_toggle = "Single Site Mode"
-                                st.rerun()
-                            st.markdown("</div>", unsafe_allow_html=True)
-                    render_backup_button("pickup_bottom")
+                if view_mode == "Full Manifest List":
+                    st.dataframe(pd.DataFrame([{
+                        "Site": s["Site"], "Street": s["Street"], "Status": "✅ Done" if s.get("Picked up") == "x" else "⏳ Pending"
+                    } for s in itin]), use_container_width=True)
                 else:
                     p_idx = st.session_state.pickup_index
                     if p_idx < len(itin):
@@ -1007,7 +954,8 @@ elif st.session_state.routing_phase == "finalized":
                         p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                         st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                         
-                        nav_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={p_lat},{p_lon}&dir_action=navigate"
+                        # --- SECURE PICK-UP NAV LINK ---
+                        nav_url = f"https://www.google.com/maps/dir/?api=1&destination={p_lat},{p_lon}&dir_action=navigate"
                         st.link_button("🚗 NAV TO FIELD GPS", nav_url, use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
@@ -1043,8 +991,6 @@ elif st.session_state.routing_phase == "finalized":
                             st.session_state.pickup_index -= 1
                             auto_save()
                             st.rerun()
-                    
-                    render_backup_button("pickup_bottom_single")
                         
     with tab4:
         st.subheader("📋 End of Day Audit")
@@ -1097,4 +1043,9 @@ elif st.session_state.routing_phase == "finalized":
                     use_container_width=True
                 )
         
-        render_backup_button("audit_bottom")
+        st.divider()
+        if os.path.exists(BACKUP_FILE):
+            try:
+                with open(BACKUP_FILE, "r") as f: backup_data = f.read()
+                st.download_button("💾 DOWNLOAD BACKUP JSON", backup_data, f"tds_backup_{st.session_state.driver_name}.json", mime="application/json", use_container_width=True)
+            except Exception: pass

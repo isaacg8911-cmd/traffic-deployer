@@ -30,7 +30,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.97", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.98", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -126,7 +126,6 @@ if "init" not in st.session_state:
                 for k, v in data.items(): st.session_state[k] = v
         except Exception: pass
 
-# Automatically inject missing keys so old JSON backups never crash the app
 defaults = {
     "session_id": str(uuid.uuid4())[:8],
     "home_coords": (33.7715, -117.9431),
@@ -192,7 +191,7 @@ def get_street_from_coords(lat, lon):
     except Exception: pass
     return ""
 
-# --- STRICT NEIGHBORHOOD SWEEP SOLVER ---
+# --- THE "VISUAL SWEEP" ROUTING ENGINE ---
 def haversine_dist(lat1, lon1, lat2, lon2):
     R = 6371.0 
     dlat = math.radians(lat2 - lat1)
@@ -226,43 +225,40 @@ def perform_2opt(route, home_coords):
 
 def solve_tsp(nodes_list, home_coords):
     if not nodes_list: return []
+    
+    # 1. Map Boundaries to "Zoom Out"
+    min_lat = min(n['nav_lat'] for n in nodes_list)
+    max_lat = max(n['nav_lat'] for n in nodes_list)
+    min_lon = min(n['nav_lon'] for n in nodes_list)
+    max_lon = max(n['nav_lon'] for n in nodes_list)
+    
+    # 2. Define the 4 Corners of the map
+    corners = [
+        (max_lat, min_lon), # NW
+        (max_lat, max_lon), # NE
+        (min_lat, min_lon), # SW
+        (min_lat, max_lon)  # SE
+    ]
+    
     global_best_route = []
     global_best_dist = float('inf')
     
-    # Force algorithm to test sweeping from home, and sweeping from the furthest corners
-    start_points = [None]
-    if len(nodes_list) > 1:
-        start_points.extend([
-            min(nodes_list, key=lambda x: x['nav_lat']),
-            max(nodes_list, key=lambda x: x['nav_lat']),
-            min(nodes_list, key=lambda x: x['nav_lon']),
-            max(nodes_list, key=lambda x: x['nav_lon'])
-        ])
-    
-    for start_node in start_points:
-        unvisited = list(nodes_list)
-        current_route = []
-        
-        if start_node is None:
-            curr = home_coords
-        else:
-            current_route.append(start_node)
-            unvisited.remove(start_node)
-            curr = (start_node['nav_lat'], start_node['nav_lon'])
-            
-        while unvisited:
-            # Strict Nearest Neighbor: Bans the algorithm from jumping across the map
-            next_node = min(unvisited, key=lambda x: haversine_dist(curr[0], curr[1], x['nav_lat'], x['nav_lon']))
-            current_route.append(next_node)
-            curr = (next_node['nav_lat'], next_node['nav_lon'])
-            unvisited.remove(next_node)
-            
-        # Untangle crossing lines within the swept neighborhoods
-        opt_route, opt_dist = perform_2opt(current_route, home_coords)
+    # 3. Visual Sweep (Radiating from each corner)
+    for corner in corners:
+        swept_route = sorted(nodes_list, key=lambda x: haversine_dist(corner[0], corner[1], x['nav_lat'], x['nav_lon']))
+        opt_route, opt_dist = perform_2opt(swept_route, home_coords)
         if opt_dist < global_best_dist:
             global_best_dist = opt_dist
             global_best_route = opt_route
             
+    # 4. Straight Directional Sweeps (North-South, East-West)
+    for key_func in [lambda x: x['nav_lat'], lambda x: -x['nav_lat'], lambda x: x['nav_lon'], lambda x: -x['nav_lon']]:
+        swept_route = sorted(nodes_list, key=key_func)
+        opt_route, opt_dist = perform_2opt(swept_route, home_coords)
+        if opt_dist < global_best_dist:
+            global_best_dist = opt_dist
+            global_best_route = opt_route
+
     return global_best_route
 
 def process_upload(est_configs, excel_files, m_type, route_strategy):
@@ -397,7 +393,6 @@ with col_logout:
                 del st.session_state[k]
         st.rerun()
 
-# Execute Auto-Open Javascript if triggered by install
 if st.session_state.get("auto_open_url"):
     components.html(f"<script>window.open('{st.session_state.auto_open_url}', '_blank');</script>", height=0)
     st.session_state.auto_open_url = ""
@@ -595,8 +590,8 @@ else:
                 if display_street.lower() == 'nan': display_street = ""
                 new_street = st.text_input("📍 STREET NAME (Auto-Fills on Install):", value=display_street)
                 
-                # FIXED: OFFICIAL GOOGLE MAPS API URL FOR LIVE NAVIGATION
-                nav_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={safe_lat},{safe_lon}&travelmode=driving"
+                # FIXED: OFFICIAL GOOGLE MAPS LIVE NAVIGATION API
+                nav_url = f"https://www.google.com/maps/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
                 st.link_button("🚗 NAV TO SITE", nav_url, use_container_width=True)
                 
                 batch = []
@@ -613,12 +608,13 @@ else:
                 if len(batch) > 1:
                     waypoints_str = "|".join(batch[:-1])
                     dest_str = batch[-1]
-                    batch_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&travelmode=driving"
+                    batch_url = f"https://www.google.com/maps/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
                     st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", batch_url, use_container_width=True)
                 
                 st.info("📍 Grab precise GPS below to lock-in the exact field coordinate and auto-name the street.")
                 if HAS_GPS:
-                    loc_install = streamlit_geolocation(key=f"loc_{s['uid']}")
+                    # FIX: Removed the crash-causing Key parameter
+                    loc_install = streamlit_geolocation()
                 else:
                     loc_install = None
                 
@@ -673,7 +669,7 @@ else:
                                 if next_idx != cur:
                                     n_lat = st.session_state.optimized_route[next_idx]['nav_lat']
                                     n_lon = st.session_state.optimized_route[next_idx]['nav_lon']
-                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={n_lat},{n_lon}&travelmode=driving"
+                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
 
                         else:
                             st.session_state.msg_type = "skip"
@@ -817,7 +813,7 @@ else:
                         p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                         st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                         
-                        nav_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={p_lat},{p_lon}&travelmode=driving"
+                        nav_url = f"https://www.google.com/maps/dir/?api=1&destination={p_lat},{p_lon}&dir_action=navigate"
                         st.link_button("🚗 NAV TO FIELD GPS", nav_url, use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
@@ -877,6 +873,7 @@ else:
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df_all = pd.DataFrame(all_d)
+                    
                     df_clean = df_all.drop(columns=['UID', 'Sheet'], errors='ignore')
                     df_clean.to_excel(writer, sheet_name='Master List', index=False)
                     

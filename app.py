@@ -1,4 +1,4 @@
-import streamlit as st
+iimport streamlit as st
 import streamlit.components.v1 as components
 import re
 import pandas as pd
@@ -29,7 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.105", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.106", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -272,7 +272,6 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
                 best_node = min(data['nodes'], key=lambda n: haversine_dist(st.session_state.home_coords[0], st.session_state.home_coords[1], n[0], n[1]))
                 best_node_lat, best_node_lon = best_node[0], best_node[1]
                 
-                # MICRO-JITTER UPGRADE: Unstacks overlapping dots so they can both be tapped
                 overlap_count = sum(1 for n in final_raw if abs(n['nav_lat'] - best_node_lat) < 0.00001 and abs(n['nav_lon'] - best_node_lon) < 0.00001)
                 if overlap_count > 0:
                     best_node_lat += 0.00005 * overlap_count
@@ -424,7 +423,7 @@ if st.session_state.routing_phase == "upload":
             else: 
                 st.error("Sync error. No matching sites found.")
 
-# --- DRAFTING PHASE (LIVE TAPPING ENGINE WITH SMART INSERTION) ---
+# --- DRAFTING PHASE (LIVE TAPPING ENGINE) ---
 elif st.session_state.routing_phase == "drafting":
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: 
@@ -439,16 +438,21 @@ elif st.session_state.routing_phase == "drafting":
     hc = st.session_state.home_coords
     
     st.subheader(f"🗺️ LIVE ROUTE BUILDER ({tapped_count}/{total_nodes} Sequenced)")
-    st.info("Tap the orange dots on the map to sequence them. Or hit Smart Auto-Finish below.")
+    st.info("Tap the orange dots on the map to sequence them. The map is hard-locked to your viewport.")
     
-    if st.session_state.map_center and st.session_state.map_zoom:
-        m_draft = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom, tiles=map_tiles)
+    # Inject Center and Zoom memory safely
+    center_val = st.session_state.map_center if st.session_state.map_center else None
+    zoom_val = st.session_state.map_zoom if st.session_state.map_zoom else None
+    
+    if center_val and zoom_val:
+        m_draft = folium.Map(location=center_val, zoom_start=zoom_val, tiles=map_tiles)
     else:
         m_draft = folium.Map(location=hc, zoom_start=11, tiles=map_tiles)
         bounds = get_map_bounds(st.session_state.raw_nodes, hc)
         if bounds: m_draft.fit_bounds(bounds) 
         
-    folium.Marker(hc, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_draft)
+    # FIX: Replaced popup= with tooltip= so Leaflet does not pan the camera when clicked
+    folium.Marker(hc, tooltip="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_draft)
     
     path_coords = []
     
@@ -458,7 +462,7 @@ elif st.session_state.routing_phase == "drafting":
             path_coords.append((node['nav_lat'], node['nav_lon']))
             folium.CircleMarker(
                 location=(node['nav_lat'], node['nav_lon']), radius=10, color="#00FF00", fill=True, fill_color="#00FF00", fill_opacity=0.9,
-                popup=f"Stop {idx+1}: Site {node['id']}"
+                tooltip=f"Stop {idx+1}: Site {node['id']}"
             ).add_to(m_draft)
             
             folium.Marker(
@@ -474,13 +478,22 @@ elif st.session_state.routing_phase == "drafting":
     for node in unsequenced:
         folium.CircleMarker(
             location=(node['nav_lat'], node['nav_lon']), radius=8, color="#FFA500", fill=True, fill_color="#FFA500", fill_opacity=0.7,
-            popup=f"Site {node['id']} (Untapped)"
+            tooltip=f"Site {node['id']} (Untapped)"
         ).add_to(m_draft)
 
     if len(path_coords) > 1:
         folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
             
-    map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked", "center", "zoom"], key="draft_map")
+    # ST_FOLIUM VIEWPORT LOCK: Passing center and zoom locks the frontend map exactly in place
+    map_data = st_folium(
+        m_draft, 
+        center=center_val, 
+        zoom=zoom_val, 
+        height=450, 
+        use_container_width=True, 
+        returned_objects=["last_object_clicked", "center", "zoom"], 
+        key="draft_map"
+    )
     
     if map_data:
         if map_data.get("center"):
@@ -522,7 +535,6 @@ elif st.session_state.routing_phase == "drafting":
     with c2:
         if st.button("🤖 SMART AUTO-FINISH", use_container_width=True):
             if unsequenced:
-                # SMART INSERTION HEURISTIC
                 if len(st.session_state.manual_sequence) == 0:
                     auto_route = solve_tsp_fixed(unsequenced, hc)
                     st.session_state.manual_sequence = [n['uid'] for n in auto_route]
@@ -630,7 +642,7 @@ elif st.session_state.routing_phase == "finalized":
         bounds = get_map_bounds(active_route, hc)
         if bounds: m.fit_bounds(bounds)
         
-        folium.Marker(hc, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m)
+        folium.Marker(hc, tooltip="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m)
         route_coords = [hc]
         
         for idx, s in enumerate(active_route):
@@ -645,7 +657,7 @@ elif st.session_state.routing_phase == "finalized":
                 
                 folium.CircleMarker(
                     location=(safe_lat, safe_lon), radius=10, color=color, fill=True, fill_color=color, fill_opacity=0.9,
-                    popup=f"Stop {idx+1}: Site {sd.get('Site', s['id'])}"
+                    tooltip=f"Stop {idx+1}: Site {sd.get('Site', s['id'])}"
                 ).add_to(m)
                 
                 folium.Marker(
@@ -889,7 +901,7 @@ elif st.session_state.routing_phase == "finalized":
                 bounds = get_map_bounds(itin, st.session_state.home_coords)
                 if bounds: m_pickup.fit_bounds(bounds)
                 
-                folium.Marker(st.session_state.home_coords, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_pickup)
+                folium.Marker(st.session_state.home_coords, tooltip="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_pickup)
                 
                 pickup_coords = [st.session_state.home_coords]
                 for idx, p_site in enumerate(itin):
@@ -901,7 +913,7 @@ elif st.session_state.routing_phase == "finalized":
                         pickup_coords.append((p_lat, p_lon))
                         folium.CircleMarker(
                             location=(p_lat, p_lon), radius=10, color=color, fill=True, fill_color=color, fill_opacity=0.9,
-                            popup=f"Pick-Up {idx+1}: Site {p_site.get('Site')}"
+                            tooltip=f"Pick-Up {idx+1}: Site {p_site.get('Site')}"
                         ).add_to(m_pickup)
                         
                         folium.Marker(

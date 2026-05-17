@@ -29,7 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.109", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.110", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -438,7 +438,7 @@ elif st.session_state.routing_phase == "drafting":
     hc = st.session_state.home_coords
     
     st.subheader(f"🗺️ LIVE ROUTE BUILDER ({tapped_count}/{total_nodes} Sequenced)")
-    st.info("Tap the orange dots on the map to sequence them. Or hit Smart Auto-Finish below.")
+    st.info("Tap the orange dots to sequence. The map will NO LONGER snap when you drag.")
     
     if st.session_state.map_center and st.session_state.map_zoom:
         m_draft = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom, tiles=map_tiles)
@@ -479,13 +479,9 @@ elif st.session_state.routing_phase == "drafting":
     if len(path_coords) > 1:
         folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
             
-    map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked", "center", "zoom"], key="draft_map")
-    
-    if map_data:
-        if map_data.get("center"):
-            st.session_state.map_center = [map_data["center"]["lat"], map_data["center"]["lng"]]
-        if map_data.get("zoom"):
-            st.session_state.map_zoom = map_data["zoom"]
+    # CRITICAL FIX: "center" and "zoom" are completely scrubbed from returned_objects. 
+    # The map is now legally blind to dragging and will NEVER stutter or snap.
+    map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked"], key="draft_map")
     
     if map_data and map_data.get("last_object_clicked"):
         click_lat = map_data["last_object_clicked"]["lat"]
@@ -506,6 +502,11 @@ elif st.session_state.routing_phase == "drafting":
             if clicked_uid and min_dist < 0.2:
                 if clicked_uid not in st.session_state.manual_sequence:
                     st.session_state.manual_sequence.append(clicked_uid)
+                    
+                    # Lock the viewport strictly on the dot you just tapped
+                    st.session_state.map_center = [click_lat, click_lon]
+                    st.session_state.map_zoom = 14 
+                    
                     auto_save()
                     st.rerun()
 
@@ -516,6 +517,16 @@ elif st.session_state.routing_phase == "drafting":
             if len(st.session_state.manual_sequence) > 0:
                 st.session_state.manual_sequence.pop()
                 st.session_state.last_processed_click = None 
+                
+                # Pan backwards to the previous dot on Undo
+                if len(st.session_state.manual_sequence) > 0:
+                    prev_uid = st.session_state.manual_sequence[-1]
+                    prev_node = next((n for n in st.session_state.raw_nodes if n['uid'] == prev_uid), None)
+                    if prev_node:
+                        st.session_state.map_center = [prev_node['nav_lat'], prev_node['nav_lon']]
+                else:
+                    st.session_state.map_center = None
+                    
                 auto_save()
                 st.rerun()
     with c2:
@@ -721,8 +732,7 @@ elif st.session_state.routing_phase == "finalized":
                 if display_street.lower() == 'nan': display_street = ""
                 new_street = st.text_input("📍 STREET NAME (Auto-Fills on Install):", value=display_street)
                 
-                # FIXED: OFFICIAL GOOGLE MAPS LIVE NAVIGATION API
-                nav_url = f"https://www.google.com/maps/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
+                nav_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
                 st.link_button("🚗 NAV TO SITE", nav_url, use_container_width=True)
                 
                 batch = []
@@ -739,7 +749,7 @@ elif st.session_state.routing_phase == "finalized":
                 if len(batch) > 1:
                     waypoints_str = "|".join(batch[:-1])
                     dest_str = batch[-1]
-                    batch_url = f"https://www.google.com/maps/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
+                    batch_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
                     st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", batch_url, use_container_width=True)
                 
                 st.info("📍 Grab precise GPS below to lock-in the exact field coordinate and auto-name the street.")
@@ -799,7 +809,7 @@ elif st.session_state.routing_phase == "finalized":
                                 if next_idx != cur:
                                     n_lat = st.session_state.optimized_route[next_idx]['nav_lat']
                                     n_lon = st.session_state.optimized_route[next_idx]['nav_lon']
-                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
+                                    st.session_state.auto_open_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
 
                         else:
                             st.session_state.msg_type = "skip"
@@ -821,224 +831,4 @@ elif st.session_state.routing_phase == "finalized":
                 with nav1:
                     if st.button("⬅️ PREV STOP", use_container_width=True, key=f"prev_{s['uid']}"):
                         st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=-1)
-                        st.session_state.last_install_msg = None
-                        auto_save()
-                        st.rerun()
-                with nav2:
-                    if st.button("NEXT ➡️", use_container_width=True, key=f"next_{s['uid']}"):
-                        st.session_state.current_index = get_next_valid_index(cur, active_uids, direction=1)
-                        st.session_state.last_install_msg = None
-                        auto_save()
-                        st.rerun()
-            else:
-                st.success("🎉 ALL STOPS ON THIS MANIFEST ARE COMPLETED!")
-                if st.button("⬅️ GO BACK TO LAST STOP", use_container_width=True):
-                    st.session_state.current_index = len(st.session_state.optimized_route) - 1
-                    auto_save()
-                    st.rerun()
-                    
-    with tab3:
-        raw_itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
-        
-        if raw_itin:
-            st.subheader("♻️ Pick-Up Strategy Engine")
-            
-            available_targets = ["All Maps (Merged)"] + st.session_state.active_files
-            safe_target_index = available_targets.index(st.session_state.pickup_target) if st.session_state.pickup_target in available_targets else 0
-            
-            new_target = st.selectbox("🎯 Select Pick-Up Target:", available_targets, index=safe_target_index)
-            
-            if new_target != st.session_state.pickup_target:
-                st.session_state.pickup_target = new_target
-                st.session_state.pickup_index = 0
-                st.session_state.show_pickup_map = False
-                auto_save()
-                st.rerun()
-                
-            if st.session_state.pickup_target != "All Maps (Merged)":
-                raw_itin = [sd for sd in raw_itin if sd.get("Sheet") == st.session_state.pickup_target]
-
-            new_sort = st.radio("Sort Manifest By:", ["🔄 Route Efficiency", "⏱️ Order Installed"], index=0 if st.session_state.pickup_sort_method == "🔄 Route Efficiency" else 1, horizontal=True)
-            
-            if new_sort != st.session_state.pickup_sort_method:
-                st.session_state.pickup_sort_method = new_sort
-                st.session_state.pickup_index = 0
-                st.session_state.show_pickup_map = False 
-                auto_save()
-                st.rerun()
-                
-            if st.session_state.pickup_sort_method == "⏱️ Order Installed":
-                raw_itin.sort(key=lambda x: x.get('ExactTime', ''))
-                itin = raw_itin
-            else:
-                itin = [site['sd'] for site in solve_tsp_fixed([{'uid': sd['UID'], 'nav_lat': float(sd['LAT']), 'nav_lon': float(sd['LON']), 'sd': sd} for sd in raw_itin], st.session_state.home_coords)]
-                
-            if st.session_state.pickup_index >= len(itin):
-                st.session_state.pickup_index = max(0, len(itin) - 1)
-
-            st.divider()
-
-            if itin and st.button("🗺️ GENERATE PICK-UP MAP MANIFEST", use_container_width=True):
-                st.session_state.show_pickup_map = not st.session_state.get("show_pickup_map", False)
-                
-            if st.session_state.get("show_pickup_map", False) and itin:
-                st.success(f"TACTICAL PICK-UP MAP: {len(itin)} Secured Sites")
-                m_pickup = folium.Map(location=st.session_state.home_coords, zoom_start=11, tiles=map_tiles)
-                
-                bounds = get_map_bounds(itin, st.session_state.home_coords)
-                if bounds: m_pickup.fit_bounds(bounds)
-                
-                folium.Marker(st.session_state.home_coords, tooltip="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_pickup)
-                
-                pickup_coords = [st.session_state.home_coords]
-                for idx, p_site in enumerate(itin):
-                    p_lat, p_lon = p_site.get('LAT'), p_site.get('LON')
-                    is_picked_up = p_site.get("Picked up") == "x"
-                    color = "#00FF00" if is_picked_up else "#FFA500" 
-                    
-                    if p_lat and p_lon:
-                        pickup_coords.append((p_lat, p_lon))
-                        folium.CircleMarker(
-                            location=(p_lat, p_lon), radius=10, color=color, fill=True, fill_color=color, fill_opacity=0.9,
-                            tooltip=f"Pick-Up {idx+1}: Site {p_site.get('Site')}"
-                        ).add_to(m_pickup)
-                        
-                        folium.Marker(
-                            location=(p_lat, p_lon),
-                            icon=DivIcon(
-                                icon_size=(20,20), icon_anchor=(10,10),
-                                html=f'<div style="font-size: 10pt; color: black; font-weight: 900; text-align: center; line-height: 20px;">{idx+1}</div>',
-                            )
-                        ).add_to(m_pickup)
-                
-                if len(pickup_coords) > 1:
-                    chunk_size = 50
-                    for i in range(0, len(pickup_coords) - 1, chunk_size - 1):
-                        chunk = pickup_coords[i:i + chunk_size]
-                        coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
-                        osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
-                        try:
-                            resp = requests.get(osrm_url, timeout=3).json()
-                            if resp.get('code') == 'Ok':
-                                route_geo = resp['routes'][0]['geometry']['coordinates']
-                                route_points = [(lat, lon) for lon, lat in route_geo]
-                                folium.PolyLine(route_points, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=4, opacity=0.7).add_to(m_pickup)
-                        except: pass
-                
-                st_folium(m_pickup, height=450, use_container_width=True, returned_objects=[], key="pickup_map_render")
-                st.divider()
-            elif not itin:
-                st.warning("No installed sites found for the selected Pick-Up target.")
-
-            if itin:
-                view_mode = st.radio("Pick-Up View:", ["Single Site Mode", "Full Manifest List"], horizontal=True)
-                
-                if view_mode == "Full Manifest List":
-                    st.dataframe(pd.DataFrame([{
-                        "Site": s["Site"], "Street": s["Street"], "Status": "✅ Done" if s.get("Picked up") == "x" else "⏳ Pending"
-                    } for s in itin]), use_container_width=True)
-                else:
-                    p_idx = st.session_state.pickup_index
-                    if p_idx < len(itin):
-                        if st.session_state.last_pickup_msg:
-                            st.markdown(f"<div class='success-recap'>{st.session_state.last_pickup_msg}</div>", unsafe_allow_html=True)
-                            
-                        s = itin[p_idx]
-                        p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
-                        st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
-                        
-                        # FIXED: OFFICIAL GOOGLE MAPS LIVE NAVIGATION API
-                        nav_url = f"https://www.google.com/maps/dir/?api=1&destination={p_lat},{p_lon}&dir_action=navigate"
-                        st.link_button("🚗 NAV TO FIELD GPS", nav_url, use_container_width=True)
-                        
-                        if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
-                            st.session_state.site_data[s['UID']]["Picked up"] = "x"
-                            st.session_state.last_pickup_msg = f"✅ Pick-Up {s.get('Site')} Confirmed."
-                            st.session_state.pickup_index += 1
-                            auto_save()
-                            st.rerun()
-                            
-                        if s.get("Picked up") == "x":
-                            if st.button("⏪ UNDO PICK-UP", use_container_width=True):
-                                st.session_state.site_data[s['UID']]["Picked up"] = ""
-                                auto_save()
-                                st.rerun()
-                        
-                        st.divider()
-                        p_nav1, p_nav2 = st.columns(2)
-                        with p_nav1:
-                            if p_idx > 0 and st.button("⬅️ PREV PICK-UP", use_container_width=True, key=f"p_prev_{s['UID']}"):
-                                st.session_state.pickup_index -= 1
-                                st.session_state.last_pickup_msg = None
-                                auto_save()
-                                st.rerun()
-                        with p_nav2:
-                            if p_idx < len(itin) - 1 and st.button("SKIP / NEXT ➡️", use_container_width=True, key=f"p_next_{s['UID']}"):
-                                st.session_state.pickup_index += 1
-                                st.session_state.last_pickup_msg = None
-                                auto_save()
-                                st.rerun()
-                    else:
-                        st.success("♻️ ALL PICK-UPS ARE SECURED!")
-                        if p_idx > 0 and st.button("⬅️ REVIEW LAST PICK-UP", use_container_width=True):
-                            st.session_state.pickup_index -= 1
-                            auto_save()
-                            st.rerun()
-                        
-    with tab4:
-        st.subheader("📋 End of Day Audit")
-        missing_data = []
-        all_d = [d for d in st.session_state.site_data.values() if d.get("Installed") == "x" or d.get("Skipped") == "x"]
-        
-        for d in all_d:
-            if d.get("Installed") == "x":
-                if not d.get("Serial") or str(d.get("Serial")).strip() == "": 
-                    missing_data.append(f"Site {d['Site']}: Missing Serial #")
-                if not d.get("Street") or str(d.get("Street")).lower() == 'nan' or str(d.get("Street")).strip() == "": 
-                    missing_data.append(f"Site {d['Site']}: Missing Street Name")
-                
-        if missing_data:
-            st.error("⚠️ ACTION REQUIRED: You have missing data on installed sites.")
-            for msg in missing_data: st.write(f"- {msg}")
-        elif all_d:
-            st.success("✅ All installed sites have complete data. Ready for export.")
-            
-        if all_d:
-            try:
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df_all = pd.DataFrame(all_d)
-                    
-                    df_clean = df_all.drop(columns=['UID', 'Sheet'], errors='ignore')
-                    df_clean.to_excel(writer, sheet_name='Master List', index=False)
-                    
-                    for sheet in df_all['Sheet'].unique():
-                        df_sheet = df_all[df_all['Sheet'] == sheet].copy()
-                        df_sheet_clean = df_sheet.drop(columns=['UID', 'Sheet'], errors='ignore')
-                        safe_sheet_name = str(sheet)[:31].replace('[', '').replace(']', '').replace(':', '').replace('*', '').replace('?', '').replace('/', '').replace('\\', '')
-                        df_sheet_clean.to_excel(writer, sheet_name=safe_sheet_name, index=False)
-                        
-                excel_data = output.getvalue()
-                st.download_button(
-                    label="📊 FINAL SUBMIT (DOWNLOAD EXCEL)", 
-                    data=excel_data, 
-                    file_name=f"TDS_Report_{st.session_state.driver_name}.xlsx", 
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
-                    use_container_width=True
-                )
-            except Exception as e:
-                st.warning("Excel Engine blocked by Cloud Server. Generating standard CSV fallback.")
-                df_csv = pd.DataFrame(all_d).drop(columns=['UID', 'Sheet'], errors='ignore')
-                st.download_button(
-                    label="📊 FINAL SUBMIT (DOWNLOAD CSV)", 
-                    data=df_csv.to_csv(index=False), 
-                    file_name=f"TDS_Report_{st.session_state.driver_name}.csv", 
-                    use_container_width=True
-                )
-        
-        st.divider()
-        if os.path.exists(BACKUP_FILE):
-            try:
-                with open(BACKUP_FILE, "r") as f: backup_data = f.read()
-                st.download_button("💾 DOWNLOAD BACKUP JSON", backup_data, f"tds_backup_{st.session_state.driver_name}.json", mime="application/json", use_container_width=True)
-            except Exception: pass
+                        st.session

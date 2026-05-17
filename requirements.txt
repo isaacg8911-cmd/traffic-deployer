@@ -13,3 +13,5 @@ pandas
 openpyxl
 folium
 streamlit-folium
+
+streamlit-cookies-manager

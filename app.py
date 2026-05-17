@@ -29,7 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.107", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.108", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -438,7 +438,7 @@ elif st.session_state.routing_phase == "drafting":
     hc = st.session_state.home_coords
     
     st.subheader(f"🗺️ LIVE ROUTE BUILDER ({tapped_count}/{total_nodes} Sequenced)")
-    st.info("Tap the orange dots on the map to sequence them. Or hit Smart Auto-Finish below.")
+    st.info("Tap the orange dots to sequence. The map will NO LONGER snap when you drag.")
     
     if st.session_state.map_center and st.session_state.map_zoom:
         m_draft = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom, tiles=map_tiles)
@@ -479,13 +479,8 @@ elif st.session_state.routing_phase == "drafting":
     if len(path_coords) > 1:
         folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
             
-    map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked", "center", "zoom"], key="draft_map")
-    
-    if map_data:
-        if map_data.get("center"):
-            st.session_state.map_center = [map_data["center"]["lat"], map_data["center"]["lng"]]
-        if map_data.get("zoom"):
-            st.session_state.map_zoom = map_data["zoom"]
+    # FIXED: REMOVED "center" and "zoom" from returned_objects so the map stops tracking drags
+    map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked"], key="draft_map")
     
     if map_data and map_data.get("last_object_clicked"):
         click_lat = map_data["last_object_clicked"]["lat"]
@@ -506,6 +501,11 @@ elif st.session_state.routing_phase == "drafting":
             if clicked_uid and min_dist < 0.2:
                 if clicked_uid not in st.session_state.manual_sequence:
                     st.session_state.manual_sequence.append(clicked_uid)
+                    
+                    # ANCHOR THE MAP: Forces map to stay exactly on the dot you tapped when it reloads
+                    st.session_state.map_center = [click_lat, click_lon]
+                    st.session_state.map_zoom = 15 
+                    
                     auto_save()
                     st.rerun()
 
@@ -516,6 +516,16 @@ elif st.session_state.routing_phase == "drafting":
             if len(st.session_state.manual_sequence) > 0:
                 st.session_state.manual_sequence.pop()
                 st.session_state.last_processed_click = None 
+                
+                # Center map on the previous dot so you don't lose your place
+                if len(st.session_state.manual_sequence) > 0:
+                    prev_uid = st.session_state.manual_sequence[-1]
+                    prev_node = next((n for n in st.session_state.raw_nodes if n['uid'] == prev_uid), None)
+                    if prev_node:
+                        st.session_state.map_center = [prev_node['nav_lat'], prev_node['nav_lon']]
+                else:
+                    st.session_state.map_center = None
+                    
                 auto_save()
                 st.rerun()
     with c2:

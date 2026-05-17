@@ -14,9 +14,10 @@ from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
+from streamlit_cookies_manager import CookieManager # NEW: Required for Auto-Login
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.92", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.93", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -51,22 +52,35 @@ def set_theme(theme_choice):
 
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 
+# --- COOKIE MANAGER SETUP (FOR AUTO-LOGIN) ---
+cookies = CookieManager()
+if not cookies.ready():
+    st.stop() # Wait for cookies to load
+
 # --- 1. AUTO-PROVISIONING LOGIN SCREEN ---
 if "driver_name" not in st.session_state:
-    st.title("🚦 TRAFFIC DATA SERVICE")
-    st.info("Enter your Name/ID. If this is your first time, your workspace will be created automatically.")
-    
-    with st.form("login_form"):
-        username_input = st.text_input("DRIVER NAME:").strip().upper()
-        submitted = st.form_submit_button("🚀 START SHIFT", use_container_width=True)
+    # Check if a cookie exists from a previous suspended Chrome session
+    if "tds_driver_cookie" in cookies:
+        st.session_state.driver_name = cookies["tds_driver_cookie"]
+        st.rerun()
+    else:
+        st.title("🚦 TRAFFIC DATA SERVICE")
+        st.info("Enter your Name/ID. If this is your first time, your workspace will be created automatically.")
         
-        if submitted:
-            if username_input:
-                st.session_state.driver_name = username_input
-                st.rerun()
-            else:
-                st.error("❌ Please enter a name to continue.")
-    st.stop()
+        with st.form("login_form"):
+            username_input = st.text_input("DRIVER NAME:").strip().upper()
+            submitted = st.form_submit_button("🚀 START SHIFT", use_container_width=True)
+            
+            if submitted:
+                if username_input:
+                    st.session_state.driver_name = username_input
+                    # Set the tracking cookie so Chrome remembers who you are
+                    cookies["tds_driver_cookie"] = username_input
+                    cookies.save()
+                    st.rerun()
+                else:
+                    st.error("❌ Please enter a name to continue.")
+        st.stop()
 
 BACKUP_FILE = f"tds_backup_{st.session_state.driver_name}.json"
 
@@ -86,6 +100,7 @@ if "init" not in st.session_state:
         st.session_state.site_data = {}
         st.session_state.current_index, st.session_state.pickup_index = 0, 0
         st.session_state.mission_type = "📍 INSTALLATION"
+        st.session_state.upload_strategy = "📌 Keep Maps Separate (Day-by-Day)" # Track how they uploaded
         
     st.session_state.last_install_msg = None
     st.session_state.last_pickup_msg = None
@@ -104,6 +119,7 @@ def auto_save():
         "site_data": st.session_state.get("site_data", {}),
         "current_index": st.session_state.get("current_index", 0),
         "mission_type": st.session_state.get("mission_type", "📍 INSTALLATION"),
+        "upload_strategy": st.session_state.get("upload_strategy", "📌 Keep Maps Separate (Day-by-Day)"),
         "pickup_index": st.session_state.get("pickup_index", 0),
         "pickup_sort_method": st.session_state.get("pickup_sort_method", "🔄 Route Efficiency"),
         "pickup_target": st.session_state.get("pickup_target", "All Maps (Merged)"),
@@ -167,6 +183,7 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
     st.session_state.site_data = {}
     st.session_state.last_install_msg = None
     st.session_state.last_pickup_msg = None
+    st.session_state.upload_strategy = route_strategy # Track this for later UI decisions
     
     excel_data = {}
     for f in excel_files:
@@ -320,7 +337,12 @@ col_logo, col_logout = st.columns([3, 1])
 with col_logo: st.title(f"🚦 Ops: {st.session_state.driver_name}")
 with col_logout:
     if st.button("LOGOUT", use_container_width=True):
-        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target"]
+        # Clear the Tracking Cookie so the browser forgets the driver
+        del cookies["tds_driver_cookie"]
+        cookies.save()
+        
+        # Surgical Wipe
+        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy"]
         for k in keys_to_wipe:
             if k in st.session_state:
                 del st.session_state[k]
@@ -384,7 +406,6 @@ if not st.session_state.get("optimized_route"):
     st.subheader("📁 2. UPLOAD DATA")
     m_type = st.radio("MISSION:", ["📍 INSTALLATION", "♻️ PICK-UP"], horizontal=True)
     
-    # NEW MULTI-DAY UPLOAD TOGGLE
     r_strat = st.radio("ROUTING STRATEGY:", ["📌 Keep Maps Separate (Day-by-Day)", "🔗 Merge All Maps into One Route"], horizontal=True)
     
     excel_files = st.file_uploader("EXCEL DATA", accept_multiple_files=True)
@@ -407,8 +428,14 @@ else:
         auto_save()
         st.rerun()
     
-    available_days = ["All Days"] + st.session_state.active_files
-    selected_day = st.selectbox("📅 MISSION FILTER:", available_days)
+    # UI FIX: If they chose "Merge Maps", lock the filter to "All Days" so the app doesn't glitch.
+    if st.session_state.get("upload_strategy") == "🔗 Merge All Maps into One Route":
+        available_days = ["All Days"]
+        selected_day = "All Days"
+        st.info("🔗 Mission Filter locked: All maps merged into a single route.")
+    else:
+        available_days = ["All Days"] + st.session_state.active_files
+        selected_day = st.selectbox("📅 MISSION FILTER:", available_days)
     
     active_route = st.session_state.optimized_route if selected_day == "All Days" else [s for s in st.session_state.optimized_route if s['sheet'] == selected_day]
     active_uids = [s['uid'] for s in active_route]
@@ -497,7 +524,7 @@ else:
             new_street = st.text_input("📍 STREET NAME (Edit if incorrect):", value=display_street)
             st.session_state.site_data[s['uid']]['Street'] = str(new_street).strip()
             
-            st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/dir/Current+Location/{safe_lat},{safe_lon}", use_container_width=True)
+            st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/dir/Current+Location/...{safe_lat},{safe_lon}", use_container_width=True)
             
             batch = []
             try:
@@ -511,7 +538,7 @@ else:
                 pass
                         
             if len(batch) > 1: 
-                st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", f"https://www.google.com/maps/dir/Current+Location/{'/'.join(batch)}", use_container_width=True)
+                st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", f"https://www.google.com/maps/dir/Current+Location/...{'/'.join(batch)}", use_container_width=True)
             
             with st.form(f"form_{s['uid']}"):
                 st.info("🎙️ **VOICE PARSER:** Type or dictate notes below.")
@@ -592,7 +619,6 @@ else:
         if raw_itin:
             st.subheader("♻️ Pick-Up Strategy Engine")
             
-            # --- NEW PICK-UP FILTER (Targeting Day 1 vs Day 2) ---
             if "pickup_target" not in st.session_state: st.session_state.pickup_target = "All Maps (Merged)"
             
             available_targets = ["All Maps (Merged)"] + st.session_state.active_files
@@ -607,7 +633,6 @@ else:
                 auto_save()
                 st.rerun()
                 
-            # Filter the list before running the efficiency math
             if st.session_state.pickup_target != "All Maps (Merged)":
                 raw_itin = [sd for sd in raw_itin if sd.get("Sheet") == st.session_state.pickup_target]
 
@@ -715,7 +740,7 @@ else:
                         p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                         st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                         
-                        st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/Current+Location/{p_lat},{p_lon}", use_container_width=True)
+                        st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/Current+Location/...{p_lat},{p_lon}", use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
                             st.session_state.site_data[s['UID']]["Picked up"] = "x"
@@ -770,14 +795,11 @@ else:
             st.success("✅ All installed sites have complete data. Ready for export.")
             
         if all_d:
-            # --- CRASH-PROOF MULTI-SHEET EXCEL EXPORT ---
             try:
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df_all = pd.DataFrame(all_d)
-                    # Master Tab
                     df_all.to_excel(writer, sheet_name='Master List', index=False)
-                    # Separate Tabs for Each Day/Map
                     for sheet in df_all['Sheet'].unique():
                         df_sheet = df_all[df_all['Sheet'] == sheet]
                         safe_sheet_name = str(sheet)[:31].replace('[', '').replace(']', '').replace(':', '').replace('*', '').replace('?', '').replace('/', '').replace('\\', '')
@@ -792,7 +814,6 @@ else:
                     use_container_width=True
                 )
             except Exception as e:
-                # Fallback to CSV if the cloud server blocks the Excel library
                 st.warning("Excel Engine blocked by Cloud Server. Generating standard CSV fallback.")
                 st.download_button(
                     label="📊 FINAL SUBMIT (DOWNLOAD CSV)", 

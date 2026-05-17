@@ -1,4 +1,4 @@
-iimport streamlit as st
+import streamlit as st
 import streamlit.components.v1 as components
 import re
 import pandas as pd
@@ -29,7 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.106", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.107", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -423,7 +423,7 @@ if st.session_state.routing_phase == "upload":
             else: 
                 st.error("Sync error. No matching sites found.")
 
-# --- DRAFTING PHASE (LIVE TAPPING ENGINE) ---
+# --- DRAFTING PHASE (LIVE TAPPING ENGINE WITH SMART INSERTION) ---
 elif st.session_state.routing_phase == "drafting":
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: 
@@ -438,20 +438,15 @@ elif st.session_state.routing_phase == "drafting":
     hc = st.session_state.home_coords
     
     st.subheader(f"🗺️ LIVE ROUTE BUILDER ({tapped_count}/{total_nodes} Sequenced)")
-    st.info("Tap the orange dots on the map to sequence them. The map is hard-locked to your viewport.")
+    st.info("Tap the orange dots on the map to sequence them. Or hit Smart Auto-Finish below.")
     
-    # Inject Center and Zoom memory safely
-    center_val = st.session_state.map_center if st.session_state.map_center else None
-    zoom_val = st.session_state.map_zoom if st.session_state.map_zoom else None
-    
-    if center_val and zoom_val:
-        m_draft = folium.Map(location=center_val, zoom_start=zoom_val, tiles=map_tiles)
+    if st.session_state.map_center and st.session_state.map_zoom:
+        m_draft = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom, tiles=map_tiles)
     else:
         m_draft = folium.Map(location=hc, zoom_start=11, tiles=map_tiles)
         bounds = get_map_bounds(st.session_state.raw_nodes, hc)
         if bounds: m_draft.fit_bounds(bounds) 
         
-    # FIX: Replaced popup= with tooltip= so Leaflet does not pan the camera when clicked
     folium.Marker(hc, tooltip="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_draft)
     
     path_coords = []
@@ -484,16 +479,7 @@ elif st.session_state.routing_phase == "drafting":
     if len(path_coords) > 1:
         folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
             
-    # ST_FOLIUM VIEWPORT LOCK: Passing center and zoom locks the frontend map exactly in place
-    map_data = st_folium(
-        m_draft, 
-        center=center_val, 
-        zoom=zoom_val, 
-        height=450, 
-        use_container_width=True, 
-        returned_objects=["last_object_clicked", "center", "zoom"], 
-        key="draft_map"
-    )
+    map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked", "center", "zoom"], key="draft_map")
     
     if map_data:
         if map_data.get("center"):

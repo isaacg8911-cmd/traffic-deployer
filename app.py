@@ -14,10 +14,16 @@ from streamlit_folium import st_folium
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from streamlit_geolocation import streamlit_geolocation
-from streamlit_cookies_manager import CookieManager # NEW: Required for Auto-Login
+
+# --- TITANIUM SAFETY NET FOR COOKIES ---
+try:
+    from streamlit_cookies_manager import CookieManager
+    HAS_COOKIES = True
+except ImportError:
+    HAS_COOKIES = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.93", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.94", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -53,20 +59,27 @@ def set_theme(theme_choice):
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 
 # --- COOKIE MANAGER SETUP (FOR AUTO-LOGIN) ---
-cookies = CookieManager()
-if not cookies.ready():
-    st.stop() # Wait for cookies to load
+if HAS_COOKIES:
+    cookies = CookieManager()
+    if not cookies.ready():
+        st.stop() # Wait for cookies to load
+else:
+    cookies = {} # Dummy dictionary if library is missing so app doesn't crash
 
 # --- 1. AUTO-PROVISIONING LOGIN SCREEN ---
 if "driver_name" not in st.session_state:
     # Check if a cookie exists from a previous suspended Chrome session
-    if "tds_driver_cookie" in cookies:
+    if HAS_COOKIES and "tds_driver_cookie" in cookies and cookies["tds_driver_cookie"]:
         st.session_state.driver_name = cookies["tds_driver_cookie"]
         st.rerun()
     else:
         st.title("🚦 TRAFFIC DATA SERVICE")
         st.info("Enter your Name/ID. If this is your first time, your workspace will be created automatically.")
         
+        # Show a small warning if cookies aren't installed so you know why auto-login isn't working
+        if not HAS_COOKIES:
+            st.warning("⚠️ Auto-Login disabled. Add `streamlit-cookies-manager` to your requirements.txt to fix Chrome refreshing.")
+            
         with st.form("login_form"):
             username_input = st.text_input("DRIVER NAME:").strip().upper()
             submitted = st.form_submit_button("🚀 START SHIFT", use_container_width=True)
@@ -75,8 +88,9 @@ if "driver_name" not in st.session_state:
                 if username_input:
                     st.session_state.driver_name = username_input
                     # Set the tracking cookie so Chrome remembers who you are
-                    cookies["tds_driver_cookie"] = username_input
-                    cookies.save()
+                    if HAS_COOKIES:
+                        cookies["tds_driver_cookie"] = username_input
+                        cookies.save()
                     st.rerun()
                 else:
                     st.error("❌ Please enter a name to continue.")
@@ -100,7 +114,7 @@ if "init" not in st.session_state:
         st.session_state.site_data = {}
         st.session_state.current_index, st.session_state.pickup_index = 0, 0
         st.session_state.mission_type = "📍 INSTALLATION"
-        st.session_state.upload_strategy = "📌 Keep Maps Separate (Day-by-Day)" # Track how they uploaded
+        st.session_state.upload_strategy = "📌 Keep Maps Separate (Day-by-Day)" 
         
     st.session_state.last_install_msg = None
     st.session_state.last_pickup_msg = None
@@ -183,7 +197,7 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
     st.session_state.site_data = {}
     st.session_state.last_install_msg = None
     st.session_state.last_pickup_msg = None
-    st.session_state.upload_strategy = route_strategy # Track this for later UI decisions
+    st.session_state.upload_strategy = route_strategy 
     
     excel_data = {}
     for f in excel_files:
@@ -231,14 +245,12 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
     if final_raw:
         global_best_route = []
         
-        # MULTI-DAY ROUTING ENGINE
         if route_strategy == "📌 Keep Maps Separate (Day-by-Day)":
             for cfg in est_configs:
                 sheet_name = cfg['label']
                 sheet_raw = [x for x in final_raw if x['sheet'] == sheet_name]
                 if not sheet_raw: continue
                 
-                # Reset starting coordinates to yard for EACH day
                 master_route, curr = [], st.session_state.home_coords
                 temp_raw = list(sheet_raw)
                 while temp_raw:
@@ -260,7 +272,7 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
                         best_route = opt_route
                 global_best_route.extend(best_route)
                 
-        else: # Merged Mega-Route
+        else: 
             master_route, curr = [], st.session_state.home_coords
             temp_raw = list(final_raw)
             while temp_raw:
@@ -337,11 +349,10 @@ col_logo, col_logout = st.columns([3, 1])
 with col_logo: st.title(f"🚦 Ops: {st.session_state.driver_name}")
 with col_logout:
     if st.button("LOGOUT", use_container_width=True):
-        # Clear the Tracking Cookie so the browser forgets the driver
-        del cookies["tds_driver_cookie"]
-        cookies.save()
-        
-        # Surgical Wipe
+        if HAS_COOKIES and "tds_driver_cookie" in cookies:
+            del cookies["tds_driver_cookie"]
+            cookies.save()
+            
         keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy"]
         for k in keys_to_wipe:
             if k in st.session_state:
@@ -428,7 +439,6 @@ else:
         auto_save()
         st.rerun()
     
-    # UI FIX: If they chose "Merge Maps", lock the filter to "All Days" so the app doesn't glitch.
     if st.session_state.get("upload_strategy") == "🔗 Merge All Maps into One Route":
         available_days = ["All Days"]
         selected_day = "All Days"
@@ -497,7 +507,7 @@ else:
             skipped = sd.get("Skipped") == "x"
             status_icon = '❌' if skipped else ('✅' if done else '🟠')
             if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
-                st.session_state.current_index = next(i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid'])
+                st.session_state.current_index = next((i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid']), 0)
                 st.rerun()
                 
         if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
@@ -524,7 +534,7 @@ else:
             new_street = st.text_input("📍 STREET NAME (Edit if incorrect):", value=display_street)
             st.session_state.site_data[s['uid']]['Street'] = str(new_street).strip()
             
-            st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/dir/Current+Location/...{safe_lat},{safe_lon}", use_container_width=True)
+            st.link_button("🚗 NAV TO INTERSECTION NODE", f"https://www.google.com/maps/dir/Current+Location/{safe_lat},{safe_lon}", use_container_width=True)
             
             batch = []
             try:
@@ -538,7 +548,7 @@ else:
                 pass
                         
             if len(batch) > 1: 
-                st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", f"https://www.google.com/maps/dir/Current+Location/...{'/'.join(batch)}", use_container_width=True)
+                st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", f"https://www.google.com/maps/dir/Current+Location/{'/'.join(batch)}", use_container_width=True)
             
             with st.form(f"form_{s['uid']}"):
                 st.info("🎙️ **VOICE PARSER:** Type or dictate notes below.")
@@ -740,7 +750,7 @@ else:
                         p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                         st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                         
-                        st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/Current+Location/...{p_lat},{p_lon}", use_container_width=True)
+                        st.link_button("🚗 NAV TO FIELD GPS", f"https://www.google.com/maps/dir/Current+Location/{p_lat},{p_lon}", use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
                             st.session_state.site_data[s['UID']]["Picked up"] = "x"

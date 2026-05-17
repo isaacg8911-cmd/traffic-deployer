@@ -29,7 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.102", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.103", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -131,7 +131,7 @@ defaults = {
     "active_files": [],
     "optimized_route": [],
     "raw_nodes": [], 
-    "draft_route": [], 
+    "manual_sequence": [], # Tracks the UIDs the user has tapped
     "routing_phase": "upload", 
     "site_data": {},
     "current_index": 0,
@@ -146,12 +146,7 @@ defaults = {
     "pickup_target": "All Maps (Merged)",
     "pickup_sort_method": "🔄 Route Efficiency",
     "show_pickup_map": False,
-    # Interactive Map States:
-    "force_start_uid": None,
-    "force_end_uid": None,
-    "swap_first_uid": None,
     "last_processed_click": None,
-    "last_map_tool": "🎯 Set First Stop",
     "init": True
 }
 
@@ -195,11 +190,10 @@ def get_street_from_coords(lat, lon):
         headers = {'User-Agent': f'TDS-Traffic-Ops-{st.session_state.session_id}/1.0'}
         resp = requests.get(url, headers=headers, timeout=3).json()
         if 'address' in resp and 'road' in resp['address']:
-            return resp['address']['road'] # Explicitly grabs ROAD ONLY. No house numbers.
+            return resp['address']['road'] # Explicitly grabs ROAD ONLY.
     except Exception: pass
     return ""
 
-# --- STRICT PROXIMITY CHAIN ROUTING ENGINE ---
 def haversine_dist(lat1, lon1, lat2, lon2):
     R = 6371.0 
     dlat = math.radians(lat2 - lat1)
@@ -208,60 +202,21 @@ def haversine_dist(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-def solve_tsp_fixed(nodes_list, start_node=None, end_node=None):
-    """
-    Sweeps nearest neighbor strictly, respecting the forced Start and End nodes.
-    """
+def solve_tsp_fixed(nodes_list, start_coords):
+    """Fallback Auto-Solver for Pick-ups or 'Auto-Finish' feature"""
     if not nodes_list: return []
     unvisited = list(nodes_list)
     route = []
     
-    if start_node and start_node in unvisited:
-        curr = start_node
-        unvisited.remove(start_node)
-    else:
-        # If no start node forced, grab the one closest to the Home Origin GPS
-        curr = min(unvisited, key=lambda x: haversine_dist(st.session_state.home_coords[0], st.session_state.home_coords[1], x['nav_lat'], x['nav_lon']))
-        unvisited.remove(curr)
+    curr_lat, curr_lon = start_coords
         
-    route.append(curr)
-    
-    # Hide the end_node so we don't accidentally grab it in the middle of the route
-    hidden_end = None
-    if end_node and end_node in unvisited and end_node != curr:
-        hidden_end = end_node
-        unvisited.remove(end_node)
-        
-    # Strict Nearest Neighbor: Cannot jump, must take the absolute closest dot
     while unvisited:
-        next_node = min(unvisited, key=lambda x: haversine_dist(curr['nav_lat'], curr['nav_lon'], x['nav_lat'], x['nav_lon']))
+        next_node = min(unvisited, key=lambda x: haversine_dist(curr_lat, curr_lon, x['nav_lat'], x['nav_lon']))
         route.append(next_node)
-        curr = next_node
+        curr_lat, curr_lon = next_node['nav_lat'], next_node['nav_lon']
         unvisited.remove(next_node)
         
-    # Append the locked end node at the very end
-    if hidden_end:
-        route.append(hidden_end)
-        
     return route
-
-def recalculate_draft_route():
-    """Reads the Raw Nodes and rebuilds the draft route using forced start/end pins."""
-    start_n = next((n for n in st.session_state.raw_nodes if n['uid'] == st.session_state.force_start_uid), None)
-    end_n = next((n for n in st.session_state.raw_nodes if n['uid'] == st.session_state.force_end_uid), None)
-    
-    if st.session_state.upload_strategy == "📌 Keep Maps Separate (Day-by-Day)":
-        new_draft = []
-        for cfg_label in st.session_state.active_files:
-            sheet_raw = [x for x in st.session_state.raw_nodes if x['sheet'] == cfg_label]
-            if sheet_raw:
-                s_node = start_n if start_n in sheet_raw else None
-                e_node = end_n if end_n in sheet_raw else None
-                new_draft.extend(solve_tsp_fixed(sheet_raw, s_node, e_node))
-        st.session_state.draft_route = new_draft
-    else:
-        st.session_state.draft_route = solve_tsp_fixed(st.session_state.raw_nodes, start_n, end_n)
-    auto_save()
 
 def process_upload(est_configs, excel_files, m_type, route_strategy):
     st.session_state.optimized_route = []
@@ -269,9 +224,7 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
     st.session_state.last_install_msg = None
     st.session_state.last_pickup_msg = None
     st.session_state.upload_strategy = route_strategy 
-    st.session_state.force_start_uid = None
-    st.session_state.force_end_uid = None
-    st.session_state.swap_first_uid = None
+    st.session_state.manual_sequence = []
     st.session_state.last_processed_click = None
     
     excel_data = {}
@@ -322,8 +275,6 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
         st.session_state.raw_nodes = final_raw
         st.session_state.active_files = [c['label'] for c in est_configs]
         st.session_state.mission_type = m_type
-        
-        recalculate_draft_route() # Runs the TSP math to fill draft_route
         st.session_state.routing_phase = "drafting"
         auto_save()
         return True, len(final_raw)
@@ -368,7 +319,7 @@ with col_logout:
             del cookies["tds_driver_cookie"]
             cookies.save()
             
-        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav", "auto_open_url", "routing_phase", "raw_nodes", "draft_route", "force_start_uid", "force_end_uid", "swap_first_uid", "last_processed_click", "last_map_tool"]
+        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav", "auto_open_url", "routing_phase", "raw_nodes", "manual_sequence", "last_processed_click"]
         for k in keys_to_wipe:
             if k in st.session_state:
                 del st.session_state[k]
@@ -457,7 +408,7 @@ if st.session_state.routing_phase == "upload":
             else: 
                 st.error("Sync error. No matching sites found.")
 
-# --- DRAFTING PHASE (INTERACTIVE COMMAND CENTER) ---
+# --- DRAFTING PHASE (LIVE TAPPING ENGINE) ---
 elif st.session_state.routing_phase == "drafting":
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: 
@@ -467,69 +418,48 @@ elif st.session_state.routing_phase == "drafting":
         
     map_tiles = "CartoDB dark_matter" if st.session_state.theme == "☁️ Overcast (Standard)" else "CartoDB positron"
     
-    st.subheader("🗺️ INTERACTIVE COMMAND CENTER")
-    st.info("Tap a dot on the map to modify your route based on the selected tool.")
+    total_nodes = len(st.session_state.raw_nodes)
+    tapped_count = len(st.session_state.manual_sequence)
     
-    # Map Tool Selector & Bug-Proofing
-    cmd_mode = st.radio("🛠️ MAP TOOL:", ["🎯 Set First Stop", "🏁 Set Last Stop", "🔄 Swap Sequence"], horizontal=True)
+    st.subheader(f"🗺️ LIVE ROUTE BUILDER ({tapped_count}/{total_nodes} Sequenced)")
+    st.info("Tap the orange dots on the map to set your driving sequence. They will turn green and connect automatically.")
     
-    # If the user switches tools, clear the click-cache so the map doesn't get stuck
-    if cmd_mode != st.session_state.last_map_tool:
-        st.session_state.last_map_tool = cmd_mode
-        st.session_state.last_processed_click = None
-        st.session_state.swap_first_uid = None
-    
-    if cmd_mode == "🔄 Swap Sequence":
-        if st.session_state.swap_first_uid:
-            st.warning(f"Tap a second dot on the map to swap with Site {next((s['id'] for s in st.session_state.draft_route if s['uid'] == st.session_state.swap_first_uid), 'Unknown')}.")
-        else:
-            st.write("Tap the first dot on the map you want to move.")
-            
-    # 1. Draw the Draft Map
     hc = st.session_state.home_coords
     m_draft = folium.Map(location=hc, zoom_start=11, tiles=map_tiles)
     folium.Marker(hc, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_draft)
-    route_coords = [hc]
     
-    for idx, s in enumerate(st.session_state.draft_route):
-        route_coords.append((s['nav_lat'], s['nav_lon']))
-        
-        # Determine Color Coding based on Commands
-        node_color = "#FFA500" # Default Orange
-        if s['uid'] == st.session_state.force_start_uid:
-            node_color = "#00FF00" # Green for Start
-        elif s['uid'] == st.session_state.force_end_uid:
-            node_color = "#FF0000" # Red for End
-        elif s['uid'] == st.session_state.swap_first_uid:
-            node_color = "#8A2BE2" # Purple for Pending Swap
+    path_coords = []
+    
+    # Draw the Sequenced Nodes (Green)
+    for idx, uid in enumerate(st.session_state.manual_sequence):
+        node = next((n for n in st.session_state.raw_nodes if n['uid'] == uid), None)
+        if node:
+            path_coords.append((node['nav_lat'], node['nav_lon']))
+            folium.CircleMarker(
+                location=(node['nav_lat'], node['nav_lon']), radius=10, color="#00FF00", fill=True, fill_color="#00FF00", fill_opacity=0.9,
+                popup=f"Stop {idx+1}: Site {node['id']}"
+            ).add_to(m_draft)
             
+            folium.Marker(
+                location=(node['nav_lat'], node['nav_lon']),
+                icon=DivIcon(
+                    icon_size=(20,20),
+                    icon_anchor=(10,10),
+                    html=f'<div style="font-size: 10pt; color: black; font-weight: 900; text-align: center; line-height: 20px;">{idx+1}</div>',
+                )
+            ).add_to(m_draft)
+            
+    # Draw the Unsequenced Nodes (Orange, Blank)
+    unsequenced = [n for n in st.session_state.raw_nodes if n['uid'] not in st.session_state.manual_sequence]
+    for node in unsequenced:
         folium.CircleMarker(
-            location=(s['nav_lat'], s['nav_lon']), radius=10, color=node_color, fill=True, fill_color=node_color, fill_opacity=0.9,
-            popup=f"Stop {idx+1}: Site {s['id']}"
+            location=(node['nav_lat'], node['nav_lon']), radius=8, color="#FFA500", fill=True, fill_color="#FFA500", fill_opacity=0.7,
+            popup=f"Site {node['id']} (Untapped)"
         ).add_to(m_draft)
-        
-        folium.Marker(
-            location=(s['nav_lat'], s['nav_lon']),
-            icon=DivIcon(
-                icon_size=(20,20),
-                icon_anchor=(10,10),
-                html=f'<div style="font-size: 10pt; color: black; font-weight: 900; text-align: center; line-height: 20px;">{idx+1}</div>',
-            )
-        ).add_to(m_draft)
-        
-    if len(route_coords) > 1:
-        chunk_size = 50
-        for i in range(0, len(route_coords) - 1, chunk_size - 1):
-            chunk = route_coords[i:i + chunk_size]
-            coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
-            osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
-            try:
-                resp = requests.get(osrm_url, timeout=3).json()
-                if resp.get('code') == 'Ok':
-                    route_geo = resp['routes'][0]['geometry']['coordinates']
-                    route_points = [(lat, lon) for lon, lat in route_geo]
-                    folium.PolyLine(route_points, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=4, opacity=0.7).add_to(m_draft)
-            except: pass 
+
+    # Fast PolyLine for the drafted path
+    if len(path_coords) > 1:
+        folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
             
     # Capture Map Clicks
     map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked"], key="draft_map")
@@ -539,78 +469,85 @@ elif st.session_state.routing_phase == "drafting":
         click_lon = map_data["last_object_clicked"]["lng"]
         click_id = f"{click_lat}_{click_lon}"
         
-        # Debounce: Prevent infinite loops if map reruns
+        # Debounce click
         if click_id != st.session_state.last_processed_click:
             st.session_state.last_processed_click = click_id
             
-            # Find the clicked site
+            # Find the clicked site (within 200 meters)
             min_dist = float('inf')
             clicked_uid = None
-            for s in st.session_state.draft_route:
+            for s in st.session_state.raw_nodes:
                 dist = haversine_dist(click_lat, click_lon, s['nav_lat'], s['nav_lon'])
                 if dist < min_dist:
                     min_dist = dist
                     clicked_uid = s['uid']
                     
-            if clicked_uid and min_dist < 0.1: # Must click within 100 meters
-                
-                # Execute tool command
-                if cmd_mode == "🎯 Set First Stop":
-                    st.session_state.force_start_uid = clicked_uid
-                    recalculate_draft_route()
+            if clicked_uid and min_dist < 0.2:
+                # If they tapped an orange dot, append it to the sequence
+                if clicked_uid not in st.session_state.manual_sequence:
+                    st.session_state.manual_sequence.append(clicked_uid)
+                    auto_save()
                     st.rerun()
-                    
-                elif cmd_mode == "🏁 Set Last Stop":
-                    st.session_state.force_end_uid = clicked_uid
-                    recalculate_draft_route()
-                    st.rerun()
-                    
-                elif cmd_mode == "🔄 Swap Sequence":
-                    if not st.session_state.swap_first_uid:
-                        st.session_state.swap_first_uid = clicked_uid
-                        st.rerun()
-                    else:
-                        if clicked_uid == st.session_state.swap_first_uid:
-                            # User clicked same dot twice to cancel
-                            st.session_state.swap_first_uid = None
-                        else:
-                            # Swap them in the draft_route list
-                            uids = [x['uid'] for x in st.session_state.draft_route]
-                            idx_a = uids.index(st.session_state.swap_first_uid)
-                            idx_b = uids.index(clicked_uid)
-                            st.session_state.draft_route[idx_a], st.session_state.draft_route[idx_b] = st.session_state.draft_route[idx_b], st.session_state.draft_route[idx_a]
-                            st.session_state.swap_first_uid = None
-                        auto_save()
-                        st.rerun()
 
-    # List Preview
-    with st.expander("📋 VIEW ITINERARY LIST", expanded=True):
-        draft_df = pd.DataFrame([{
-            "Stop #": idx + 1,
-            "Site ID": s['id'],
-            "Map/Sheet": s['sheet']
-        } for idx, s in enumerate(st.session_state.draft_route)])
-        st.dataframe(draft_df, use_container_width=True)
-    
+    # Controls
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("⏪ UNDO LAST TAP", use_container_width=True):
+            if len(st.session_state.manual_sequence) > 0:
+                st.session_state.manual_sequence.pop()
+                st.session_state.last_processed_click = None # Reset click memory
+                auto_save()
+                st.rerun()
+    with c2:
+        if st.button("🤖 AUTO-FINISH", use_container_width=True):
+            if unsequenced:
+                # Find where to start the auto-math
+                if len(st.session_state.manual_sequence) > 0:
+                    last_tapped_uid = st.session_state.manual_sequence[-1]
+                    last_node = next((n for n in st.session_state.raw_nodes if n['uid'] == last_tapped_uid))
+                    start_coords = (last_node['nav_lat'], last_node['nav_lon'])
+                else:
+                    start_coords = st.session_state.home_coords
+                    
+                # Auto-solve the remaining dots
+                auto_route = solve_tsp_fixed(unsequenced, start_coords)
+                for n in auto_route:
+                    st.session_state.manual_sequence.append(n['uid'])
+                auto_save()
+                st.rerun()
+    with c3:
+        if st.button("🗑️ CLEAR MAP", use_container_width=True):
+            st.session_state.manual_sequence = []
+            st.session_state.last_processed_click = None
+            auto_save()
+            st.rerun()
+
     st.divider()
     
     # Finalize
-    if st.button("✅ FINALIZE & START SHIFT", use_container_width=True):
-        st.session_state.optimized_route = st.session_state.draft_route
-        st.session_state.site_data = {
-            s['uid']: {
-                "Date": "", "Time": "", "ExactTime": "", "Site": s['id'], "UID": s['uid'], "Counter": "c1b",
-                "Serial": "", "Directions": "n", "Lanes": 2, "Street": s['street'], "Notes": "", "Installed": "",
-                "LAT": s['nav_lat'], "LON": s['nav_lon'], "Skipped": "", "Sheet": s['sheet']
-            } for s in st.session_state.optimized_route
-        }
-        st.session_state.routing_phase = "finalized"
-        auto_save()
-        st.rerun()
-        
-    if st.button("🗑️ CANCEL & CLEAR DEVICE"):
+    if tapped_count > 0:
+        if st.button(f"✅ FINALIZE ROUTE ({tapped_count} Stops)", use_container_width=True):
+            # Build optimized route from the manual sequence ONLY
+            st.session_state.optimized_route = []
+            for uid in st.session_state.manual_sequence:
+                node = next((n for n in st.session_state.raw_nodes if n['uid'] == uid))
+                st.session_state.optimized_route.append(node)
+                
+            st.session_state.site_data = {
+                s['uid']: {
+                    "Date": "", "Time": "", "ExactTime": "", "Site": s['id'], "UID": s['uid'], "Counter": "c1b",
+                    "Serial": "", "Directions": "n", "Lanes": 2, "Street": s['street'], "Notes": "", "Installed": "",
+                    "LAT": s['nav_lat'], "LON": s['nav_lon'], "Skipped": "", "Sheet": s['sheet']
+                } for s in st.session_state.optimized_route
+            }
+            st.session_state.routing_phase = "finalized"
+            auto_save()
+            st.rerun()
+            
+    if st.button("❌ CANCEL & RESTART"):
         if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
-        keys_to_wipe = ["optimized_route", "raw_nodes", "draft_route", "routing_phase", "force_start_uid", "force_end_uid", "swap_first_uid", "last_processed_click", "last_map_tool"]
+        keys_to_wipe = ["optimized_route", "raw_nodes", "manual_sequence", "routing_phase", "last_processed_click"]
         for k in keys_to_wipe:
             if k in st.session_state: del st.session_state[k]
         st.session_state.routing_phase = "upload"
@@ -699,7 +636,7 @@ elif st.session_state.routing_phase == "finalized":
                 
         if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
-            keys_to_wipe = ["optimized_route", "raw_nodes", "draft_route", "routing_phase", "site_data", "force_start_uid", "force_end_uid", "swap_first_uid", "last_processed_click"]
+            keys_to_wipe = ["optimized_route", "raw_nodes", "manual_sequence", "routing_phase", "site_data"]
             for k in keys_to_wipe:
                 if k in st.session_state: del st.session_state[k]
             st.session_state.routing_phase = "upload"
@@ -886,7 +823,7 @@ elif st.session_state.routing_phase == "finalized":
                 raw_itin.sort(key=lambda x: x.get('ExactTime', ''))
                 itin = raw_itin
             else:
-                itin = [site['sd'] for site in solve_tsp_fixed([{'uid': sd['UID'], 'nav_lat': float(sd['LAT']), 'nav_lon': float(sd['LON']), 'sd': sd} for sd in raw_itin])]
+                itin = [site['sd'] for site in solve_tsp_fixed([{'uid': sd['UID'], 'nav_lat': float(sd['LAT']), 'nav_lon': float(sd['LON']), 'sd': sd} for sd in raw_itin], st.session_state.home_coords)]
                 
             if st.session_state.pickup_index >= len(itin):
                 st.session_state.pickup_index = max(0, len(itin) - 1)

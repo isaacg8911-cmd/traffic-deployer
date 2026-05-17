@@ -29,7 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.104", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.105", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -147,8 +147,8 @@ defaults = {
     "pickup_sort_method": "🔄 Route Efficiency",
     "show_pickup_map": False,
     "last_processed_click": None,
-    "map_center": None, # Tracks the user's pan location
-    "map_zoom": None,   # Tracks the user's zoom level
+    "map_center": None, 
+    "map_zoom": None,   
     "init": True
 }
 
@@ -168,7 +168,6 @@ def auto_save():
             json.dump(payload, f, default=str)
     except Exception: pass
 
-# --- AUTO-FRAMING BOUNDING BOX CALCULATION ---
 def get_map_bounds(nodes, home_coords):
     if not nodes: return None
     lats = [home_coords[0]] + [n.get('nav_lat', n.get('LAT')) for n in nodes if n.get('nav_lat') or n.get('LAT')]
@@ -176,7 +175,6 @@ def get_map_bounds(nodes, home_coords):
     if not lats or not lons: return None
     return [[min(lats), min(lons)], [max(lats), max(lons)]]
 
-# --- DUAL-ENGINE GEOCODER & REVERSE GEOCODER ---
 def geocode_address(address):
     try:
         url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address={requests.utils.quote(address)}&benchmark=Public_AR_Current&format=json"
@@ -272,11 +270,19 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
             match = re.search(r'\b' + re.escape(sid) + r'\b', raw_map)
             if match:
                 best_node = min(data['nodes'], key=lambda n: haversine_dist(st.session_state.home_coords[0], st.session_state.home_coords[1], n[0], n[1]))
+                best_node_lat, best_node_lon = best_node[0], best_node[1]
+                
+                # MICRO-JITTER UPGRADE: Unstacks overlapping dots so they can both be tapped
+                overlap_count = sum(1 for n in final_raw if abs(n['nav_lat'] - best_node_lat) < 0.00001 and abs(n['nav_lon'] - best_node_lon) < 0.00001)
+                if overlap_count > 0:
+                    best_node_lat += 0.00005 * overlap_count
+                    best_node_lon += 0.00005 * overlap_count
+                    
                 final_raw.append({
                     "id": sid, 
                     "uid": f"{cfg['label']}_{sid}", 
-                    "nav_lat": best_node[0],
-                    "nav_lon": best_node[1],
+                    "nav_lat": best_node_lat,
+                    "nav_lon": best_node_lon,
                     "sheet": cfg['label'], 
                     "street": data['street']
                 })
@@ -418,7 +424,7 @@ if st.session_state.routing_phase == "upload":
             else: 
                 st.error("Sync error. No matching sites found.")
 
-# --- DRAFTING PHASE (LIVE TAPPING ENGINE) ---
+# --- DRAFTING PHASE (LIVE TAPPING ENGINE WITH SMART INSERTION) ---
 elif st.session_state.routing_phase == "drafting":
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: 
@@ -430,19 +436,17 @@ elif st.session_state.routing_phase == "drafting":
     
     total_nodes = len(st.session_state.raw_nodes)
     tapped_count = len(st.session_state.manual_sequence)
-    
-    st.subheader(f"🗺️ LIVE ROUTE BUILDER ({tapped_count}/{total_nodes} Sequenced)")
-    st.info("Tap the orange dots on the map to set your driving sequence. The map will remember where you zoom.")
-    
     hc = st.session_state.home_coords
     
-    # Persistent Viewport Memory Logic
+    st.subheader(f"🗺️ LIVE ROUTE BUILDER ({tapped_count}/{total_nodes} Sequenced)")
+    st.info("Tap the orange dots on the map to sequence them. Or hit Smart Auto-Finish below.")
+    
     if st.session_state.map_center and st.session_state.map_zoom:
         m_draft = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom, tiles=map_tiles)
     else:
         m_draft = folium.Map(location=hc, zoom_start=11, tiles=map_tiles)
         bounds = get_map_bounds(st.session_state.raw_nodes, hc)
-        if bounds: m_draft.fit_bounds(bounds) # Auto-Frames all dots perfectly
+        if bounds: m_draft.fit_bounds(bounds) 
         
     folium.Marker(hc, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_draft)
     
@@ -476,10 +480,8 @@ elif st.session_state.routing_phase == "drafting":
     if len(path_coords) > 1:
         folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
             
-    # Capture map clicks and Viewport info
     map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked", "center", "zoom"], key="draft_map")
     
-    # Save the exact pan/zoom so it doesn't reset on the user
     if map_data:
         if map_data.get("center"):
             st.session_state.map_center = [map_data["center"]["lat"], map_data["center"]["lng"]]
@@ -518,18 +520,43 @@ elif st.session_state.routing_phase == "drafting":
                 auto_save()
                 st.rerun()
     with c2:
-        if st.button("🤖 AUTO-FINISH", use_container_width=True):
+        if st.button("🤖 SMART AUTO-FINISH", use_container_width=True):
             if unsequenced:
-                if len(st.session_state.manual_sequence) > 0:
-                    last_tapped_uid = st.session_state.manual_sequence[-1]
-                    last_node = next((n for n in st.session_state.raw_nodes if n['uid'] == last_tapped_uid))
-                    start_coords = (last_node['nav_lat'], last_node['nav_lon'])
+                # SMART INSERTION HEURISTIC
+                if len(st.session_state.manual_sequence) == 0:
+                    auto_route = solve_tsp_fixed(unsequenced, hc)
+                    st.session_state.manual_sequence = [n['uid'] for n in auto_route]
                 else:
-                    start_coords = st.session_state.home_coords
-                    
-                auto_route = solve_tsp_fixed(unsequenced, start_coords)
-                for n in auto_route:
-                    st.session_state.manual_sequence.append(n['uid'])
+                    current_seq = list(st.session_state.manual_sequence)
+                    for u_node in unsequenced:
+                        best_insert_idx = len(current_seq)
+                        min_added_dist = float('inf')
+                        
+                        node_0 = next(n for n in st.session_state.raw_nodes if n['uid'] == current_seq[0])
+                        d_home_u = haversine_dist(hc[0], hc[1], u_node['nav_lat'], u_node['nav_lon'])
+                        d_u_0 = haversine_dist(u_node['nav_lat'], u_node['nav_lon'], node_0['nav_lat'], node_0['nav_lon'])
+                        d_home_0 = haversine_dist(hc[0], hc[1], node_0['nav_lat'], node_0['nav_lon'])
+                        if (d_home_u + d_u_0 - d_home_0) < min_added_dist:
+                            min_added_dist = (d_home_u + d_u_0 - d_home_0)
+                            best_insert_idx = 0
+                            
+                        for i in range(len(current_seq) - 1):
+                            n_a = next(n for n in st.session_state.raw_nodes if n['uid'] == current_seq[i])
+                            n_b = next(n for n in st.session_state.raw_nodes if n['uid'] == current_seq[i+1])
+                            d_a_u = haversine_dist(n_a['nav_lat'], n_a['nav_lon'], u_node['nav_lat'], u_node['nav_lon'])
+                            d_u_b = haversine_dist(u_node['nav_lat'], u_node['nav_lon'], n_b['nav_lat'], n_b['nav_lon'])
+                            d_a_b = haversine_dist(n_a['nav_lat'], n_a['nav_lon'], n_b['nav_lat'], n_b['nav_lon'])
+                            if (d_a_u + d_u_b - d_a_b) < min_added_dist:
+                                min_added_dist = (d_a_u + d_u_b - d_a_b)
+                                best_insert_idx = i + 1
+                                
+                        n_last = next(n for n in st.session_state.raw_nodes if n['uid'] == current_seq[-1])
+                        added = haversine_dist(n_last['nav_lat'], n_last['nav_lon'], u_node['nav_lat'], u_node['nav_lon'])
+                        if added < min_added_dist:
+                            best_insert_idx = len(current_seq)
+                            
+                        current_seq.insert(best_insert_idx, u_node['uid'])
+                    st.session_state.manual_sequence = current_seq
                 auto_save()
                 st.rerun()
     with c3:
@@ -557,7 +584,6 @@ elif st.session_state.routing_phase == "drafting":
                     "LAT": s['nav_lat'], "LON": s['nav_lon'], "Skipped": "", "Sheet": s['sheet']
                 } for s in st.session_state.optimized_route
             }
-            # Clear Map Memory so working tabs load cleanly bounded
             st.session_state.map_center = None 
             st.session_state.map_zoom = None
             st.session_state.routing_phase = "finalized"
@@ -601,7 +627,6 @@ elif st.session_state.routing_phase == "finalized":
         hc = st.session_state.home_coords
         m = folium.Map(location=hc, zoom_start=11, tiles=map_tiles)
         
-        # Auto-Frame Bounds
         bounds = get_map_bounds(active_route, hc)
         if bounds: m.fit_bounds(bounds)
         
@@ -861,7 +886,6 @@ elif st.session_state.routing_phase == "finalized":
                 st.success(f"TACTICAL PICK-UP MAP: {len(itin)} Secured Sites")
                 m_pickup = folium.Map(location=st.session_state.home_coords, zoom_start=11, tiles=map_tiles)
                 
-                # Auto-Frame Bounds
                 bounds = get_map_bounds(itin, st.session_state.home_coords)
                 if bounds: m_pickup.fit_bounds(bounds)
                 

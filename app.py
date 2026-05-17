@@ -29,7 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.99", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.100", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -130,6 +130,9 @@ defaults = {
     "home_coords": (33.7715, -117.9431),
     "active_files": [],
     "optimized_route": [],
+    "raw_nodes": [], # Holds raw data for drafting
+    "draft_route": [], # Holds the pre-finalized route
+    "routing_phase": "upload", # upload -> drafting -> finalized
     "site_data": {},
     "current_index": 0,
     "pickup_index": 0,
@@ -190,7 +193,7 @@ def get_street_from_coords(lat, lon):
     except Exception: pass
     return ""
 
-# --- STRICT PROXIMITY CHAIN ROUTING ENGINE (FIXED NUMBERING) ---
+# --- PURE PROXIMITY SOLVER ---
 def haversine_dist(lat1, lon1, lat2, lon2):
     R = 6371.0 
     dlat = math.radians(lat2 - lat1)
@@ -199,22 +202,40 @@ def haversine_dist(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-def solve_tsp(nodes_list, home_coords):
+def solve_tsp_fixed(nodes_list, start_node=None, end_node=None):
     """
-    Pure Nearest-Neighbor sequence.
-    Guarantees human-readable numbering by always jumping to the absolute closest dot.
+    Sweeps nearest neighbor strictly, respecting the forced Start and End nodes.
     """
     if not nodes_list: return []
-    
     unvisited = list(nodes_list)
     route = []
-    curr = home_coords
     
+    if start_node and start_node in unvisited:
+        curr = start_node
+        unvisited.remove(start_node)
+    else:
+        # If no start node forced, grab the one closest to the Home Origin GPS
+        curr = min(unvisited, key=lambda x: haversine_dist(st.session_state.home_coords[0], st.session_state.home_coords[1], x['nav_lat'], x['nav_lon']))
+        unvisited.remove(curr)
+        
+    route.append(curr)
+    
+    # Hide the end_node so we don't accidentally grab it in the middle of the route
+    hidden_end = None
+    if end_node and end_node in unvisited and end_node != curr:
+        hidden_end = end_node
+        unvisited.remove(end_node)
+        
+    # Strict Nearest Neighbor: Cannot jump, must take the absolute closest dot
     while unvisited:
-        next_node = min(unvisited, key=lambda x: haversine_dist(curr[0], curr[1], x['nav_lat'], x['nav_lon']))
+        next_node = min(unvisited, key=lambda x: haversine_dist(curr['nav_lat'], curr['nav_lon'], x['nav_lat'], x['nav_lon']))
         route.append(next_node)
-        curr = (next_node['nav_lat'], next_node['nav_lon'])
+        curr = next_node
         unvisited.remove(next_node)
+        
+    # Append the locked end node at the very end
+    if hidden_end:
+        route.append(hidden_end)
         
     return route
 
@@ -237,9 +258,7 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
                 id_c = next((c for c in df.columns if any(x in c.lower() for x in ['tds', 'site', 'id'])), df.columns[0])
                 b_lat_c = next((c for c in df.columns if 'begin_lat' in c.lower()), next((c for c in df.columns if 'lat' in c.lower()), None))
                 b_lon_c = next((c for c in df.columns if 'begin_lon' in c.lower()), next((c for c in df.columns if 'lon' in c.lower()), None))
-                e_lat_c = next((c for c in df.columns if 'end_lat' in c.lower()), None)
-                e_lon_c = next((c for c in df.columns if 'end_lon' in c.lower()), None)
-
+                
                 if b_lat_c and b_lon_c:
                     for _, row in df.iterrows():
                         sid = str(row[id_c]).split('.')[0].strip()
@@ -248,10 +267,6 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
                                 b_lat, b_lon = float(row[b_lat_c]), float(row[b_lon_c])
                                 if 30.0 < b_lat < 40.0 and -125.0 < b_lon < -110.0:
                                     nodes = [(b_lat, b_lon)]
-                                    if e_lat_c and e_lon_c and pd.notna(row[e_lat_c]) and pd.notna(row[e_lon_c]):
-                                        e_lat, e_lon = float(row[e_lat_c]), float(row[e_lon_c])
-                                        if 30.0 < e_lat < 40.0 and -125.0 < e_lon < -110.0:
-                                            nodes.append((e_lat, e_lon))
                                     street_name = str(row.get('Street', f'Site {sid}'))
                                     excel_data[sid] = {"nodes": nodes, "street": street_name}
                             except Exception: pass
@@ -276,33 +291,24 @@ def process_upload(est_configs, excel_files, m_type, route_strategy):
                 })
 
     if final_raw:
-        global_best_route = []
-        if route_strategy == "📌 Keep Maps Separate (Day-by-Day)":
-            for cfg in est_configs:
-                sheet_name = cfg['label']
-                sheet_raw = [x for x in final_raw if x['sheet'] == sheet_name]
-                if not sheet_raw: continue
-                sheet_route = solve_tsp(sheet_raw, st.session_state.home_coords)
-                global_best_route.extend(sheet_route)
-        else: 
-            global_best_route = solve_tsp(final_raw, st.session_state.home_coords)
-            
-        st.session_state.optimized_route = global_best_route
+        st.session_state.raw_nodes = final_raw
         st.session_state.active_files = [c['label'] for c in est_configs]
-        
-        st.session_state.site_data = {
-            s['uid']: {
-                "Date": "", "Time": "", "ExactTime": "", "Site": s['id'], "UID": s['uid'], "Counter": "c1b",
-                "Serial": "", "Directions": "n", "Lanes": 2, "Street": s['street'], "Notes": "", "Installed": "",
-                "LAT": s['nav_lat'], "LON": s['nav_lon'], "Skipped": "", "Sheet": s['sheet']
-            } for s in global_best_route
-        }
-        
         st.session_state.mission_type = m_type
-        st.session_state.current_index = 0
-        st.session_state.pickup_index = 0
+        
+        # Calculate Initial Draft
+        if route_strategy == "📌 Keep Maps Separate (Day-by-Day)":
+            draft_rt = []
+            for cfg in est_configs:
+                sheet_raw = [x for x in final_raw if x['sheet'] == cfg['label']]
+                if sheet_raw:
+                    draft_rt.extend(solve_tsp_fixed(sheet_raw))
+            st.session_state.draft_route = draft_rt
+        else: 
+            st.session_state.draft_route = solve_tsp_fixed(final_raw)
+            
+        st.session_state.routing_phase = "drafting"
         auto_save()
-        return True, len(global_best_route)
+        return True, len(final_raw)
     return False, 0
 
 def parse_dictation(text, current_dr, current_ln, current_ser):
@@ -344,7 +350,7 @@ with col_logout:
             del cookies["tds_driver_cookie"]
             cookies.save()
             
-        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav", "auto_open_url"]
+        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav", "auto_open_url", "routing_phase", "raw_nodes", "draft_route"]
         for k in keys_to_wipe:
             if k in st.session_state:
                 del st.session_state[k]
@@ -354,11 +360,15 @@ if st.session_state.get("auto_open_url"):
     components.html(f"<script>window.open('{st.session_state.auto_open_url}', '_blank');</script>", height=0)
     st.session_state.auto_open_url = ""
 
-if not st.session_state.get("optimized_route"):
+# --- UPLOAD PHASE ---
+if st.session_state.routing_phase == "upload":
     restore_file = st.file_uploader("🔄 RESTORE BACKUP", type=["json"])
     if restore_file and st.button("🔓 LOAD BACKUP"):
         data = json.loads(restore_file.getvalue())
         for k, v in data.items(): st.session_state[k] = v
+        # Ensure older backups that were already loaded skip drafting
+        if "routing_phase" not in data and "optimized_route" in data and len(data["optimized_route"]) > 0:
+            st.session_state.routing_phase = "finalized"
         st.rerun()
         
     st.divider()
@@ -371,7 +381,6 @@ if not st.session_state.get("optimized_route"):
     with tab_gps:
         st.write("Grab your live phone/truck location:")
         if HAS_GPS:
-            # NO KEY PARAMETER: Fixes TypeError Crash
             loc_start = streamlit_geolocation()
             if loc_start and loc_start.get('latitude'):
                 current_lat = round(loc_start['latitude'], 4)
@@ -423,15 +432,143 @@ if not st.session_state.get("optimized_route"):
     
     if up_files and excel_files:
         configs = [{"file": f, "label": st.text_input(f"Map {i+1} Name (e.g. Day {i+1}):", value=f"Day {i+1}", key=f"l_{i}_{st.session_state.session_id}")} for i, f in enumerate(up_files)]
-        if st.button("🚀 SYNC TACTICAL MAP"):
+        if st.button("🚀 SYNC TACTICAL MAP", use_container_width=True):
             success, count = process_upload(configs, excel_files, m_type, r_strat)
             if success: 
-                st.success(f"Locked {count} sites.")
                 time.sleep(0.5)
                 st.rerun()
             else: 
                 st.error("Sync error. No matching sites found.")
-else:
+
+# --- DRAFTING PHASE (NEW: USER COMMAND CENTER) ---
+elif st.session_state.routing_phase == "drafting":
+    new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
+    if new_theme != st.session_state.theme: 
+        st.session_state.theme = new_theme
+        auto_save()
+        st.rerun()
+        
+    map_tiles = "CartoDB dark_matter" if st.session_state.theme == "☁️ Overcast (Standard)" else "CartoDB positron"
+    
+    st.subheader("🗺️ ROUTE COMMAND CENTER")
+    st.info("Review your drafted route below. Lock your Start/End points, or manually adjust the sequence before locking it in.")
+    
+    # 1. Draw the Draft Map
+    hc = st.session_state.home_coords
+    m_draft = folium.Map(location=hc, zoom_start=11, tiles=map_tiles)
+    folium.Marker(hc, popup="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_draft)
+    route_coords = [hc]
+    
+    for idx, s in enumerate(st.session_state.draft_route):
+        route_coords.append((s['nav_lat'], s['nav_lon']))
+        folium.CircleMarker(
+            location=(s['nav_lat'], s['nav_lon']), radius=10, color="#FFA500", fill=True, fill_color="#FFA500", fill_opacity=0.9,
+            popup=f"Stop {idx+1}: Site {s['id']}"
+        ).add_to(m_draft)
+        
+        folium.Marker(
+            location=(s['nav_lat'], s['nav_lon']),
+            icon=DivIcon(
+                icon_size=(20,20),
+                icon_anchor=(10,10),
+                html=f'<div style="font-size: 10pt; color: black; font-weight: 900; text-align: center; line-height: 20px;">{idx+1}</div>',
+            )
+        ).add_to(m_draft)
+        
+    if len(route_coords) > 1:
+        chunk_size = 50
+        for i in range(0, len(route_coords) - 1, chunk_size - 1):
+            chunk = route_coords[i:i + chunk_size]
+            coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
+            osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson"
+            try:
+                resp = requests.get(osrm_url, timeout=3).json()
+                if resp.get('code') == 'Ok':
+                    route_geo = resp['routes'][0]['geometry']['coordinates']
+                    route_points = [(lat, lon) for lon, lat in route_geo]
+                    folium.PolyLine(route_points, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=4, opacity=0.7).add_to(m_draft)
+            except: pass 
+    st_folium(m_draft, height=400, use_container_width=True, returned_objects=[], key="draft_map")
+    
+    st.divider()
+    
+    # 2. Start / End Lock Tool
+    st.subheader("1️⃣ Lock Start & End Stops")
+    uid_list = [s['uid'] for s in st.session_state.draft_route]
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        start_sel = st.selectbox("Force First Stop:", uid_list, format_func=lambda x: f"Site {next(s['id'] for s in st.session_state.draft_route if s['uid'] == x)}", index=0)
+    with c2:
+        end_sel = st.selectbox("Force Last Stop:", uid_list, format_func=lambda x: f"Site {next(s['id'] for s in st.session_state.draft_route if s['uid'] == x)}", index=len(uid_list)-1)
+        
+    if st.button("🔄 RECALCULATE PROXIMITY PATH", use_container_width=True):
+        start_node = next((n for n in st.session_state.draft_route if n['uid'] == start_sel), None)
+        end_node = next((n for n in st.session_state.draft_route if n['uid'] == end_sel), None)
+        
+        if st.session_state.upload_strategy == "📌 Keep Maps Separate (Day-by-Day)":
+            new_draft = []
+            for cfg_label in st.session_state.active_files:
+                sheet_raw = [x for x in st.session_state.raw_nodes if x['sheet'] == cfg_label]
+                if sheet_raw:
+                    # Only apply the forced start/end if the node is actually in this sheet
+                    s_node = start_node if start_node in sheet_raw else None
+                    e_node = end_node if end_node in sheet_raw else None
+                    new_draft.extend(solve_tsp_fixed(sheet_raw, s_node, e_node))
+            st.session_state.draft_route = new_draft
+        else:
+            st.session_state.draft_route = solve_tsp_fixed(st.session_state.raw_nodes, start_node, end_node)
+            
+        auto_save()
+        st.rerun()
+        
+    st.divider()
+    
+    # 3. Manual Tweaks
+    st.subheader("2️⃣ Manual Sequence Tweaks")
+    tweak_sel = st.selectbox("Select a Site to Move:", uid_list, format_func=lambda x: f"Stop {uid_list.index(x)+1}: Site {next(s['id'] for s in st.session_state.draft_route if s['uid'] == x)}")
+    c_up, c_dn = st.columns(2)
+    with c_up:
+        if st.button("⬆️ MOVE UP", use_container_width=True):
+            idx = uid_list.index(tweak_sel)
+            if idx > 0:
+                st.session_state.draft_route[idx], st.session_state.draft_route[idx-1] = st.session_state.draft_route[idx-1], st.session_state.draft_route[idx]
+                auto_save()
+                st.rerun()
+    with c_dn:
+        if st.button("⬇️ MOVE DOWN", use_container_width=True):
+            idx = uid_list.index(tweak_sel)
+            if idx < len(st.session_state.draft_route) - 1:
+                st.session_state.draft_route[idx], st.session_state.draft_route[idx+1] = st.session_state.draft_route[idx+1], st.session_state.draft_route[idx]
+                auto_save()
+                st.rerun()
+                
+    st.divider()
+    
+    # 4. Finalize
+    if st.button("✅ FINALIZE & START SHIFT", use_container_width=True):
+        st.session_state.optimized_route = st.session_state.draft_route
+        st.session_state.site_data = {
+            s['uid']: {
+                "Date": "", "Time": "", "ExactTime": "", "Site": s['id'], "UID": s['uid'], "Counter": "c1b",
+                "Serial": "", "Directions": "n", "Lanes": 2, "Street": s['street'], "Notes": "", "Installed": "",
+                "LAT": s['nav_lat'], "LON": s['nav_lon'], "Skipped": "", "Sheet": s['sheet']
+            } for s in st.session_state.optimized_route
+        }
+        st.session_state.routing_phase = "finalized"
+        auto_save()
+        st.rerun()
+        
+    if st.button("🗑️ CANCEL & CLEAR DEVICE"):
+        if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
+        keys_to_wipe = ["optimized_route", "raw_nodes", "draft_route", "routing_phase"]
+        for k in keys_to_wipe:
+            if k in st.session_state: del st.session_state[k]
+        st.session_state.routing_phase = "upload"
+        st.rerun()
+
+# --- FINALIZED PHASE (WORKING TABS) ---
+elif st.session_state.routing_phase == "finalized":
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: 
         st.session_state.theme = new_theme
@@ -513,7 +650,10 @@ else:
                 
         if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
-            st.session_state.optimized_route = []
+            keys_to_wipe = ["optimized_route", "raw_nodes", "draft_route", "routing_phase", "site_data"]
+            for k in keys_to_wipe:
+                if k in st.session_state: del st.session_state[k]
+            st.session_state.routing_phase = "upload"
             st.rerun()
             
     with tab2:
@@ -548,8 +688,8 @@ else:
                 if display_street.lower() == 'nan': display_street = ""
                 new_street = st.text_input("📍 STREET NAME (Auto-Fills on Install):", value=display_street)
                 
-                # FIXED: Force Maps to use Current Location and bypass preview
-                nav_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location...{safe_lat},{safe_lon}&dir_action=navigate"
+                # FIXED: OFFICIAL GOOGLE MAPS LIVE NAVIGATION API
+                nav_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
                 st.link_button("🚗 NAV TO SITE", nav_url, use_container_width=True)
                 
                 batch = []
@@ -566,13 +706,12 @@ else:
                 if len(batch) > 1:
                     waypoints_str = "|".join(batch[:-1])
                     dest_str = batch[-1]
-                    batch_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location...{dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
+                    batch_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
                     st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", batch_url, use_container_width=True)
                 
                 st.info("📍 Grab precise GPS below to lock-in the exact field coordinate and auto-name the street.")
                 if HAS_GPS:
-                    # NO KEY PARAMETER: Crash Prevented
-                    loc_install = streamlit_geolocation()
+                    loc_install = streamlit_geolocation() # FIXED NO KEY
                 else:
                     loc_install = None
                 
@@ -627,7 +766,7 @@ else:
                                 if next_idx != cur:
                                     n_lat = st.session_state.optimized_route[next_idx]['nav_lat']
                                     n_lon = st.session_state.optimized_route[next_idx]['nav_lon']
-                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location...{n_lat},{n_lon}&dir_action=navigate"
+                                    st.session_state.auto_open_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
 
                         else:
                             st.session_state.msg_type = "skip"
@@ -699,7 +838,7 @@ else:
                 raw_itin.sort(key=lambda x: x.get('ExactTime', ''))
                 itin = raw_itin
             else:
-                itin = [site['sd'] for site in solve_tsp([{'uid': sd['UID'], 'nav_lat': float(sd['LAT']), 'nav_lon': float(sd['LON']), 'sd': sd} for sd in raw_itin], st.session_state.home_coords)]
+                itin = [site['sd'] for site in solve_tsp_fixed([{'uid': sd['UID'], 'nav_lat': float(sd['LAT']), 'nav_lon': float(sd['LON']), 'sd': sd} for sd in raw_itin])]
                 
             if st.session_state.pickup_index >= len(itin):
                 st.session_state.pickup_index = max(0, len(itin) - 1)
@@ -771,7 +910,7 @@ else:
                         p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                         st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                         
-                        nav_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location...{p_lat},{p_lon}&dir_action=navigate"
+                        nav_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={p_lat},{p_lon}&dir_action=navigate"
                         st.link_button("🚗 NAV TO FIELD GPS", nav_url, use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):

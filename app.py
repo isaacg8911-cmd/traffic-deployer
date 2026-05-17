@@ -30,7 +30,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.96", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.97", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -65,11 +65,10 @@ def set_theme(theme_choice):
 
 st.markdown(set_theme(st.session_state.theme), unsafe_allow_html=True)
 
-# --- OFFLINE JS LOCALSTORAGE INJECTION (IDEA 1) ---
+# --- OFFLINE JS LOCALSTORAGE INJECTION ---
 components.html(
     """
     <script>
-    // Saves a backup of the app state to the browser memory constantly
     function backupToBrowser() {
         const state = window.parent.document.body.innerText;
         if(state.includes('Traffic Data Service')) {
@@ -82,7 +81,6 @@ components.html(
     height=0,
 )
 
-# --- COOKIE MANAGER SETUP ---
 if HAS_COOKIES:
     cookies = CookieManager()
     if not cookies.ready():
@@ -119,7 +117,7 @@ if "driver_name" not in st.session_state:
 
 BACKUP_FILE = f"tds_backup_{st.session_state.driver_name}.json"
 
-# --- 2. STATE MANAGEMENT ---
+# --- 2. MASTER STATE SANITIZER (CRASH PREVENTION) ---
 if "init" not in st.session_state:
     if os.path.exists(BACKUP_FILE):
         try:
@@ -127,42 +125,40 @@ if "init" not in st.session_state:
                 data = json.load(f)
                 for k, v in data.items(): st.session_state[k] = v
         except Exception: pass
-        
-    if "session_id" not in st.session_state: st.session_state.session_id = str(uuid.uuid4())[:8]
-    if "home_coords" not in st.session_state: st.session_state.home_coords = (33.7715, -117.9431) 
-    if "optimized_route" not in st.session_state:
-        st.session_state.active_files, st.session_state.optimized_route = [], []
-        st.session_state.site_data = {}
-        st.session_state.current_index, st.session_state.pickup_index = 0, 0
-        st.session_state.mission_type = "📍 INSTALLATION"
-        st.session_state.upload_strategy = "📌 Keep Maps Separate (Day-by-Day)" 
-        st.session_state.auto_advance_nav = False
-        
-    st.session_state.last_install_msg = None
-    st.session_state.last_pickup_msg = None
-    st.session_state.msg_type = "success"
-    st.session_state.auto_open_url = "" # For Javascript trigger
-    st.session_state.init = True
+
+# Automatically inject missing keys so old JSON backups never crash the app
+defaults = {
+    "session_id": str(uuid.uuid4())[:8],
+    "home_coords": (33.7715, -117.9431),
+    "active_files": [],
+    "optimized_route": [],
+    "site_data": {},
+    "current_index": 0,
+    "pickup_index": 0,
+    "mission_type": "📍 INSTALLATION",
+    "upload_strategy": "📌 Keep Maps Separate (Day-by-Day)",
+    "auto_advance_nav": False,
+    "last_install_msg": None,
+    "last_pickup_msg": None,
+    "msg_type": "success",
+    "auto_open_url": "",
+    "pickup_target": "All Maps (Merged)",
+    "pickup_sort_method": "🔄 Route Efficiency",
+    "show_pickup_map": False,
+    "init": True
+}
+
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 def get_ca_time():
     now = datetime.now(ZoneInfo("America/Los_Angeles"))
     return now.strftime("%H00"), now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S")
 
 def auto_save():
-    payload = {
-        "home_coords": st.session_state.get("home_coords", (33.7715, -117.9431)),
-        "active_files": st.session_state.get("active_files", []),
-        "optimized_route": st.session_state.get("optimized_route", []),
-        "site_data": st.session_state.get("site_data", {}),
-        "current_index": st.session_state.get("current_index", 0),
-        "mission_type": st.session_state.get("mission_type", "📍 INSTALLATION"),
-        "upload_strategy": st.session_state.get("upload_strategy", "📌 Keep Maps Separate (Day-by-Day)"),
-        "pickup_index": st.session_state.get("pickup_index", 0),
-        "pickup_sort_method": st.session_state.get("pickup_sort_method", "🔄 Route Efficiency"),
-        "pickup_target": st.session_state.get("pickup_target", "All Maps (Merged)"),
-        "theme": st.session_state.get("theme", "☁️ Overcast (Standard)"),
-        "auto_advance_nav": st.session_state.get("auto_advance_nav", False)
-    }
+    payload = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
+    payload["theme"] = st.session_state.get("theme", "☁️ Overcast (Standard)")
     try:
         with open(BACKUP_FILE, "w") as f:
             json.dump(payload, f, default=str)
@@ -196,9 +192,9 @@ def get_street_from_coords(lat, lon):
     except Exception: pass
     return ""
 
-# --- UPGRADED HAVERSINE & MULTI-START TSP SOLVER ---
+# --- STRICT NEIGHBORHOOD SWEEP SOLVER ---
 def haversine_dist(lat1, lon1, lat2, lon2):
-    R = 6371.0 # Earth radius in km
+    R = 6371.0 
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
@@ -230,12 +226,18 @@ def perform_2opt(route, home_coords):
 
 def solve_tsp(nodes_list, home_coords):
     if not nodes_list: return []
-    # Multi-start nearest neighbor to find best global path
     global_best_route = []
     global_best_dist = float('inf')
     
-    # Try starting from home, AND starting from every other node to prevent spaghetti
-    start_points = [None] + nodes_list 
+    # Force algorithm to test sweeping from home, and sweeping from the furthest corners
+    start_points = [None]
+    if len(nodes_list) > 1:
+        start_points.extend([
+            min(nodes_list, key=lambda x: x['nav_lat']),
+            max(nodes_list, key=lambda x: x['nav_lat']),
+            min(nodes_list, key=lambda x: x['nav_lon']),
+            max(nodes_list, key=lambda x: x['nav_lon'])
+        ])
     
     for start_node in start_points:
         unvisited = list(nodes_list)
@@ -249,24 +251,17 @@ def solve_tsp(nodes_list, home_coords):
             curr = (start_node['nav_lat'], start_node['nav_lon'])
             
         while unvisited:
+            # Strict Nearest Neighbor: Bans the algorithm from jumping across the map
             next_node = min(unvisited, key=lambda x: haversine_dist(curr[0], curr[1], x['nav_lat'], x['nav_lon']))
             current_route.append(next_node)
             curr = (next_node['nav_lat'], next_node['nav_lon'])
             unvisited.remove(next_node)
             
+        # Untangle crossing lines within the swept neighborhoods
         opt_route, opt_dist = perform_2opt(current_route, home_coords)
         if opt_dist < global_best_dist:
             global_best_dist = opt_dist
             global_best_route = opt_route
-
-    # Final aggressive shuffles
-    for _ in range(15):
-        shuffled = list(global_best_route)
-        random.shuffle(shuffled)
-        r, d = perform_2opt(shuffled, home_coords)
-        if d < global_best_dist:
-            global_best_dist = d
-            global_best_route = r
             
     return global_best_route
 
@@ -396,7 +391,7 @@ with col_logout:
             del cookies["tds_driver_cookie"]
             cookies.save()
             
-        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav"]
+        keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav", "auto_open_url"]
         for k in keys_to_wipe:
             if k in st.session_state:
                 del st.session_state[k]
@@ -405,7 +400,7 @@ with col_logout:
 # Execute Auto-Open Javascript if triggered by install
 if st.session_state.get("auto_open_url"):
     components.html(f"<script>window.open('{st.session_state.auto_open_url}', '_blank');</script>", height=0)
-    st.session_state.auto_open_url = "" # Reset immediately
+    st.session_state.auto_open_url = ""
 
 if not st.session_state.get("optimized_route"):
     restore_file = st.file_uploader("🔄 RESTORE BACKUP", type=["json"])
@@ -490,7 +485,6 @@ else:
         auto_save()
         st.rerun()
         
-    # Set Map Tile based on Theme (Idea 5)
     map_tiles = "CartoDB dark_matter" if st.session_state.theme == "☁️ Overcast (Standard)" else "CartoDB positron"
     
     if st.session_state.get("upload_strategy") == "🔗 Merge All Maps into One Route":
@@ -570,7 +564,6 @@ else:
             st.rerun()
             
     with tab2:
-        # NEW: Install List / Single View Toggle
         install_view = st.radio("Install View:", ["Single Site Mode", "Full Manifest List"], horizontal=True)
         
         if install_view == "Full Manifest List":
@@ -581,7 +574,6 @@ else:
             } for s in [st.session_state.site_data[uid] for uid in active_uids]])
             st.dataframe(df_display, use_container_width=True)
         else:
-            # (Idea 3) Auto Advance Toggle
             new_auto = st.checkbox("🚀 Auto-Open Next Stop Map on Install", value=st.session_state.auto_advance_nav)
             if new_auto != st.session_state.auto_advance_nav:
                 st.session_state.auto_advance_nav = new_auto
@@ -603,8 +595,8 @@ else:
                 if display_street.lower() == 'nan': display_street = ""
                 new_street = st.text_input("📍 STREET NAME (Auto-Fills on Install):", value=display_street)
                 
-                # FIXED: True Live Navigation Google Maps URL
-                nav_url = f"https://www.google.com/maps/dir/?api=1&destination={safe_lat},{safe_lon}&travelmode=driving"
+                # FIXED: OFFICIAL GOOGLE MAPS API URL FOR LIVE NAVIGATION
+                nav_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={safe_lat},{safe_lon}&travelmode=driving"
                 st.link_button("🚗 NAV TO SITE", nav_url, use_container_width=True)
                 
                 batch = []
@@ -621,7 +613,7 @@ else:
                 if len(batch) > 1:
                     waypoints_str = "|".join(batch[:-1])
                     dest_str = batch[-1]
-                    batch_url = f"https://www.google.com/maps/dir/?api=1&destination={dest_str}&waypoints={waypoints_str}&travelmode=driving"
+                    batch_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&travelmode=driving"
                     st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", batch_url, use_container_width=True)
                 
                 st.info("📍 Grab precise GPS below to lock-in the exact field coordinate and auto-name the street.")
@@ -655,7 +647,6 @@ else:
                         final_lat = loc_install['latitude'] if loc_install and loc_install.get('latitude') else safe_lat
                         final_lon = loc_install['longitude'] if loc_install and loc_install.get('longitude') else safe_lon
                         
-                        # AUTO-STREET NAMER
                         auto_street = get_street_from_coords(final_lat, final_lon) if submit_btn else str(sd.get('Street', ''))
                         if not auto_street: auto_street = str(new_street).strip()
                         
@@ -677,13 +668,12 @@ else:
                             st.session_state.msg_type = "success"
                             st.session_state.last_install_msg = f"✅ Site {sd.get('Site', s['id'])} SECURED at {auto_street}."
                             
-                            # (Idea 3) Trigger Auto-Advance URL
                             if st.session_state.auto_advance_nav:
                                 next_idx = get_next_valid_index(cur, active_uids, direction=1)
                                 if next_idx != cur:
                                     n_lat = st.session_state.optimized_route[next_idx]['nav_lat']
                                     n_lon = st.session_state.optimized_route[next_idx]['nav_lon']
-                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&destination={n_lat},{n_lon}&travelmode=driving"
+                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={n_lat},{n_lon}&travelmode=driving"
 
                         else:
                             st.session_state.msg_type = "skip"
@@ -727,8 +717,6 @@ else:
         if raw_itin:
             st.subheader("♻️ Pick-Up Strategy Engine")
             
-            if "pickup_target" not in st.session_state: st.session_state.pickup_target = "All Maps (Merged)"
-            
             available_targets = ["All Maps (Merged)"] + st.session_state.active_files
             safe_target_index = available_targets.index(st.session_state.pickup_target) if st.session_state.pickup_target in available_targets else 0
             
@@ -744,8 +732,6 @@ else:
             if st.session_state.pickup_target != "All Maps (Merged)":
                 raw_itin = [sd for sd in raw_itin if sd.get("Sheet") == st.session_state.pickup_target]
 
-            if "pickup_sort_method" not in st.session_state: st.session_state.pickup_sort_method = "🔄 Route Efficiency"
-                
             new_sort = st.radio("Sort Manifest By:", ["🔄 Route Efficiency", "⏱️ Order Installed"], index=0 if st.session_state.pickup_sort_method == "🔄 Route Efficiency" else 1, horizontal=True)
             
             if new_sort != st.session_state.pickup_sort_method:
@@ -831,7 +817,7 @@ else:
                         p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
                         st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
                         
-                        nav_url = f"https://www.google.com/maps/dir/?api=1&destination={p_lat},{p_lon}&travelmode=driving"
+                        nav_url = f"https://www.google.com/maps/dir/?api=1&origin=Current+Location&destination={p_lat},{p_lon}&travelmode=driving"
                         st.link_button("🚗 NAV TO FIELD GPS", nav_url, use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):
@@ -891,8 +877,6 @@ else:
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df_all = pd.DataFrame(all_d)
-                    
-                    # SCRUB EXCEL COLUMNS: Drop UID and Sheet from final export
                     df_clean = df_all.drop(columns=['UID', 'Sheet'], errors='ignore')
                     df_clean.to_excel(writer, sheet_name='Master List', index=False)
                     

@@ -1228,4 +1228,58 @@ elif st.session_state.routing_phase == "finalized":
         st.subheader("👑 Commander Projection Engine")
         st.info("Live recalculation of your finalized shift based on completed work.")
         c_proj1, c_proj2, c_proj3 = st.columns(3)
-        with c_proj1: shift_start = st.time_input("Shift Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start
+        with c_proj1: shift_start = st.time_input("Shift Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start_fin")
+        with c_proj2: avg_stop = st.number_input("Avg Mins per Stop:", value=15, min_value=1, key="proj_mins_fin")
+        with c_proj3: 
+            st.write("")
+            run_proj = st.button("⏱️ PROJECT SHIFT", use_container_width=True, key="proj_btn_fin")
+            
+        if run_proj:
+            start_dt = datetime.combine(datetime.today(), shift_start)
+            
+            def calc_time(nodes_to_route):
+                if not nodes_to_route: return 0, 0
+                coords = [(hc[0], hc[1])]
+                for node in nodes_to_route:
+                    coords.append((node['nav_lat'], node['nav_lon']))
+                coords.append((hc[0], hc[1]))
+                
+                drive_sec = 0
+                chunk_size = 50
+                for i in range(0, len(coords) - 1, chunk_size - 1):
+                    chunk = coords[i:i + chunk_size]
+                    coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
+                    osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=false"
+                    try:
+                        resp = requests.get(osrm_url, timeout=3).json()
+                        if resp.get('code') == 'Ok':
+                            drive_sec += resp['routes'][0]['duration']
+                        else: raise Exception()
+                    except:
+                        for j in range(len(chunk)-1):
+                            dist = haversine_dist(chunk[j][0], chunk[j][1], chunk[j+1][0], chunk[j+1][1])
+                            drive_sec += (dist / 48.28) * 3600 
+                return drive_sec / 60.0, len(nodes_to_route) * avg_stop
+            
+            if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
+                if st.session_state.optimized_route:
+                    d_mins, s_mins = calc_time(st.session_state.optimized_route)
+                    end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
+                    st.success(f"**MERGED ROUTE:** {len(st.session_state.optimized_route)} Total Stops")
+                    st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
+                    st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
+                else:
+                    st.warning("No stops found in your route.")
+            else:
+                has_data = False
+                for day in st.session_state.active_files:
+                    day_nodes = [n for n in st.session_state.optimized_route if n['sheet'] == day]
+                    if day_nodes:
+                        has_data = True
+                        d_mins, s_mins = calc_time(day_nodes)
+                        end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
+                        st.success(f"**{day}:** {len(day_nodes)} Total Stops")
+                        st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
+                        st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
+                if not has_data:
+                    st.warning("No stops found in your route.")

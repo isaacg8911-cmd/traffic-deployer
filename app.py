@@ -32,7 +32,7 @@ except ImportError:
 st.set_page_config(page_title="Traffic Data Service V51.119", layout="centered")
 
 # --- 👑 COMMANDER PROFILE SETUP ---
-COMMANDER_NAME = "ISAAC GARCIA"
+COMMANDER_NAME = "Isaac"
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:

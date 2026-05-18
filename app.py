@@ -29,10 +29,10 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.118", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.119", layout="centered")
 
 # --- 👑 COMMANDER PROFILE SETUP ---
-COMMANDER_NAME = "Isaac"
+COMMANDER_NAME = "ISAAC GARCIA"
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -50,7 +50,6 @@ def set_theme(theme_choice):
         .success-recap { background-color: #003300; border: 2px solid #00FF00; color: #00FF00; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
         .skip-recap { background-color: #330000; border: 2px solid #FF0000; color: #FF0000; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
         .list-card { background-color: #111; border: 1px solid #00FFFF; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
-        /* Style the solid-state radio menu to look like tactical tabs */
         div[role="radiogroup"] { padding-bottom: 10px; border-bottom: 2px solid #333; margin-bottom: 15px;}
         </style>
         """
@@ -453,7 +452,6 @@ elif st.session_state.routing_phase == "drafting":
     hc = st.session_state.home_coords
     is_commander = str(st.session_state.driver_name).upper() == COMMANDER_NAME.upper()
     
-    # SOLID STATE MENU (Replaces buggy st.tabs)
     if is_commander:
         draft_view = st.radio("COMMAND CENTER NAVIGATION:", ["🗺️ ROUTE BUILDER", "👑 FORECAST"], horizontal=True, label_visibility="collapsed")
     else:
@@ -529,8 +527,8 @@ elif st.session_state.routing_phase == "drafting":
         if len(path_coords) > 1:
             folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
                 
-        # RETURNED_OBJECTS SCRUBBED TO FIX REACT ERROR 185
-        map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked"], key="draft_map")
+        # HARD BYPASS FOR REACT ERROR 185: Fixed width of 720px prevents the layout engine from infinitely thrashing
+        map_data = st_folium(m_draft, width=720, height=450, returned_objects=["last_object_clicked"], key="draft_map")
         
         if map_data and map_data.get("last_object_clicked"):
             click_lat = map_data["last_object_clicked"]["lat"]
@@ -695,7 +693,7 @@ elif st.session_state.routing_phase == "drafting":
                     except:
                         for j in range(len(chunk)-1):
                             dist = haversine_dist(chunk[j][0], chunk[j][1], chunk[j+1][0], chunk[j+1][1])
-                            drive_sec += (dist / 48.28) * 3600 # Fallback 30mph math
+                            drive_sec += (dist / 48.28) * 3600 
                 return drive_sec / 60.0, len(uids) * avg_stop
             
             if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
@@ -811,7 +809,8 @@ elif st.session_state.routing_phase == "finalized":
                 except requests.exceptions.RequestException: 
                     pass 
         
-        st_folium(m, height=450, use_container_width=True, returned_objects=[], key="main_route_map")
+        # HARD BYPASS FOR REACT ERROR 185
+        st_folium(m, width=720, height=450, returned_objects=[], key="main_route_map")
             
         for idx, s in enumerate(active_route):
             sd = st.session_state.site_data[s['uid']]
@@ -1094,7 +1093,8 @@ elif st.session_state.routing_phase == "finalized":
                                 folium.PolyLine(route_points, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=4, opacity=0.7).add_to(m_pickup)
                         except: pass
                 
-                st_folium(m_pickup, height=450, use_container_width=True, returned_objects=[], key="pickup_map_render")
+                # HARD BYPASS FOR REACT ERROR 185
+                st_folium(m_pickup, width=720, height=450, returned_objects=[], key="pickup_map_render")
                 st.divider()
             elif not itin:
                 st.warning("No installed sites found for the selected Pick-Up target.")
@@ -1228,58 +1228,4 @@ elif st.session_state.routing_phase == "finalized":
         st.subheader("👑 Commander Projection Engine")
         st.info("Live recalculation of your finalized shift based on completed work.")
         c_proj1, c_proj2, c_proj3 = st.columns(3)
-        with c_proj1: shift_start = st.time_input("Shift Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start_fin")
-        with c_proj2: avg_stop = st.number_input("Avg Mins per Stop:", value=15, min_value=1, key="proj_mins_fin")
-        with c_proj3: 
-            st.write("")
-            run_proj = st.button("⏱️ PROJECT SHIFT", use_container_width=True, key="proj_btn_fin")
-            
-        if run_proj:
-            start_dt = datetime.combine(datetime.today(), shift_start)
-            
-            def calc_time(nodes_to_route):
-                if not nodes_to_route: return 0, 0
-                coords = [(hc[0], hc[1])]
-                for node in nodes_to_route:
-                    coords.append((node['nav_lat'], node['nav_lon']))
-                coords.append((hc[0], hc[1]))
-                
-                drive_sec = 0
-                chunk_size = 50
-                for i in range(0, len(coords) - 1, chunk_size - 1):
-                    chunk = coords[i:i + chunk_size]
-                    coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
-                    osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=false"
-                    try:
-                        resp = requests.get(osrm_url, timeout=3).json()
-                        if resp.get('code') == 'Ok':
-                            drive_sec += resp['routes'][0]['duration']
-                        else: raise Exception()
-                    except:
-                        for j in range(len(chunk)-1):
-                            dist = haversine_dist(chunk[j][0], chunk[j][1], chunk[j+1][0], chunk[j+1][1])
-                            drive_sec += (dist / 48.28) * 3600 
-                return drive_sec / 60.0, len(nodes_to_route) * avg_stop
-            
-            if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
-                if st.session_state.optimized_route:
-                    d_mins, s_mins = calc_time(st.session_state.optimized_route)
-                    end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                    st.success(f"**MERGED ROUTE:** {len(st.session_state.optimized_route)} Total Stops")
-                    st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
-                    st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                else:
-                    st.warning("No stops found in your route.")
-            else:
-                has_data = False
-                for day in st.session_state.active_files:
-                    day_nodes = [n for n in st.session_state.optimized_route if n['sheet'] == day]
-                    if day_nodes:
-                        has_data = True
-                        d_mins, s_mins = calc_time(day_nodes)
-                        end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                        st.success(f"**{day}:** {len(day_nodes)} Total Stops")
-                        st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
-                        st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                if not has_data:
-                    st.warning("No stops found in your route.")
+        with c_proj1: shift_start = st.time_input("Shift Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start

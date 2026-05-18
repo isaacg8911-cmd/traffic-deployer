@@ -29,7 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.117", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.118", layout="centered")
 
 # --- 👑 COMMANDER PROFILE SETUP ---
 COMMANDER_NAME = "Isaac"
@@ -45,12 +45,13 @@ def set_theme(theme_choice):
         .stApp { background-color: #000000; color: #FFFFFF; }
         h1, h2, h3 { color: #00FFFF !important; font-family: 'Arial Black'; font-weight: 900;}
         div.stButton > button { background-color: #000000; color: #00FFFF; border: 3px solid #00FFFF; font-weight: 900; }
-        .stTabs [data-baseweb="tab-list"] { background-color: #000000; border-bottom: 3px solid #333; }
         input, select, textarea { background-color: #000000 !important; color: #00FFFF !important; border: 2px solid #00FFFF !important; }
         div[data-testid="stMetricValue"] { color: #00FFFF !important; font-weight: 900; }
         .success-recap { background-color: #003300; border: 2px solid #00FF00; color: #00FF00; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
         .skip-recap { background-color: #330000; border: 2px solid #FF0000; color: #FF0000; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
         .list-card { background-color: #111; border: 1px solid #00FFFF; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
+        /* Style the solid-state radio menu to look like tactical tabs */
+        div[role="radiogroup"] { padding-bottom: 10px; border-bottom: 2px solid #333; margin-bottom: 15px;}
         </style>
         """
     else:
@@ -64,6 +65,7 @@ def set_theme(theme_choice):
         .success-recap { background-color: #1E2E1E; border: 2px solid #32CD32; color: #32CD32; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
         .skip-recap { background-color: #2E1E1E; border: 2px solid #FF4500; color: #FF4500; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
         .list-card { background-color: #1a1a1a; border: 1px solid #444; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
+        div[role="radiogroup"] { padding-bottom: 10px; border-bottom: 2px solid #333; margin-bottom: 15px;}
         </style>
         """
 
@@ -439,7 +441,7 @@ if st.session_state.routing_phase == "upload":
             else: 
                 st.error("Sync error. No matching sites found.")
 
-# --- DRAFTING PHASE (MAP ISOLATION & PROJECTION TABS) ---
+# --- DRAFTING PHASE (SOLID-STATE MENU FIX) ---
 elif st.session_state.routing_phase == "drafting":
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: 
@@ -449,18 +451,15 @@ elif st.session_state.routing_phase == "drafting":
         
     map_tiles = "CartoDB dark_matter" if st.session_state.theme == "☁️ Overcast (Standard)" else "CartoDB positron"
     hc = st.session_state.home_coords
-    
     is_commander = str(st.session_state.driver_name).upper() == COMMANDER_NAME.upper()
     
+    # SOLID STATE MENU (Replaces buggy st.tabs)
     if is_commander:
-        draft_tabs = st.tabs(["🗺️ ROUTE BUILDER", "👑 FORECAST"])
-        draft_container = draft_tabs[0]
-        proj_container = draft_tabs[1]
+        draft_view = st.radio("COMMAND CENTER NAVIGATION:", ["🗺️ ROUTE BUILDER", "👑 FORECAST"], horizontal=True, label_visibility="collapsed")
     else:
-        draft_container = st.container()
-        proj_container = None
+        draft_view = "🗺️ ROUTE BUILDER"
     
-    with draft_container:
+    if draft_view == "🗺️ ROUTE BUILDER":
         if st.session_state.upload_strategy == "📌 Keep Maps Separate (Day-by-Day)":
             if "drafting_day" not in st.session_state or not st.session_state.drafting_day:
                 st.session_state.drafting_day = st.session_state.active_files[0] if st.session_state.active_files else None
@@ -530,6 +529,7 @@ elif st.session_state.routing_phase == "drafting":
         if len(path_coords) > 1:
             folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
                 
+        # RETURNED_OBJECTS SCRUBBED TO FIX REACT ERROR 185
         map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked"], key="draft_map")
         
         if map_data and map_data.get("last_object_clicked"):
@@ -551,10 +551,8 @@ elif st.session_state.routing_phase == "drafting":
                 if clicked_uid and min_dist < 0.2:
                     if clicked_uid not in st.session_state.manual_sequence:
                         st.session_state.manual_sequence.append(clicked_uid)
-                        
                         st.session_state.map_center = [click_lat, click_lon]
                         st.session_state.map_zoom = 14 
-                        
                         auto_save()
                         st.rerun()
 
@@ -662,69 +660,68 @@ elif st.session_state.routing_phase == "drafting":
             st.session_state.routing_phase = "upload"
             st.rerun()
 
-    if proj_container:
-        with proj_container:
-            st.subheader("👑 Commander Projection Engine")
-            st.info("Calculate estimated shift duration based on your current drafted sequence.")
-            c_proj1, c_proj2, c_proj3 = st.columns(3)
-            with c_proj1: shift_start = st.time_input("Shift Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start_draft")
-            with c_proj2: avg_stop = st.number_input("Avg Mins per Stop:", value=15, min_value=1, key="proj_mins_draft")
-            with c_proj3: 
-                st.write("")
-                run_proj = st.button("⏱️ PROJECT SHIFT", use_container_width=True, key="proj_btn_draft")
+    elif draft_view == "👑 FORECAST":
+        st.subheader("👑 Commander Projection Engine")
+        st.info("Calculate estimated shift duration based on your current drafted sequence.")
+        c_proj1, c_proj2, c_proj3 = st.columns(3)
+        with c_proj1: shift_start = st.time_input("Shift Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start_draft")
+        with c_proj2: avg_stop = st.number_input("Avg Mins per Stop:", value=15, min_value=1, key="proj_mins_draft")
+        with c_proj3: 
+            st.write("")
+            run_proj = st.button("⏱️ PROJECT SHIFT", use_container_width=True, key="proj_btn_draft")
+            
+        if run_proj:
+            start_dt = datetime.combine(datetime.today(), shift_start)
+            
+            def calc_time(uids):
+                if not uids: return 0, 0
+                coords = [(hc[0], hc[1])]
+                for u in uids:
+                    node = next((n for n in st.session_state.raw_nodes if n['uid'] == u), None)
+                    if node: coords.append((node['nav_lat'], node['nav_lon']))
+                coords.append((hc[0], hc[1]))
                 
-            if run_proj:
-                start_dt = datetime.combine(datetime.today(), shift_start)
-                
-                def calc_time(uids):
-                    if not uids: return 0, 0
-                    coords = [(hc[0], hc[1])]
-                    for u in uids:
-                        node = next((n for n in st.session_state.raw_nodes if n['uid'] == u), None)
-                        if node: coords.append((node['nav_lat'], node['nav_lon']))
-                    coords.append((hc[0], hc[1]))
-                    
-                    drive_sec = 0
-                    chunk_size = 50
-                    for i in range(0, len(coords) - 1, chunk_size - 1):
-                        chunk = coords[i:i + chunk_size]
-                        coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
-                        osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=false"
-                        try:
-                            resp = requests.get(osrm_url, timeout=3).json()
-                            if resp.get('code') == 'Ok':
-                                drive_sec += resp['routes'][0]['duration']
-                            else: raise Exception()
-                        except:
-                            for j in range(len(chunk)-1):
-                                dist = haversine_dist(chunk[j][0], chunk[j][1], chunk[j+1][0], chunk[j+1][1])
-                                drive_sec += (dist / 48.28) * 3600 # Fallback 30mph math
-                    return drive_sec / 60.0, len(uids) * avg_stop
-                
-                if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
-                    if st.session_state.manual_sequence:
-                        d_mins, s_mins = calc_time(st.session_state.manual_sequence)
+                drive_sec = 0
+                chunk_size = 50
+                for i in range(0, len(coords) - 1, chunk_size - 1):
+                    chunk = coords[i:i + chunk_size]
+                    coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
+                    osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=false"
+                    try:
+                        resp = requests.get(osrm_url, timeout=3).json()
+                        if resp.get('code') == 'Ok':
+                            drive_sec += resp['routes'][0]['duration']
+                        else: raise Exception()
+                    except:
+                        for j in range(len(chunk)-1):
+                            dist = haversine_dist(chunk[j][0], chunk[j][1], chunk[j+1][0], chunk[j+1][1])
+                            drive_sec += (dist / 48.28) * 3600 # Fallback 30mph math
+                return drive_sec / 60.0, len(uids) * avg_stop
+            
+            if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
+                if st.session_state.manual_sequence:
+                    d_mins, s_mins = calc_time(st.session_state.manual_sequence)
+                    end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
+                    st.success(f"**MERGED ROUTE:** {len(st.session_state.manual_sequence)} Stops")
+                    st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
+                    st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
+                else:
+                    st.warning("Sequence some stops first!")
+            else:
+                has_data = False
+                for day in st.session_state.active_files:
+                    day_uids = [u for u in st.session_state.manual_sequence if any(n['uid'] == u and n['sheet'] == day for n in st.session_state.raw_nodes)]
+                    if day_uids:
+                        has_data = True
+                        d_mins, s_mins = calc_time(day_uids)
                         end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                        st.success(f"**MERGED ROUTE:** {len(st.session_state.manual_sequence)} Stops")
+                        st.success(f"**{day}:** {len(day_uids)} Stops")
                         st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
                         st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                    else:
-                        st.warning("Sequence some stops first!")
-                else:
-                    has_data = False
-                    for day in st.session_state.active_files:
-                        day_uids = [u for u in st.session_state.manual_sequence if any(n['uid'] == u and n['sheet'] == day for n in st.session_state.raw_nodes)]
-                        if day_uids:
-                            has_data = True
-                            d_mins, s_mins = calc_time(day_uids)
-                            end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                            st.success(f"**{day}:** {len(day_uids)} Stops")
-                            st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
-                            st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                    if not has_data:
-                        st.warning("Sequence some stops first!")
+                if not has_data:
+                    st.warning("Sequence some stops first!")
 
-# --- FINALIZED PHASE (WORKING TABS WITH COMMANDER FORECAST) ---
+# --- FINALIZED PHASE (SOLID-STATE MENU FIX) ---
 elif st.session_state.routing_phase == "finalized":
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: 
@@ -747,18 +744,21 @@ elif st.session_state.routing_phase == "finalized":
     active_route = st.session_state.optimized_route if selected_day == "All Days" else [s for s in st.session_state.optimized_route if s['sheet'] == selected_day]
     active_uids = [s['uid'] for s in active_route]
     
-    # 👑 COMMANDER TAB INJECTION
+    # SOLID STATE MENU (Replaces buggy st.tabs)
     tab_names = ["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL / AUDIT"]
     is_commander = str(st.session_state.driver_name).upper() == COMMANDER_NAME.upper()
     if is_commander:
         tab_names.append("👑 COMMANDER")
         
-    tabs = st.tabs(tab_names)
-    tab1, tab2, tab3, tab4 = tabs[0], tabs[1], tabs[2], tabs[3]
-    if is_commander:
-        tab5 = tabs[4]
+    if "active_main_tab" not in st.session_state:
+        st.session_state.active_main_tab = "📁 ROUTE"
+        
+    main_view = st.radio("OPERATIONAL NAVIGATION:", tab_names, index=tab_names.index(st.session_state.active_main_tab) if st.session_state.active_main_tab in tab_names else 0, horizontal=True, label_visibility="collapsed")
+    if main_view != st.session_state.active_main_tab:
+        st.session_state.active_main_tab = main_view
+        st.rerun()
     
-    with tab1:
+    if main_view == "📁 ROUTE":
         st.success(f"STOPS IN VIEW: {len(active_route)}")
         
         hc = st.session_state.home_coords
@@ -822,17 +822,18 @@ elif st.session_state.routing_phase == "finalized":
             if st.button(f"{status_icon} Stop {idx+1}: Site {sd.get('Site', s['id'])}{tag}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
                 st.session_state.current_index = next((i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid']), 0)
                 st.session_state.install_view_toggle = "Single Site Mode" 
+                st.session_state.active_main_tab = "📍 INSTALL"
                 st.rerun()
                 
         if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
-            keys_to_wipe = ["optimized_route", "raw_nodes", "manual_sequence", "routing_phase", "site_data", "map_center", "map_zoom", "drafting_day"]
+            keys_to_wipe = ["optimized_route", "raw_nodes", "manual_sequence", "routing_phase", "site_data", "map_center", "map_zoom", "drafting_day", "active_main_tab"]
             for k in keys_to_wipe:
                 if k in st.session_state: del st.session_state[k]
             st.session_state.routing_phase = "upload"
             st.rerun()
             
-    with tab2:
+    elif main_view == "📍 INSTALL":
         installed_count = sum(1 for s in active_route if st.session_state.site_data[s['uid']].get("Installed") == "x" or st.session_state.site_data[s['uid']].get("Skipped") == "x")
         total_active = len(active_route)
         if total_active > 0:
@@ -1000,7 +1001,7 @@ elif st.session_state.routing_phase == "finalized":
             
             render_backup_button("install_bottom")
                     
-    with tab3:
+    elif main_view == "♻️ PICK-UP":
         raw_itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
         
         if raw_itin:
@@ -1170,7 +1171,7 @@ elif st.session_state.routing_phase == "finalized":
                     
                     render_backup_button("pickup_bottom_single")
                         
-    with tab4:
+    elif main_view == "📊 EXCEL / AUDIT":
         st.subheader("📋 End of Day Audit")
         missing_data = []
         all_d = [d for d in st.session_state.site_data.values() if d.get("Installed") == "x" or d.get("Skipped") == "x"]
@@ -1223,63 +1224,62 @@ elif st.session_state.routing_phase == "finalized":
         
         render_backup_button("audit_bottom")
         
-    if is_commander:
-        with tab5:
-            st.subheader("👑 Commander Projection Engine")
-            st.info("Live recalculation of your finalized shift based on completed work.")
-            c_proj1, c_proj2, c_proj3 = st.columns(3)
-            with c_proj1: shift_start = st.time_input("Shift Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start_fin")
-            with c_proj2: avg_stop = st.number_input("Avg Mins per Stop:", value=15, min_value=1, key="proj_mins_fin")
-            with c_proj3: 
-                st.write("")
-                run_proj = st.button("⏱️ PROJECT SHIFT", use_container_width=True, key="proj_btn_fin")
+    elif is_commander and main_view == "👑 COMMANDER":
+        st.subheader("👑 Commander Projection Engine")
+        st.info("Live recalculation of your finalized shift based on completed work.")
+        c_proj1, c_proj2, c_proj3 = st.columns(3)
+        with c_proj1: shift_start = st.time_input("Shift Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start_fin")
+        with c_proj2: avg_stop = st.number_input("Avg Mins per Stop:", value=15, min_value=1, key="proj_mins_fin")
+        with c_proj3: 
+            st.write("")
+            run_proj = st.button("⏱️ PROJECT SHIFT", use_container_width=True, key="proj_btn_fin")
+            
+        if run_proj:
+            start_dt = datetime.combine(datetime.today(), shift_start)
+            
+            def calc_time(nodes_to_route):
+                if not nodes_to_route: return 0, 0
+                coords = [(hc[0], hc[1])]
+                for node in nodes_to_route:
+                    coords.append((node['nav_lat'], node['nav_lon']))
+                coords.append((hc[0], hc[1]))
                 
-            if run_proj:
-                start_dt = datetime.combine(datetime.today(), shift_start)
-                
-                def calc_time(nodes_to_route):
-                    if not nodes_to_route: return 0, 0
-                    coords = [(hc[0], hc[1])]
-                    for node in nodes_to_route:
-                        coords.append((node['nav_lat'], node['nav_lon']))
-                    coords.append((hc[0], hc[1]))
-                    
-                    drive_sec = 0
-                    chunk_size = 50
-                    for i in range(0, len(coords) - 1, chunk_size - 1):
-                        chunk = coords[i:i + chunk_size]
-                        coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
-                        osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=false"
-                        try:
-                            resp = requests.get(osrm_url, timeout=3).json()
-                            if resp.get('code') == 'Ok':
-                                drive_sec += resp['routes'][0]['duration']
-                            else: raise Exception()
-                        except:
-                            for j in range(len(chunk)-1):
-                                dist = haversine_dist(chunk[j][0], chunk[j][1], chunk[j+1][0], chunk[j+1][1])
-                                drive_sec += (dist / 48.28) * 3600 
-                    return drive_sec / 60.0, len(nodes_to_route) * avg_stop
-                
-                if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
-                    if st.session_state.optimized_route:
-                        d_mins, s_mins = calc_time(st.session_state.optimized_route)
+                drive_sec = 0
+                chunk_size = 50
+                for i in range(0, len(coords) - 1, chunk_size - 1):
+                    chunk = coords[i:i + chunk_size]
+                    coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
+                    osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=false"
+                    try:
+                        resp = requests.get(osrm_url, timeout=3).json()
+                        if resp.get('code') == 'Ok':
+                            drive_sec += resp['routes'][0]['duration']
+                        else: raise Exception()
+                    except:
+                        for j in range(len(chunk)-1):
+                            dist = haversine_dist(chunk[j][0], chunk[j][1], chunk[j+1][0], chunk[j+1][1])
+                            drive_sec += (dist / 48.28) * 3600 
+                return drive_sec / 60.0, len(nodes_to_route) * avg_stop
+            
+            if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
+                if st.session_state.optimized_route:
+                    d_mins, s_mins = calc_time(st.session_state.optimized_route)
+                    end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
+                    st.success(f"**MERGED ROUTE:** {len(st.session_state.optimized_route)} Total Stops")
+                    st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
+                    st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
+                else:
+                    st.warning("No stops found in your route.")
+            else:
+                has_data = False
+                for day in st.session_state.active_files:
+                    day_nodes = [n for n in st.session_state.optimized_route if n['sheet'] == day]
+                    if day_nodes:
+                        has_data = True
+                        d_mins, s_mins = calc_time(day_nodes)
                         end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                        st.success(f"**MERGED ROUTE:** {len(st.session_state.optimized_route)} Total Stops")
+                        st.success(f"**{day}:** {len(day_nodes)} Total Stops")
                         st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
                         st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                    else:
-                        st.warning("No stops found in your route.")
-                else:
-                    has_data = False
-                    for day in st.session_state.active_files:
-                        day_nodes = [n for n in st.session_state.optimized_route if n['sheet'] == day]
-                        if day_nodes:
-                            has_data = True
-                            d_mins, s_mins = calc_time(day_nodes)
-                            end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                            st.success(f"**{day}:** {len(day_nodes)} Total Stops")
-                            st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
-                            st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                    if not has_data:
-                        st.warning("No stops found in your route.")
+                if not has_data:
+                    st.warning("No stops found in your route.")

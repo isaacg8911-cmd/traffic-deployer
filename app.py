@@ -12,7 +12,7 @@ import uuid
 import io
 from folium.features import DivIcon
 from streamlit_folium import st_folium
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # --- TITANIUM SAFETY NET FOR COOKIES & GPS ---
@@ -29,10 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.120", layout="centered")
-
-# --- 👑 COMMANDER PROFILE SETUP ---
-COMMANDER_NAME = "Isaac"
+st.set_page_config(page_title="Traffic Data Service V51.121", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -45,12 +42,12 @@ def set_theme(theme_choice):
         .stApp { background-color: #000000; color: #FFFFFF; }
         h1, h2, h3 { color: #00FFFF !important; font-family: 'Arial Black'; font-weight: 900;}
         div.stButton > button { background-color: #000000; color: #00FFFF; border: 3px solid #00FFFF; font-weight: 900; }
+        .stTabs [data-baseweb="tab-list"] { background-color: #000000; border-bottom: 3px solid #333; }
         input, select, textarea { background-color: #000000 !important; color: #00FFFF !important; border: 2px solid #00FFFF !important; }
         div[data-testid="stMetricValue"] { color: #00FFFF !important; font-weight: 900; }
         .success-recap { background-color: #003300; border: 2px solid #00FF00; color: #00FF00; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
         .skip-recap { background-color: #330000; border: 2px solid #FF0000; color: #FF0000; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
         .list-card { background-color: #111; border: 1px solid #00FFFF; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
-        div[role="radiogroup"] { padding-bottom: 10px; border-bottom: 2px solid #333; margin-bottom: 15px;}
         </style>
         """
     else:
@@ -64,7 +61,6 @@ def set_theme(theme_choice):
         .success-recap { background-color: #1E2E1E; border: 2px solid #32CD32; color: #32CD32; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
         .skip-recap { background-color: #2E1E1E; border: 2px solid #FF4500; color: #FF4500; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
         .list-card { background-color: #1a1a1a; border: 1px solid #444; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
-        div[role="radiogroup"] { padding-bottom: 10px; border-bottom: 2px solid #333; margin-bottom: 15px;}
         </style>
         """
 
@@ -450,263 +446,206 @@ elif st.session_state.routing_phase == "drafting":
         
     map_tiles = "CartoDB dark_matter" if st.session_state.theme == "☁️ Overcast (Standard)" else "CartoDB positron"
     hc = st.session_state.home_coords
-    is_commander = str(st.session_state.driver_name).upper() == COMMANDER_NAME.upper()
     
-    if is_commander:
-        draft_view = st.radio("COMMAND CENTER NAVIGATION:", ["🗺️ ROUTE BUILDER", "👑 FORECAST"], horizontal=True, label_visibility="collapsed")
+    if st.session_state.upload_strategy == "📌 Keep Maps Separate (Day-by-Day)":
+        if "drafting_day" not in st.session_state or not st.session_state.drafting_day:
+            st.session_state.drafting_day = st.session_state.active_files[0] if st.session_state.active_files else None
+            
+        new_draft_day = st.radio("📝 ACTIVE MAP:", st.session_state.active_files, index=st.session_state.active_files.index(st.session_state.drafting_day) if st.session_state.drafting_day in st.session_state.active_files else 0, horizontal=True)
+        
+        if new_draft_day != st.session_state.drafting_day:
+            st.session_state.drafting_day = new_draft_day
+            st.session_state.map_center = None 
+            st.session_state.map_zoom = None
+            st.session_state.last_processed_click = None
+            st.rerun()
+            
+        active_raw_nodes = [n for n in st.session_state.raw_nodes if n['sheet'] == st.session_state.drafting_day]
+        active_title = f"({st.session_state.drafting_day})"
     else:
-        draft_view = "🗺️ ROUTE BUILDER"
+        active_raw_nodes = st.session_state.raw_nodes
+        active_title = "(All Maps Merged)"
+
+    active_total = len(active_raw_nodes)
+    active_sequence = [uid for uid in st.session_state.manual_sequence if any(n['uid'] == uid for n in active_raw_nodes)]
+    active_tapped = len(active_sequence)
+
+    st.subheader(f"🗺️ ROUTE BUILDER {active_title}")
+    st.info(f"Progress: {active_tapped}/{active_total} Sequenced. Map will NOT snap when dragging.")
     
-    if draft_view == "🗺️ ROUTE BUILDER":
-        if st.session_state.upload_strategy == "📌 Keep Maps Separate (Day-by-Day)":
-            if "drafting_day" not in st.session_state or not st.session_state.drafting_day:
-                st.session_state.drafting_day = st.session_state.active_files[0] if st.session_state.active_files else None
-                
-            new_draft_day = st.radio("📝 ACTIVE MAP:", st.session_state.active_files, index=st.session_state.active_files.index(st.session_state.drafting_day) if st.session_state.drafting_day in st.session_state.active_files else 0, horizontal=True)
+    if st.session_state.map_center and st.session_state.map_zoom:
+        m_draft = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom, tiles=map_tiles)
+    else:
+        m_draft = folium.Map(location=hc, zoom_start=11, tiles=map_tiles)
+        bounds = get_map_bounds(active_raw_nodes, hc)
+        if bounds: m_draft.fit_bounds(bounds) 
+        
+    folium.Marker(hc, tooltip="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_draft)
+    
+    path_coords = []
+    
+    for idx, uid in enumerate(active_sequence):
+        node = next((n for n in active_raw_nodes if n['uid'] == uid), None)
+        if node:
+            path_coords.append((node['nav_lat'], node['nav_lon']))
             
-            if new_draft_day != st.session_state.drafting_day:
-                st.session_state.drafting_day = new_draft_day
-                st.session_state.map_center = None 
-                st.session_state.map_zoom = None
-                st.session_state.last_processed_click = None
-                st.rerun()
-                
-            active_raw_nodes = [n for n in st.session_state.raw_nodes if n['sheet'] == st.session_state.drafting_day]
-            active_title = f"({st.session_state.drafting_day})"
-        else:
-            active_raw_nodes = st.session_state.raw_nodes
-            active_title = "(All Maps Merged)"
-
-        active_total = len(active_raw_nodes)
-        active_sequence = [uid for uid in st.session_state.manual_sequence if any(n['uid'] == uid for n in active_raw_nodes)]
-        active_tapped = len(active_sequence)
-
-        st.subheader(f"🗺️ ROUTE BUILDER {active_title}")
-        st.info(f"Progress: {active_tapped}/{active_total} Sequenced. Map will NOT snap when dragging.")
-        
-        if st.session_state.map_center and st.session_state.map_zoom:
-            m_draft = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom, tiles=map_tiles)
-        else:
-            m_draft = folium.Map(location=hc, zoom_start=11, tiles=map_tiles)
-            bounds = get_map_bounds(active_raw_nodes, hc)
-            if bounds: m_draft.fit_bounds(bounds) 
-            
-        folium.Marker(hc, tooltip="STARTING POINT", icon=folium.Icon(color="blue", icon="home")).add_to(m_draft)
-        
-        path_coords = []
-        
-        for idx, uid in enumerate(active_sequence):
-            node = next((n for n in active_raw_nodes if n['uid'] == uid), None)
-            if node:
-                path_coords.append((node['nav_lat'], node['nav_lon']))
-                tag = f" [{node['sheet']}]" if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route" else ""
-                folium.CircleMarker(
-                    location=(node['nav_lat'], node['nav_lon']), radius=10, color="#00FF00", fill=True, fill_color="#00FF00", fill_opacity=0.9,
-                    tooltip=f"Stop {idx+1}: Site {node['id']}{tag}"
-                ).add_to(m_draft)
-                
-                folium.Marker(
-                    location=(node['nav_lat'], node['nav_lon']),
-                    icon=DivIcon(
-                        icon_size=(20,20),
-                        icon_anchor=(10,10),
-                        html=f'<div style="font-size: 10pt; color: black; font-weight: 900; text-align: center; line-height: 20px;">{idx+1}</div>',
-                    )
-                ).add_to(m_draft)
-                
-        unsequenced_active = [n for n in active_raw_nodes if n['uid'] not in st.session_state.manual_sequence]
-        for node in unsequenced_active:
             tag = f" [{node['sheet']}]" if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route" else ""
-            folium.CircleMarker(
-                location=(node['nav_lat'], node['nav_lon']), radius=8, color="#FFA500", fill=True, fill_color="#FFA500", fill_opacity=0.7,
-                tooltip=f"Site {node['id']}{tag} (Untapped)"
-            ).add_to(m_draft)
-
-        if len(path_coords) > 1:
-            folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
-                
-        map_data = st_folium(m_draft, width=720, height=450, returned_objects=["last_object_clicked"], key="draft_map")
-        
-        if map_data and map_data.get("last_object_clicked"):
-            click_lat = map_data["last_object_clicked"]["lat"]
-            click_lon = map_data["last_object_clicked"]["lng"]
-            click_id = f"{click_lat}_{click_lon}"
             
-            if click_id != st.session_state.last_processed_click:
-                st.session_state.last_processed_click = click_id
-                
-                min_dist = float('inf')
-                clicked_uid = None
-                for s in active_raw_nodes:
-                    dist = haversine_dist(click_lat, click_lon, s['nav_lat'], s['nav_lon'])
-                    if dist < min_dist:
-                        min_dist = dist
-                        clicked_uid = s['uid']
-                        
-                if clicked_uid and min_dist < 0.2:
-                    if clicked_uid not in st.session_state.manual_sequence:
-                        st.session_state.manual_sequence.append(clicked_uid)
-                        st.session_state.map_center = [click_lat, click_lon]
-                        st.session_state.map_zoom = 14 
-                        auto_save()
-                        st.rerun()
+            folium.CircleMarker(
+                location=(node['nav_lat'], node['nav_lon']), radius=10, color="#00FF00", fill=True, fill_color="#00FF00", fill_opacity=0.9,
+                tooltip=f"Stop {idx+1}: Site {node['id']}{tag}"
+            ).add_to(m_draft)
+            
+            folium.Marker(
+                location=(node['nav_lat'], node['nav_lon']),
+                icon=DivIcon(
+                    icon_size=(20,20),
+                    icon_anchor=(10,10),
+                    html=f'<div style="font-size: 10pt; color: black; font-weight: 900; text-align: center; line-height: 20px;">{idx+1}</div>',
+                )
+            ).add_to(m_draft)
+            
+    unsequenced_active = [n for n in active_raw_nodes if n['uid'] not in st.session_state.manual_sequence]
+    for node in unsequenced_active:
+        tag = f" [{node['sheet']}]" if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route" else ""
+        folium.CircleMarker(
+            location=(node['nav_lat'], node['nav_lon']), radius=8, color="#FFA500", fill=True, fill_color="#FFA500", fill_opacity=0.7,
+            tooltip=f"Site {node['id']}{tag} (Untapped)"
+        ).add_to(m_draft)
 
-        st.divider()
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            if st.button("⏪ UNDO LAST TAP", use_container_width=True):
-                if len(active_sequence) > 0:
-                    uid_to_remove = active_sequence[-1]
-                    st.session_state.manual_sequence.remove(uid_to_remove)
-                    st.session_state.last_processed_click = None 
-                    
-                    new_active_sequence = [uid for uid in st.session_state.manual_sequence if any(n['uid'] == uid for n in active_raw_nodes)]
-                    if len(new_active_sequence) > 0:
-                        prev_uid = new_active_sequence[-1]
-                        prev_node = next((n for n in active_raw_nodes if n['uid'] == prev_uid), None)
-                        if prev_node:
-                            st.session_state.map_center = [prev_node['nav_lat'], prev_node['nav_lon']]
-                    else:
-                        st.session_state.map_center = None
-                        
-                    auto_save()
-                    st.rerun()
-        with c2:
-            if st.button("🤖 SMART AUTO-FINISH", use_container_width=True):
-                if unsequenced_active:
-                    if len(active_sequence) == 0:
-                        auto_route = solve_tsp_fixed(unsequenced_active, hc)
-                        for n in auto_route:
-                            st.session_state.manual_sequence.append(n['uid'])
-                    else:
-                        current_seq = list(active_sequence)
-                        for u_node in unsequenced_active:
-                            best_insert_idx = len(current_seq)
-                            min_added_dist = float('inf')
-                            
-                            node_0 = next(n for n in active_raw_nodes if n['uid'] == current_seq[0])
-                            d_home_u = haversine_dist(hc[0], hc[1], u_node['nav_lat'], u_node['nav_lon'])
-                            d_u_0 = haversine_dist(u_node['nav_lat'], u_node['nav_lon'], node_0['nav_lat'], node_0['nav_lon'])
-                            d_home_0 = haversine_dist(hc[0], hc[1], node_0['nav_lat'], node_0['nav_lon'])
-                            if (d_home_u + d_u_0 - d_home_0) < min_added_dist:
-                                min_added_dist = (d_home_u + d_u_0 - d_home_0)
-                                best_insert_idx = 0
-                                
-                            for i in range(len(current_seq) - 1):
-                                n_a = next(n for n in active_raw_nodes if n['uid'] == current_seq[i])
-                                n_b = next(n for n in active_raw_nodes if n['uid'] == current_seq[i+1])
-                                d_a_u = haversine_dist(n_a['nav_lat'], n_a['nav_lon'], u_node['nav_lat'], u_node['nav_lon'])
-                                d_u_b = haversine_dist(u_node['nav_lat'], u_node['nav_lon'], n_b['nav_lat'], n_b['nav_lon'])
-                                d_a_b = haversine_dist(n_a['nav_lat'], n_a['nav_lon'], n_b['nav_lat'], n_b['nav_lon'])
-                                if (d_a_u + d_u_b - d_a_b) < min_added_dist:
-                                    min_added_dist = (d_a_u + d_u_b - d_a_b)
-                                    best_insert_idx = i + 1
-                                    
-                            n_last = next(n for n in active_raw_nodes if n['uid'] == current_seq[-1])
-                            added = haversine_dist(n_last['nav_lat'], n_last['nav_lon'], u_node['nav_lat'], u_node['nav_lon'])
-                            if added < min_added_dist:
-                                best_insert_idx = len(current_seq)
-                                
-                            current_seq.insert(best_insert_idx, u_node['uid'])
-                        
-                        first_idx = next((i for i, uid in enumerate(st.session_state.manual_sequence) if uid in active_sequence), len(st.session_state.manual_sequence))
-                        st.session_state.manual_sequence = [uid for uid in st.session_state.manual_sequence if uid not in current_seq]
-                        for uid in reversed(current_seq):
-                            st.session_state.manual_sequence.insert(first_idx, uid)
-                    auto_save()
-                    st.rerun()
-        with c3:
-            if st.button("🗑️ CLEAR THIS MAP", use_container_width=True):
-                st.session_state.manual_sequence = [uid for uid in st.session_state.manual_sequence if uid not in active_sequence]
-                st.session_state.last_processed_click = None
-                st.session_state.map_center = None 
-                st.session_state.map_zoom = None
-                auto_save()
-                st.rerun()
-
-        st.divider()
+    if len(path_coords) > 1:
+        folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
+            
+    # FIXED: Width is hardcoded to 720 to prevent React Error #185 Layout Thrashing
+    map_data = st_folium(m_draft, width=720, height=450, returned_objects=["last_object_clicked"], key="draft_map")
+    
+    if map_data and map_data.get("last_object_clicked"):
+        click_lat = map_data["last_object_clicked"]["lat"]
+        click_lon = map_data["last_object_clicked"]["lng"]
+        click_id = f"{click_lat}_{click_lon}"
         
-        global_tapped = len(st.session_state.manual_sequence)
-        if global_tapped > 0:
-            if st.button(f"✅ FINALIZE ALL ROUTES ({global_tapped} Total Stops)", use_container_width=True):
-                st.session_state.optimized_route = []
-                for uid in st.session_state.manual_sequence:
-                    node = next((n for n in st.session_state.raw_nodes if n['uid'] == uid))
-                    st.session_state.optimized_route.append(node)
+        if click_id != st.session_state.last_processed_click:
+            st.session_state.last_processed_click = click_id
+            
+            min_dist = float('inf')
+            clicked_uid = None
+            for s in active_raw_nodes:
+                dist = haversine_dist(click_lat, click_lon, s['nav_lat'], s['nav_lon'])
+                if dist < min_dist:
+                    min_dist = dist
+                    clicked_uid = s['uid']
                     
-                st.session_state.site_data = {
-                    s['uid']: {
-                        "Date": "", "Time": "", "ExactTime": "", "Site": s['id'], "UID": s['uid'], "Counter": "c1b",
-                        "Serial": "", "Directions": "n", "Lanes": 2, "Street": s['street'], "Notes": "", "Installed": "",
-                        "LAT": s['nav_lat'], "LON": s['nav_lon'], "Skipped": "", "Sheet": s['sheet']
-                    } for s in st.session_state.optimized_route
-                }
-                st.session_state.map_center = None 
-                st.session_state.map_zoom = None
-                st.session_state.routing_phase = "finalized"
+            if clicked_uid and min_dist < 0.2:
+                if clicked_uid not in st.session_state.manual_sequence:
+                    st.session_state.manual_sequence.append(clicked_uid)
+                    st.session_state.map_center = [click_lat, click_lon]
+                    st.session_state.map_zoom = 14 
+                    auto_save()
+                    st.rerun()
+
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("⏪ UNDO LAST TAP", use_container_width=True):
+            if len(active_sequence) > 0:
+                uid_to_remove = active_sequence[-1]
+                st.session_state.manual_sequence.remove(uid_to_remove)
+                st.session_state.last_processed_click = None 
+                
+                new_active_sequence = [uid for uid in st.session_state.manual_sequence if any(n['uid'] == uid for n in active_raw_nodes)]
+                if len(new_active_sequence) > 0:
+                    prev_uid = new_active_sequence[-1]
+                    prev_node = next((n for n in active_raw_nodes if n['uid'] == prev_uid), None)
+                    if prev_node:
+                        st.session_state.map_center = [prev_node['nav_lat'], prev_node['nav_lon']]
+                else:
+                    st.session_state.map_center = None
+                    
                 auto_save()
                 st.rerun()
-                
-        if st.button("❌ CANCEL & RESTART"):
-            if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
-            keys_to_wipe = ["optimized_route", "raw_nodes", "manual_sequence", "routing_phase", "last_processed_click", "map_center", "map_zoom", "drafting_day"]
-            for k in keys_to_wipe:
-                if k in st.session_state: del st.session_state[k]
-            st.session_state.routing_phase = "upload"
+    with c2:
+        if st.button("🤖 SMART AUTO-FINISH", use_container_width=True):
+            if unsequenced_active:
+                if len(active_sequence) == 0:
+                    auto_route = solve_tsp_fixed(unsequenced_active, hc)
+                    for n in auto_route:
+                        st.session_state.manual_sequence.append(n['uid'])
+                else:
+                    current_seq = list(active_sequence)
+                    for u_node in unsequenced_active:
+                        best_insert_idx = len(current_seq)
+                        min_added_dist = float('inf')
+                        
+                        node_0 = next(n for n in active_raw_nodes if n['uid'] == current_seq[0])
+                        d_home_u = haversine_dist(hc[0], hc[1], u_node['nav_lat'], u_node['nav_lon'])
+                        d_u_0 = haversine_dist(u_node['nav_lat'], u_node['nav_lon'], node_0['nav_lat'], node_0['nav_lon'])
+                        d_home_0 = haversine_dist(hc[0], hc[1], node_0['nav_lat'], node_0['nav_lon'])
+                        if (d_home_u + d_u_0 - d_home_0) < min_added_dist:
+                            min_added_dist = (d_home_u + d_u_0 - d_home_0)
+                            best_insert_idx = 0
+                            
+                        for i in range(len(current_seq) - 1):
+                            n_a = next(n for n in active_raw_nodes if n['uid'] == current_seq[i])
+                            n_b = next(n for n in active_raw_nodes if n['uid'] == current_seq[i+1])
+                            d_a_u = haversine_dist(n_a['nav_lat'], n_a['nav_lon'], u_node['nav_lat'], u_node['nav_lon'])
+                            d_u_b = haversine_dist(u_node['nav_lat'], u_node['nav_lon'], n_b['nav_lat'], n_b['nav_lon'])
+                            d_a_b = haversine_dist(n_a['nav_lat'], n_a['nav_lon'], n_b['nav_lat'], n_b['nav_lon'])
+                            if (d_a_u + d_u_b - d_a_b) < min_added_dist:
+                                min_added_dist = (d_a_u + d_u_b - d_a_b)
+                                best_insert_idx = i + 1
+                                
+                        n_last = next(n for n in active_raw_nodes if n['uid'] == current_seq[-1])
+                        added = haversine_dist(n_last['nav_lat'], n_last['nav_lon'], u_node['nav_lat'], u_node['nav_lon'])
+                        if added < min_added_dist:
+                            best_insert_idx = len(current_seq)
+                            
+                        current_seq.insert(best_insert_idx, u_node['uid'])
+                    
+                    first_idx = next((i for i, uid in enumerate(st.session_state.manual_sequence) if uid in active_sequence), len(st.session_state.manual_sequence))
+                    st.session_state.manual_sequence = [uid for uid in st.session_state.manual_sequence if uid not in current_seq]
+                    for uid in reversed(current_seq):
+                        st.session_state.manual_sequence.insert(first_idx, uid)
+                auto_save()
+                st.rerun()
+    with c3:
+        if st.button("🗑️ CLEAR THIS MAP", use_container_width=True):
+            st.session_state.manual_sequence = [uid for uid in st.session_state.manual_sequence if uid not in active_sequence]
+            st.session_state.last_processed_click = None
+            st.session_state.map_center = None 
+            st.session_state.map_zoom = None
+            auto_save()
             st.rerun()
 
-    elif draft_view == "👑 FORECAST":
-        st.subheader("👑 Commander Projection Engine")
-        st.info("Calculate offline, math-based shift duration using your physical sequence.")
-        
-        c_proj1, c_proj2, c_proj3, c_proj4 = st.columns(4)
-        with c_proj1: shift_start = st.time_input("Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start_draft")
-        with c_proj2: avg_stop = st.number_input("Mins/Stop:", value=15, min_value=1, key="proj_mins_draft")
-        with c_proj3: avg_speed = st.number_input("Avg MPH:", value=30, min_value=5, key="proj_speed_draft")
-        with c_proj4: 
-            st.write("")
-            run_proj = st.button("⏱️ RUN", use_container_width=True, key="proj_btn_draft")
-            
-        if run_proj:
-            start_dt = datetime.combine(datetime.today(), shift_start)
-            speed_kmh = avg_speed * 1.60934
-            
-            def calc_time(uids):
-                if not uids: return 0, 0, 0
-                coords = [(hc[0], hc[1])]
-                for u in uids:
-                    node = next((n for n in st.session_state.raw_nodes if n['uid'] == u), None)
-                    if node: coords.append((node['nav_lat'], node['nav_lon']))
-                coords.append((hc[0], hc[1]))
+    st.divider()
+    
+    global_tapped = len(st.session_state.manual_sequence)
+    if global_tapped > 0:
+        if st.button(f"✅ FINALIZE ALL ROUTES ({global_tapped} Total Stops)", use_container_width=True):
+            st.session_state.optimized_route = []
+            for uid in st.session_state.manual_sequence:
+                node = next((n for n in st.session_state.raw_nodes if n['uid'] == uid))
+                st.session_state.optimized_route.append(node)
                 
-                total_dist_km = sum(haversine_dist(coords[i][0], coords[i][1], coords[i+1][0], coords[i+1][1]) for i in range(len(coords)-1))
-                total_miles = total_dist_km / 1.60934
-                drive_mins = (total_miles / avg_speed) * 60
-                work_mins = len(uids) * avg_stop
-                return drive_mins, work_mins, total_miles
+            st.session_state.site_data = {
+                s['uid']: {
+                    "Date": "", "Time": "", "ExactTime": "", "Site": s['id'], "UID": s['uid'], "Counter": "c1b",
+                    "Serial": "", "Directions": "n", "Lanes": 2, "Street": s['street'], "Notes": "", "Installed": "",
+                    "LAT": s['nav_lat'], "LON": s['nav_lon'], "Skipped": "", "Sheet": s['sheet']
+                } for s in st.session_state.optimized_route
+            }
+            st.session_state.map_center = None 
+            st.session_state.map_zoom = None
+            st.session_state.routing_phase = "finalized"
+            auto_save()
+            st.rerun()
             
-            if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
-                if st.session_state.manual_sequence:
-                    d_mins, s_mins, t_miles = calc_time(st.session_state.manual_sequence)
-                    end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                    st.success(f"**MERGED ROUTE:** {len(st.session_state.manual_sequence)} Stops")
-                    st.write(f"🚗 Est. Drive: {int(d_mins)} mins ({t_miles:.1f} mi) | 🛠️ Work: {int(s_mins)} mins")
-                    st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                else:
-                    st.warning("Sequence some stops first!")
-            else:
-                has_data = False
-                for day in st.session_state.active_files:
-                    day_uids = [u for u in st.session_state.manual_sequence if any(n['uid'] == u and n['sheet'] == day for n in st.session_state.raw_nodes)]
-                    if day_uids:
-                        has_data = True
-                        d_mins, s_mins, t_miles = calc_time(day_uids)
-                        end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                        st.success(f"**{day}:** {len(day_uids)} Stops")
-                        st.write(f"🚗 Est. Drive: {int(d_mins)} mins ({t_miles:.1f} mi) | 🛠️ Work: {int(s_mins)} mins")
-                        st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                if not has_data:
-                    st.warning("Sequence some stops first!")
+    if st.button("❌ CANCEL & RESTART"):
+        if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
+        keys_to_wipe = ["optimized_route", "raw_nodes", "manual_sequence", "routing_phase", "last_processed_click", "map_center", "map_zoom", "drafting_day"]
+        for k in keys_to_wipe:
+            if k in st.session_state: del st.session_state[k]
+        st.session_state.routing_phase = "upload"
+        st.rerun()
 
 # --- FINALIZED PHASE ---
 elif st.session_state.routing_phase == "finalized":
@@ -731,20 +670,9 @@ elif st.session_state.routing_phase == "finalized":
     active_route = st.session_state.optimized_route if selected_day == "All Days" else [s for s in st.session_state.optimized_route if s['sheet'] == selected_day]
     active_uids = [s['uid'] for s in active_route]
     
-    tab_names = ["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL / AUDIT"]
-    is_commander = str(st.session_state.driver_name).upper() == COMMANDER_NAME.upper()
-    if is_commander:
-        tab_names.append("👑 COMMANDER")
-        
-    if "active_main_tab" not in st.session_state:
-        st.session_state.active_main_tab = "📁 ROUTE"
-        
-    main_view = st.radio("OPERATIONAL NAVIGATION:", tab_names, index=tab_names.index(st.session_state.active_main_tab) if st.session_state.active_main_tab in tab_names else 0, horizontal=True, label_visibility="collapsed")
-    if main_view != st.session_state.active_main_tab:
-        st.session_state.active_main_tab = main_view
-        st.rerun()
+    tab1, tab2, tab3, tab4 = st.tabs(["📁 ROUTE", "📍 INSTALL", "♻️ PICK-UP", "📊 EXCEL / AUDIT"])
     
-    if main_view == "📁 ROUTE":
+    with tab1:
         st.success(f"STOPS IN VIEW: {len(active_route)}")
         
         hc = st.session_state.home_coords
@@ -796,18 +724,17 @@ elif st.session_state.routing_phase == "finalized":
             if st.button(f"{status_icon} Stop {idx+1}: Site {sd.get('Site', s['id'])}{tag}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
                 st.session_state.current_index = next((i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid']), 0)
                 st.session_state.install_view_toggle = "Single Site Mode" 
-                st.session_state.active_main_tab = "📍 INSTALL"
                 st.rerun()
                 
         if st.button("🗑️ RESET ROUTE (CLEAR DEVICE)"):
             if os.path.exists(BACKUP_FILE): os.remove(BACKUP_FILE)
-            keys_to_wipe = ["optimized_route", "raw_nodes", "manual_sequence", "routing_phase", "site_data", "map_center", "map_zoom", "drafting_day", "active_main_tab"]
+            keys_to_wipe = ["optimized_route", "raw_nodes", "manual_sequence", "routing_phase", "site_data", "map_center", "map_zoom", "drafting_day"]
             for k in keys_to_wipe:
                 if k in st.session_state: del st.session_state[k]
             st.session_state.routing_phase = "upload"
             st.rerun()
             
-    elif main_view == "📍 INSTALL":
+    with tab2:
         installed_count = sum(1 for s in active_route if st.session_state.site_data[s['uid']].get("Installed") == "x" or st.session_state.site_data[s['uid']].get("Skipped") == "x")
         total_active = len(active_route)
         if total_active > 0:
@@ -975,7 +902,7 @@ elif st.session_state.routing_phase == "finalized":
             
             render_backup_button("install_bottom")
                     
-    elif main_view == "♻️ PICK-UP":
+    with tab3:
         raw_itin = [sd for sd in st.session_state.site_data.values() if sd.get("Installed") == "x"]
         
         if raw_itin:
@@ -1134,7 +1061,7 @@ elif st.session_state.routing_phase == "finalized":
                     
                     render_backup_button("pickup_bottom_single")
                         
-    elif main_view == "📊 EXCEL / AUDIT":
+    with tab4:
         st.subheader("📋 End of Day Audit")
         missing_data = []
         all_d = [d for d in st.session_state.site_data.values() if d.get("Installed") == "x" or d.get("Skipped") == "x"]
@@ -1186,54 +1113,3 @@ elif st.session_state.routing_phase == "finalized":
                 )
         
         render_backup_button("audit_bottom")
-        
-    elif is_commander and main_view == "👑 COMMANDER":
-        st.subheader("👑 Commander Projection Engine")
-        st.info("Live recalculation of your finalized shift based on completed work.")
-        
-        c_proj1, c_proj2, c_proj3, c_proj4 = st.columns(4)
-        with c_proj1: shift_start = st.time_input("Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time(), key="proj_start_fin")
-        with c_proj2: avg_stop = st.number_input("Mins/Stop:", value=15, min_value=1, key="proj_mins_fin")
-        with c_proj3: avg_speed = st.number_input("Avg MPH:", value=30, min_value=5, key="proj_speed_fin")
-        with c_proj4: 
-            st.write("")
-            run_proj = st.button("⏱️ RUN", use_container_width=True, key="proj_btn_fin")
-            
-        if run_proj:
-            start_dt = datetime.combine(datetime.today(), shift_start)
-            
-            def calc_time(nodes_to_route):
-                if not nodes_to_route: return 0, 0, 0
-                coords = [(hc[0], hc[1])]
-                for node in nodes_to_route:
-                    coords.append((node['nav_lat'], node['nav_lon']))
-                coords.append((hc[0], hc[1]))
-                
-                total_dist_km = sum(haversine_dist(coords[i][0], coords[i][1], coords[i+1][0], coords[i+1][1]) for i in range(len(coords)-1))
-                total_miles = total_dist_km / 1.60934
-                drive_mins = (total_miles / avg_speed) * 60
-                work_mins = len(nodes_to_route) * avg_stop
-                return drive_mins, work_mins, total_miles
-            
-            if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
-                if st.session_state.optimized_route:
-                    d_mins, s_mins, t_miles = calc_time(st.session_state.optimized_route)
-                    end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                    st.success(f"**MERGED ROUTE:** {len(st.session_state.optimized_route)} Total Stops")
-                    st.write(f"🚗 Est. Drive: {int(d_mins)} mins ({t_miles:.1f} mi) | 🛠️ Work: {int(s_mins)} mins")
-                    st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                else:
-                    st.warning("No stops found in your route.")
-            else:
-                has_data = False
-                for day in st.session_state.active_files:
-                    day_nodes = [n for n in st.session_state.optimized_route if n['sheet'] == day]
-                    if day_nodes:
-                        has_data = True
-                        d_mins, s_mins, t_miles = calc_time(day_nodes)
-                        end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
-                        st.success(f"**{day}:** {len(day_nodes)} Total Stops")
-                        st.write(f"🚗 Est. Drive: {int(d_mins)} mins ({t_miles:.1f} mi) | 🛠️ Work: {int(s_mins)} mins")
-                        st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
-                if not has_data:
-                    st.warning("No stops found in your route.")

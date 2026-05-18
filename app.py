@@ -33,7 +33,7 @@ st.set_page_config(page_title="Traffic Data Service V51.116", layout="centered")
 
 # --- 👑 COMMANDER PROFILE SETUP ---
 # Change "BOSS" to whatever EXACT name you type into the Login screen.
-COMMANDER_NAME = "Isaac Garcia"
+COMMANDER_NAME = "Isaac"
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:

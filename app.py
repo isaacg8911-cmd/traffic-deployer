@@ -12,7 +12,7 @@ import uuid
 import io
 from folium.features import DivIcon
 from streamlit_folium import st_folium
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- TITANIUM SAFETY NET FOR COOKIES & GPS ---
@@ -29,7 +29,11 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.115", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.116", layout="centered")
+
+# --- 👑 COMMANDER PROFILE SETUP ---
+# Change "BOSS" to whatever EXACT name you type into the Login screen.
+COMMANDER_NAME = "Isaac Garcia"
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -489,7 +493,6 @@ elif st.session_state.routing_phase == "drafting":
         if node:
             path_coords.append((node['nav_lat'], node['nav_lon']))
             
-            # Show Map/Sheet origin tag in tooltip if merged
             tag = f" [{node['sheet']}]" if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route" else ""
             
             folium.CircleMarker(
@@ -619,6 +622,66 @@ elif st.session_state.routing_phase == "drafting":
             st.rerun()
 
     st.divider()
+
+    # --- 👑 COMMANDER EXCLUSIVE: SHIFT PROJECTION ENGINE ---
+    if str(st.session_state.driver_name).upper() == COMMANDER_NAME.upper():
+        with st.expander("👑 COMMANDER PROJECTION ENGINE", expanded=True):
+            st.info("Calculate estimated shift duration and return-home time based on current sequence.")
+            c_proj1, c_proj2, c_proj3 = st.columns(3)
+            with c_proj1: shift_start = st.time_input("Shift Start Time:", value=datetime.strptime("08:00 AM", "%I:%M %p").time())
+            with c_proj2: avg_stop = st.number_input("Avg Mins per Stop:", value=15, min_value=1)
+            with c_proj3: 
+                st.write("")
+                run_proj = st.button("⏱️ PROJECT SHIFT", use_container_width=True)
+                
+            if run_proj:
+                start_dt = datetime.combine(datetime.today(), shift_start)
+                
+                def calc_time(uids):
+                    if not uids: return 0, 0
+                    coords = [(hc[0], hc[1])]
+                    for u in uids:
+                        node = next((n for n in st.session_state.raw_nodes if n['uid'] == u), None)
+                        if node: coords.append((node['nav_lat'], node['nav_lon']))
+                    coords.append((hc[0], hc[1]))
+                    
+                    drive_sec = 0
+                    chunk_size = 50
+                    for i in range(0, len(coords) - 1, chunk_size - 1):
+                        chunk = coords[i:i + chunk_size]
+                        coords_str = ";".join([f"{lon},{lat}" for lat, lon in chunk])
+                        osrm_url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=false"
+                        try:
+                            resp = requests.get(osrm_url, timeout=3).json()
+                            if resp.get('code') == 'Ok':
+                                drive_sec += resp['routes'][0]['duration']
+                            else: raise Exception()
+                        except:
+                            for j in range(len(chunk)-1):
+                                dist = haversine_dist(chunk[j][0], chunk[j][1], chunk[j+1][0], chunk[j+1][1])
+                                drive_sec += (dist / 48.28) * 3600 # Fallback 30mph math
+                    return drive_sec / 60.0, len(uids) * avg_stop
+                
+                if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route":
+                    if st.session_state.manual_sequence:
+                        d_mins, s_mins = calc_time(st.session_state.manual_sequence)
+                        end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
+                        st.success(f"**MERGED ROUTE:** {len(st.session_state.manual_sequence)} Stops")
+                        st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
+                        st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
+                    else:
+                        st.warning("Sequence some stops first!")
+                else:
+                    for day in st.session_state.active_files:
+                        day_uids = [u for u in st.session_state.manual_sequence if any(n['uid'] == u and n['sheet'] == day for n in st.session_state.raw_nodes)]
+                        if day_uids:
+                            d_mins, s_mins = calc_time(day_uids)
+                            end_dt = start_dt + timedelta(minutes=(d_mins + s_mins))
+                            st.success(f"**{day}:** {len(day_uids)} Stops")
+                            st.write(f"🚗 Drive Time: {int(d_mins)} mins | 🛠️ Work Time: {int(s_mins)} mins")
+                            st.info(f"🏁 **Projected Return Home: {end_dt.strftime('%I:%M %p')}**")
+
+        st.divider()
     
     global_tapped = len(st.session_state.manual_sequence)
     if global_tapped > 0:
@@ -659,7 +722,6 @@ elif st.session_state.routing_phase == "finalized":
         
     map_tiles = "CartoDB dark_matter" if st.session_state.theme == "☁️ Overcast (Standard)" else "CartoDB positron"
     
-    # Origin Tag logic
     show_origin_tag = st.session_state.get("upload_strategy") == "🔗 Merge All Maps into One Route"
     
     if show_origin_tag:
@@ -800,7 +862,7 @@ elif st.session_state.routing_phase == "finalized":
                 if display_street.lower() == 'nan': display_street = ""
                 new_street = st.text_input("📍 STREET NAME (Auto-Fills on Install):", value=display_street)
                 
-                nav_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
+                nav_url = f"https://www.google.com/maps/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
                 st.link_button("🚗 NAV TO SITE", nav_url, use_container_width=True)
                 
                 batch = []
@@ -817,7 +879,7 @@ elif st.session_state.routing_phase == "finalized":
                 if len(batch) > 1:
                     waypoints_str = "|".join(batch[:-1])
                     dest_str = batch[-1]
-                    batch_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
+                    batch_url = f"https://www.google.com/maps/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
                     st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", batch_url, use_container_width=True)
                 
                 st.info("📍 Grab precise GPS below to lock-in the exact field coordinate and auto-name the street.")
@@ -877,7 +939,7 @@ elif st.session_state.routing_phase == "finalized":
                                 if next_idx != cur:
                                     n_lat = st.session_state.optimized_route[next_idx]['nav_lat']
                                     n_lon = st.session_state.optimized_route[next_idx]['nav_lon']
-                                    st.session_state.auto_open_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
+                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
 
                         else:
                             st.session_state.msg_type = "skip"
@@ -1048,7 +1110,7 @@ elif st.session_state.routing_phase == "finalized":
                         
                         st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}{tag}")
                         
-                        nav_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={p_lat},{p_lon}&dir_action=navigate"
+                        nav_url = f"https://www.google.com/maps/dir/?api=1&destination={p_lat},{p_lon}&dir_action=navigate"
                         st.link_button("🚗 NAV TO FIELD GPS", nav_url, use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):

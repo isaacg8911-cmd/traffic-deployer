@@ -29,7 +29,7 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.114", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.115", layout="centered")
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -447,7 +447,6 @@ elif st.session_state.routing_phase == "drafting":
     map_tiles = "CartoDB dark_matter" if st.session_state.theme == "☁️ Overcast (Standard)" else "CartoDB positron"
     hc = st.session_state.home_coords
     
-    # ISOLATION LOGIC
     if st.session_state.upload_strategy == "📌 Keep Maps Separate (Day-by-Day)":
         if "drafting_day" not in st.session_state or not st.session_state.drafting_day:
             st.session_state.drafting_day = st.session_state.active_files[0] if st.session_state.active_files else None
@@ -489,9 +488,13 @@ elif st.session_state.routing_phase == "drafting":
         node = next((n for n in active_raw_nodes if n['uid'] == uid), None)
         if node:
             path_coords.append((node['nav_lat'], node['nav_lon']))
+            
+            # Show Map/Sheet origin tag in tooltip if merged
+            tag = f" [{node['sheet']}]" if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route" else ""
+            
             folium.CircleMarker(
                 location=(node['nav_lat'], node['nav_lon']), radius=10, color="#00FF00", fill=True, fill_color="#00FF00", fill_opacity=0.9,
-                tooltip=f"Stop {idx+1}: Site {node['id']}"
+                tooltip=f"Stop {idx+1}: Site {node['id']}{tag}"
             ).add_to(m_draft)
             
             folium.Marker(
@@ -505,15 +508,15 @@ elif st.session_state.routing_phase == "drafting":
             
     unsequenced_active = [n for n in active_raw_nodes if n['uid'] not in st.session_state.manual_sequence]
     for node in unsequenced_active:
+        tag = f" [{node['sheet']}]" if st.session_state.upload_strategy == "🔗 Merge All Maps into One Route" else ""
         folium.CircleMarker(
             location=(node['nav_lat'], node['nav_lon']), radius=8, color="#FFA500", fill=True, fill_color="#FFA500", fill_opacity=0.7,
-            tooltip=f"Site {node['id']} (Untapped)"
+            tooltip=f"Site {node['id']}{tag} (Untapped)"
         ).add_to(m_draft)
 
     if len(path_coords) > 1:
         folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
             
-    # BLIND MAP: No returned center/zoom = NO SNAPPING
     map_data = st_folium(m_draft, height=450, use_container_width=True, returned_objects=["last_object_clicked"], key="draft_map")
     
     if map_data and map_data.get("last_object_clicked"):
@@ -656,13 +659,15 @@ elif st.session_state.routing_phase == "finalized":
         
     map_tiles = "CartoDB dark_matter" if st.session_state.theme == "☁️ Overcast (Standard)" else "CartoDB positron"
     
-    if st.session_state.get("upload_strategy") == "🔗 Merge All Maps into One Route":
+    # Origin Tag logic
+    show_origin_tag = st.session_state.get("upload_strategy") == "🔗 Merge All Maps into One Route"
+    
+    if show_origin_tag:
         available_days = ["All Days"]
         selected_day = "All Days"
         st.info("🔗 Mission Filter locked: All maps merged into a single route.")
     else:
         available_days = ["All Days"] + st.session_state.active_files
-        # Set default view to Day 1 so the finalized map isn't an overlapping mess
         selected_day = st.selectbox("📅 MISSION FILTER:", available_days, index=1 if len(available_days) > 1 else 0)
     
     active_route = st.session_state.optimized_route if selected_day == "All Days" else [s for s in st.session_state.optimized_route if s['sheet'] == selected_day]
@@ -692,9 +697,11 @@ elif st.session_state.routing_phase == "finalized":
                 route_coords.append((safe_lat, safe_lon))
                 color = "#FF0000" if skipped else ("#00FF00" if done else "#FFA500")
                 
+                tag = f" [{sd.get('Sheet')}]" if show_origin_tag else ""
+                
                 folium.CircleMarker(
                     location=(safe_lat, safe_lon), radius=10, color=color, fill=True, fill_color=color, fill_opacity=0.9,
-                    tooltip=f"Stop {idx+1}: Site {sd.get('Site', s['id'])}"
+                    tooltip=f"Stop {idx+1}: Site {sd.get('Site', s['id'])}{tag}"
                 ).add_to(m)
                 
                 folium.Marker(
@@ -728,7 +735,8 @@ elif st.session_state.routing_phase == "finalized":
             done = sd.get("Installed") == "x" or sd.get("Picked up") == "x"
             skipped = sd.get("Skipped") == "x"
             status_icon = '❌' if skipped else ('✅' if done else '🟠')
-            if st.button(f"{status_icon} Stop {idx+1}: {sd.get('Site', s['id'])}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
+            tag = f" [{sd.get('Sheet')}]" if show_origin_tag else ""
+            if st.button(f"{status_icon} Stop {idx+1}: Site {sd.get('Site', s['id'])}{tag}", key=f"m_{s['uid']}_{st.session_state.session_id}", use_container_width=True):
                 st.session_state.current_index = next((i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid']), 0)
                 st.session_state.install_view_toggle = "Single Site Mode" 
                 st.rerun()
@@ -754,12 +762,13 @@ elif st.session_state.routing_phase == "finalized":
             for idx, s in enumerate(active_route):
                 sd = st.session_state.site_data[s['uid']]
                 status = "✅ Installed" if sd.get("Installed") == "x" else ("❌ Skipped" if sd.get("Skipped") == "x" else "⏳ Pending")
+                tag = f" [{sd.get('Sheet')}]" if show_origin_tag else ""
                 
                 with st.container():
                     st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
                     c1, c2, c3 = st.columns([1, 3, 1])
                     c1.write(f"**{status}**")
-                    c2.write(f"Stop {idx+1}: **Site {sd.get('Site')}** \n{sd.get('Street', 'Unknown Street')}")
+                    c2.write(f"Stop {idx+1}: **Site {sd.get('Site')}**{tag} \n{sd.get('Street', 'Unknown Street')}")
                     
                     if c3.button("🔍 OPEN", key=f"jump_inst_{s['uid']}", use_container_width=True):
                         st.session_state.current_index = next((i for i, stop in enumerate(st.session_state.optimized_route) if stop['uid'] == s['uid']), 0)
@@ -783,15 +792,15 @@ elif st.session_state.routing_phase == "finalized":
                 s = st.session_state.optimized_route[cur]
                 sd = st.session_state.site_data[s['uid']]
                 safe_lat, safe_lon = sd.get('LAT', sd.get('lat')), sd.get('LON', sd.get('lon'))
+                tag = f" [{sd.get('Sheet')}]" if show_origin_tag else ""
                 
-                st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}")
+                st.subheader(f"#{cur+1}: Site {sd.get('Site', s['id'])}{tag}")
                 
                 display_street = str(sd.get('Street', f"Site {s['id']}"))
                 if display_street.lower() == 'nan': display_street = ""
                 new_street = st.text_input("📍 STREET NAME (Auto-Fills on Install):", value=display_street)
                 
-                # TRUE GOOGLE MAPS SECURE NAVIGATION URL
-                nav_url = f"https://www.google.com/maps/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
+                nav_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={safe_lat},{safe_lon}&dir_action=navigate"
                 st.link_button("🚗 NAV TO SITE", nav_url, use_container_width=True)
                 
                 batch = []
@@ -808,8 +817,7 @@ elif st.session_state.routing_phase == "finalized":
                 if len(batch) > 1:
                     waypoints_str = "|".join(batch[:-1])
                     dest_str = batch[-1]
-                    # TRUE GOOGLE MAPS BATCH NAVIGATION URL
-                    batch_url = f"https://www.google.com/maps/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
+                    batch_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={dest_str}&waypoints={requests.utils.quote(waypoints_str)}&dir_action=navigate"
                     st.link_button(f"🗺️ BATCH NAV (Next {len(batch)} Stops)", batch_url, use_container_width=True)
                 
                 st.info("📍 Grab precise GPS below to lock-in the exact field coordinate and auto-name the street.")
@@ -869,8 +877,7 @@ elif st.session_state.routing_phase == "finalized":
                                 if next_idx != cur:
                                     n_lat = st.session_state.optimized_route[next_idx]['nav_lat']
                                     n_lon = st.session_state.optimized_route[next_idx]['nav_lon']
-                                    # TRUE GOOGLE MAPS AUTO-OPEN URL
-                                    st.session_state.auto_open_url = f"https://www.google.com/maps/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
+                                    st.session_state.auto_open_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={n_lat},{n_lon}&dir_action=navigate"
 
                         else:
                             st.session_state.msg_type = "skip"
@@ -972,12 +979,13 @@ elif st.session_state.routing_phase == "finalized":
                     p_lat, p_lon = p_site.get('LAT'), p_site.get('LON')
                     is_picked_up = p_site.get("Picked up") == "x"
                     color = "#00FF00" if is_picked_up else "#FFA500" 
+                    tag = f" [{p_site.get('Sheet')}]" if show_origin_tag else ""
                     
                     if p_lat and p_lon:
                         pickup_coords.append((p_lat, p_lon))
                         folium.CircleMarker(
                             location=(p_lat, p_lon), radius=10, color=color, fill=True, fill_color=color, fill_opacity=0.9,
-                            tooltip=f"Pick-Up {idx+1}: Site {p_site.get('Site')}"
+                            tooltip=f"Pick-Up {idx+1}: Site {p_site.get('Site')}{tag}"
                         ).add_to(m_pickup)
                         
                         folium.Marker(
@@ -1014,12 +1022,13 @@ elif st.session_state.routing_phase == "finalized":
                     st.markdown("### 📋 Pick-Up Manifest")
                     for p_idx, s in enumerate(itin):
                         status = "✅ Done" if s.get("Picked up") == "x" else "⏳ Pending"
+                        tag = f" [{s.get('Sheet')}]" if show_origin_tag else ""
                         
                         with st.container():
                             st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
                             c1, c2, c3 = st.columns([1, 3, 1])
                             c1.write(f"**{status}**")
-                            c2.write(f"Pick-Up {p_idx+1}: **Site {s.get('Site')}** \n{s.get('Street', 'Unknown Street')}")
+                            c2.write(f"Pick-Up {p_idx+1}: **Site {s.get('Site')}**{tag} \n{s.get('Street', 'Unknown Street')}")
                             
                             if c3.button("🔍 OPEN", key=f"jump_pickup_{s['UID']}", use_container_width=True):
                                 st.session_state.pickup_index = p_idx
@@ -1035,10 +1044,11 @@ elif st.session_state.routing_phase == "finalized":
                             
                         s = itin[p_idx]
                         p_lat, p_lon = s.get('LAT', s.get('lat')), s.get('LON', s.get('lon'))
-                        st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}")
+                        tag = f" [{s.get('Sheet')}]" if show_origin_tag else ""
                         
-                        # TRUE GOOGLE MAPS SECURE NAVIGATION URL
-                        nav_url = f"https://www.google.com/maps/dir/?api=1&destination={p_lat},{p_lon}&dir_action=navigate"
+                        st.subheader(f"PICK-UP #{p_idx+1}: Site {s.get('Site', s.get('id', 'Unknown'))}{tag}")
+                        
+                        nav_url = f"http://googleusercontent.com/maps.google.com/dir/?api=1&destination={p_lat},{p_lon}&dir_action=navigate"
                         st.link_button("🚗 NAV TO FIELD GPS", nav_url, use_container_width=True)
                         
                         if st.button("✅ SECURED", use_container_width=True, key=f"sec_{s['UID']}"):

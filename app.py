@@ -12,7 +12,7 @@ import uuid
 import io
 from folium.features import DivIcon
 from streamlit_folium import st_folium
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # --- TITANIUM SAFETY NET FOR COOKIES & GPS ---
@@ -29,7 +29,10 @@ except ImportError:
     HAS_GPS = False
 
 # --- ROCK-SOLID CONFIG ---
-st.set_page_config(page_title="Traffic Data Service V51.121", layout="centered")
+st.set_page_config(page_title="Traffic Data Service V51.122", layout="centered")
+
+# --- 👑 COMMANDER PROFILE SETUP ---
+COMMANDER_NAME = "ISAAC GARCIA"
 
 # --- THEME ENGINE ---
 if "theme" not in st.session_state:
@@ -48,6 +51,7 @@ def set_theme(theme_choice):
         .success-recap { background-color: #003300; border: 2px solid #00FF00; color: #00FF00; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
         .skip-recap { background-color: #330000; border: 2px solid #FF0000; color: #FF0000; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center;}
         .list-card { background-color: #111; border: 1px solid #00FFFF; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
+        div[role="radiogroup"] { padding-bottom: 10px; border-bottom: 2px solid #333; margin-bottom: 15px;}
         </style>
         """
     else:
@@ -61,6 +65,7 @@ def set_theme(theme_choice):
         .success-recap { background-color: #1E2E1E; border: 2px solid #32CD32; color: #32CD32; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
         .skip-recap { background-color: #2E1E1E; border: 2px solid #FF4500; color: #FF4500; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; text-align: center; }
         .list-card { background-color: #1a1a1a; border: 1px solid #444; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
+        div[role="radiogroup"] { padding-bottom: 10px; border-bottom: 2px solid #333; margin-bottom: 15px;}
         </style>
         """
 
@@ -89,11 +94,23 @@ if HAS_COOKIES:
 else:
     cookies = {}
 
-# --- 1. AUTO-PROVISIONING LOGIN SCREEN ---
+# --- 1. AUTO-PROVISIONING LOGIN SCREEN (URL ANCHOR FIX) ---
 if "driver_name" not in st.session_state:
-    if HAS_COOKIES and "tds_driver_cookie" in cookies and cookies["tds_driver_cookie"]:
-        st.session_state.driver_name = cookies["tds_driver_cookie"]
+    # 1st Priority: Check if the URL has the driver name locked in (Survives App-Switching)
+    if "driver" in st.query_params:
+        st.session_state.driver_name = st.query_params["driver"].upper()
+        if HAS_COOKIES:
+            cookies["tds_driver_cookie"] = st.session_state.driver_name
+            cookies.save()
         st.rerun()
+        
+    # 2nd Priority: Check browser cookies
+    elif HAS_COOKIES and "tds_driver_cookie" in cookies and cookies["tds_driver_cookie"]:
+        st.session_state.driver_name = cookies["tds_driver_cookie"].upper()
+        st.query_params["driver"] = st.session_state.driver_name # Sync URL
+        st.rerun()
+        
+    # 3rd Priority: Force manual login
     else:
         st.title("🚦 TRAFFIC DATA SERVICE")
         st.info("Enter your Name/ID. If this is your first time, your workspace will be created automatically.")
@@ -108,6 +125,8 @@ if "driver_name" not in st.session_state:
             if submitted:
                 if username_input:
                     st.session_state.driver_name = username_input
+                    # Lock name into URL so tab-sleeping doesn't kick them out
+                    st.query_params["driver"] = username_input 
                     if HAS_COOKIES:
                         cookies["tds_driver_cookie"] = username_input
                         cookies.save()
@@ -347,6 +366,10 @@ with col_logout:
             del cookies["tds_driver_cookie"]
             cookies.save()
             
+        # Scrub the URL anchor to properly log out
+        if "driver" in st.query_params:
+            del st.query_params["driver"]
+            
         keys_to_wipe = ["driver_name", "optimized_route", "site_data", "init", "pickup_index", "current_index", "active_files", "mission_type", "last_install_msg", "last_pickup_msg", "msg_type", "show_pickup_map", "pickup_sort_method", "pickup_target", "upload_strategy", "auto_advance_nav", "auto_open_url", "routing_phase", "raw_nodes", "manual_sequence", "last_processed_click", "map_center", "map_zoom", "install_view_toggle", "pickup_view_toggle", "drafting_day"]
         for k in keys_to_wipe:
             if k in st.session_state:
@@ -362,7 +385,9 @@ if st.session_state.routing_phase == "upload":
     restore_file = st.file_uploader("🔄 RESTORE BACKUP", type=["json"])
     if restore_file and st.button("🔓 LOAD BACKUP"):
         data = json.loads(restore_file.getvalue())
-        for k, v in data.items(): st.session_state[k] = v
+        for k, v in data.items(): 
+            st.session_state[k] = v
+        # Ensure it moves to finalized if valid data exists in the upload
         if "routing_phase" not in data and "optimized_route" in data and len(data["optimized_route"]) > 0:
             st.session_state.routing_phase = "finalized"
         st.rerun()
@@ -516,7 +541,6 @@ elif st.session_state.routing_phase == "drafting":
     if len(path_coords) > 1:
         folium.PolyLine(path_coords, color="#00FFFF" if st.session_state.theme == "🌞 Bright Sun (OLED Contrast)" else "#FFD700", weight=3, dash_array="5, 10").add_to(m_draft)
             
-    # FIXED: Width is hardcoded to 720 to prevent React Error #185 Layout Thrashing
     map_data = st_folium(m_draft, width=720, height=450, returned_objects=["last_object_clicked"], key="draft_map")
     
     if map_data and map_data.get("last_object_clicked"):
@@ -647,7 +671,7 @@ elif st.session_state.routing_phase == "drafting":
         st.session_state.routing_phase = "upload"
         st.rerun()
 
-# --- FINALIZED PHASE ---
+# --- FINALIZED PHASE (TABS RESTORED) ---
 elif st.session_state.routing_phase == "finalized":
     new_theme = st.radio("MODE:", ["☁️ Overcast", "🌞 Bright Sun"], index=0 if st.session_state.theme == "☁️ Overcast (Standard)" else 1, horizontal=True)
     if new_theme != st.session_state.theme: 

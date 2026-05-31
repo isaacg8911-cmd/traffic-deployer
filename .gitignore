@@ -1,0 +1,23 @@
+# Local environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Offline map data (downloaded locally; large, area-specific)
+cache/
+*.graphml
+*.pmtiles
+
+# Downloaded tooling / vendored map libraries (re-fetched by setup_maps.py)
+pmtiles.exe
+pmtiles
+web/vendor/
+
+# PRIVATE field data — never push to GitHub
+tds_data/
+*.json
+!.streamlit/*.json
+
+# Streamlit local config
+.streamlit/secrets.toml

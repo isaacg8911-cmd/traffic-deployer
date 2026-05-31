@@ -1,0 +1,10 @@
+Traffic Deployer demo map — DemoDay
+Site list for desk testing (not a real TrafficViewer binary).
+101 102 103 104 105
+BEGIN MAP DemoDay
+SITE 101 ZONE A
+SITE 102 ZONE B
+SITE 103 ZONE C
+SITE 104 ZONE D
+SITE 105 ZONE E
+END MAP

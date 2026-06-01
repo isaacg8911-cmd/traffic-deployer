@@ -21,6 +21,7 @@ tds_data/
 
 # Build output
 dist/
+_diag_py.txt
 
 # Streamlit local config
 .streamlit/secrets.toml

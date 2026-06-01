@@ -1,7 +1,6 @@
 PySide6
 PySide6-Addons
 pandas
-numpy
 openpyxl
 xlrd
 xlsxwriter

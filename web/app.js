@@ -15,7 +15,8 @@
 
   var origin = window.location.origin;
   var pmtilesUrl = origin + '/data/california.pmtiles';
-  var MAX_ZOOM = 16;
+  var MAX_ZOOM = 15;
+  var FOLLOW_ZOOM = 13;  // street names visible; z15 shows house numbers we hide
 
   var map = new maplibregl.Map({
     container: 'map',
@@ -259,7 +260,7 @@
     // Defer to next frame so the canvas has its real size before fitting.
     requestAnimationFrame(function () {
       map.resize();
-      map.fitBounds(b, { padding: 80, duration: 500, maxZoom: MAX_ZOOM, linear: false });
+      map.fitBounds(b, { padding: 80, duration: 500, maxZoom: FOLLOW_ZOOM, linear: false });
     });
   }
   window.__fit = function () { if (lastState) fitToData(lastState); };
@@ -290,7 +291,7 @@
       map.easeTo({
         center: [g.lon, g.lat],
         duration: 320,
-        zoom: Math.min(MAX_ZOOM, Math.max(map.getZoom(), 15))
+        zoom: Math.min(MAX_ZOOM, Math.max(map.getZoom(), FOLLOW_ZOOM))
       });
     }
   }

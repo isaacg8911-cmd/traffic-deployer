@@ -19,5 +19,8 @@ tds_data/
 *.json
 !.streamlit/*.json
 
+# Build output
+dist/
+
 # Streamlit local config
 .streamlit/secrets.toml

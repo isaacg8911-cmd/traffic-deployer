@@ -77,8 +77,7 @@ class RouteState:
         d["pickup_index"] = int(self.pickup_index)
         d["map_day_filter"] = self.map_day_filter or "All maps"
         d["voice_nav"] = bool(self.voice_nav)
-        vs = str(getattr(self, "voice_style", "female") or "female").strip().lower()
-        d["voice_style"] = vs if vs in ("female", "vader") else "female"
+        d["voice_style"] = "female"
         return d
 
     def load(self) -> bool:
@@ -107,8 +106,7 @@ class RouteState:
         self.pickup_index = int(data.get("pickup_index", 0))
         self.map_day_filter = str(data.get("map_day_filter", "All maps") or "All maps")
         self.voice_nav = bool(data.get("voice_nav", True))
-        vs = str(data.get("voice_style", "female") or "female").strip().lower()
-        self.voice_style = vs if vs in ("female", "vader") else "female"
+        self.voice_style = "female"
         return True
 
     def apply_default_home(self):

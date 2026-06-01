@@ -45,7 +45,7 @@ from core.field_ready import TOMORROW_STEPS, check_all
 from core.state import RouteState, ca_now
 from ui_themes import normalize_theme, qt_stylesheet
 from version import APP_NAME, APP_VERSION, APP_TAGLINE
-from voice_nav import DriveVoiceAnnouncer, NavVoice, VOICE_FEMALE, VOICE_VADER, tts_available, tts_error
+from voice_nav import DriveVoiceAnnouncer, NavVoice, tts_available, tts_error
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(APP_DIR, "web")
@@ -207,6 +207,9 @@ class MainWindow(QMainWindow):
         self.state = RouteState(DATA_DIR, profile="DEFAULT")
         self.state.load()
         self.state.theme = normalize_theme(self.state.theme)
+        if str(getattr(self.state, "voice_style", "female")).lower() == "vader":
+            self.state.voice_style = "female"
+            self.state.save()
         self.setStyleSheet(qt_stylesheet(self.state.theme))
         if self.state.default_home:
             self.state.apply_default_home()
@@ -252,7 +255,6 @@ class MainWindow(QMainWindow):
 
         self._nav_voice = NavVoice()
         self._nav_voice.enabled = bool(self.state.voice_nav)
-        self._nav_voice.mode = getattr(self.state, "voice_style", VOICE_FEMALE)
         self._voice_announcer = DriveVoiceAnnouncer(self._nav_voice)
 
         self._build_ui()
@@ -559,27 +561,14 @@ class MainWindow(QMainWindow):
         v.addStretch(1)
         return w
 
-    def _on_voice_style_changed(self):
-        style = self.combo_voice_style.currentData() or VOICE_FEMALE
-        self.state.voice_style = style
-        self._nav_voice.mode = style
-        self.state.save()
-        self._refresh_voice_ui()
-
     def _sync_prefs_ui(self):
         """Reload voice toggles from state (after profile switch)."""
         if hasattr(self, "chk_voice_nav"):
             self.chk_voice_nav.blockSignals(True)
             self.chk_voice_nav.setChecked(bool(self.state.voice_nav))
             self.chk_voice_nav.blockSignals(False)
-        if hasattr(self, "combo_voice_style"):
-            self.combo_voice_style.blockSignals(True)
-            idx = self.combo_voice_style.findData(getattr(self.state, "voice_style", VOICE_FEMALE))
-            self.combo_voice_style.setCurrentIndex(idx if idx >= 0 else 0)
-            self.combo_voice_style.blockSignals(False)
         if hasattr(self, "_nav_voice"):
             self._nav_voice.enabled = bool(self.state.voice_nav)
-            self._nav_voice.mode = getattr(self.state, "voice_style", VOICE_FEMALE)
         self._refresh_voice_ui()
 
     def _refresh_field_ready(self):
@@ -658,8 +647,6 @@ class MainWindow(QMainWindow):
         self._refresh_voice_ui()
         if not on:
             self._nav_voice.flush()
-            if hasattr(self, "combo_voice_style"):
-                self.combo_voice_style.setEnabled(False)
 
     def _test_voice(self):
         if not tts_available():
@@ -685,12 +672,9 @@ class MainWindow(QMainWindow):
         if self._nav_voice.ready:
             name = self._nav_voice.voice_name
             on = "ON" if self.state.voice_nav else "off"
-            style = "Female" if self.state.voice_style == VOICE_FEMALE else "Vader"
-            self.lbl_voice_status.setText(f"Offline voice {on} — {style}: {name}")
+            self.lbl_voice_status.setText(f"Offline voice {on} — {name}")
         else:
             self.lbl_voice_status.setText("Voice engine starting…")
-        if hasattr(self, "combo_voice_style"):
-            self.combo_voice_style.setEnabled(self.state.voice_nav and tts_available())
 
     # ---------------------------------------------------------- Route page
     def _page_route(self) -> QWidget:
@@ -722,16 +706,6 @@ class MainWindow(QMainWindow):
         self.chk_voice_nav.setChecked(bool(self.state.voice_nav))
         self.chk_voice_nav.stateChanged.connect(self._on_voice_toggle)
         v.addWidget(self.chk_voice_nav)
-        row_style = QHBoxLayout()
-        row_style.addWidget(QLabel("Voice style:"))
-        self.combo_voice_style = QComboBox()
-        self.combo_voice_style.addItem("Female guide", VOICE_FEMALE)
-        self.combo_voice_style.addItem("Darth Vader", VOICE_VADER)
-        cur = self.combo_voice_style.findData(getattr(self.state, "voice_style", VOICE_FEMALE))
-        self.combo_voice_style.setCurrentIndex(cur if cur >= 0 else 0)
-        self.combo_voice_style.currentIndexChanged.connect(self._on_voice_style_changed)
-        row_style.addWidget(self.combo_voice_style, 1)
-        v.addLayout(row_style)
         row_voice = QHBoxLayout()
         self.lbl_voice_status = QLabel("")
         self.lbl_voice_status.setWordWrap(True)
@@ -2062,7 +2036,7 @@ class MainWindow(QMainWindow):
     def _center_current(self):
         if self.state.stops and self.current_index < len(self.state.stops):
             lat, lon = self.state.point(self.state.stops[self.current_index])
-            self.bridge.fly_to(lat, lon, 14)
+            self.bridge.fly_to(lat, lon, 13)
 
     # -------------------------------------------------------- Pickup UI/flow
     def _installed_stops(self):
@@ -2095,7 +2069,7 @@ class MainWindow(QMainWindow):
         items = self._installed_stops()
         if self.pickup_index < len(items):
             lat, lon = self.state.point(items[self.pickup_index])
-            self.bridge.fly_to(lat, lon, 14)
+            self.bridge.fly_to(lat, lon, 13)
 
     def _mark_pickup(self):
         items = self._installed_stops()

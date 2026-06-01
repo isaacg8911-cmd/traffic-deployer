@@ -144,7 +144,6 @@ def test_voice_paths():
     section("voice")
     import voice_nav
     v = voice_nav.NavVoice()
-    v.mode = voice_nav.VOICE_VADER
     ok("NavVoice init") if v.ready or voice_nav.tts_available() else warn("voice engine slow/start")
     ann = voice_nav.DriveVoiceAnnouncer(v)
     ann.reset()

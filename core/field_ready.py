@@ -133,8 +133,8 @@ def check_all(
 
 
 TOMORROW_STEPS = [
-    "Tonight (WiFi): Excel + .EST loaded → Download road map → BUILD ROUTE → Test voice.",
+    "Tonight (WiFi): Excel + .EST loaded → Download road map → BUILD ROUTE → Test voice (Zira).",
     "Tap READY FOR OFFLINE before you leave.",
-    "In the field: plug GPS → START DRIVING → Follow Me on map.",
+    "In the field: plug GPS → START DRIVING → Follow Me (street-name zoom).",
     "Each stop: Grab GPS → INSTALL or SKIP → end of day Audit export.",
 ]

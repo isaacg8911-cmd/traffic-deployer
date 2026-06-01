@@ -13,6 +13,7 @@ import os
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote
 
 _MIME = {
     ".html": "text/html; charset=utf-8",
@@ -35,7 +36,7 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
     def _resolve(self, path: str) -> str | None:
-        path = path.split("?", 1)[0].split("#", 1)[0]
+        path = unquote(path.split("?", 1)[0].split("#", 1)[0])
         if path in ("", "/"):
             path = "/index.html"
         for prefix, root in self.roots.items():

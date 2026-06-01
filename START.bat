@@ -60,4 +60,8 @@ if errorlevel 1 (
 echo.
 echo Starting Traffic Deployer...
 python main.py
-pause
+if errorlevel 1 (
+    echo.
+    echo App exited with an error.
+    pause
+)

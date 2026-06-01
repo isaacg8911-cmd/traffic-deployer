@@ -63,7 +63,7 @@ class MapBridge(QObject):
     def send_nav(self, nav: dict):
         self._run(f"window.__tdPushNav && window.__tdPushNav({_dumps(nav)})")
 
-    def fly_to(self, lat: float, lon: float, zoom: int = 16):
+    def fly_to(self, lat: float, lon: float, zoom: int = 13):
         self._run(f"window.__tdFlyTo && window.__tdFlyTo({float(lat)}, {float(lon)}, {int(zoom)})")
 
     def set_follow(self, on: bool):

@@ -35,7 +35,7 @@ the **best driving route along real streets** using your USB GPS. Your field fil
 3. **Map** — standard **Protomaps light** colors (not tied to Sunny/Cloudy/Night panel
    themes). Zoom to neighborhood level for street names. If labels are still sparse,
    re-run `python setup_maps.py` once (wifi) to refresh tiles at zoom 15 + fonts.
-4. **START DRIVING** - turn-by-turn banner + offline voice (Female or Darth Vader). Light blue line to the next stop only.
+4. **START DRIVING** - turn-by-turn banner + offline voice (female Windows guide). Light blue line to the next stop only.
 5. **Install tab** - per stop: **Grab GPS Here** (precise field coordinate +
    auto street name when online), compass + **Set direction from compass** when
    stopped, set serial/lanes, then **INSTALL** or **SKIP**. Prev/Next to move along.

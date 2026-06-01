@@ -116,7 +116,7 @@ def test_voice():
     import voice_nav
     check("maneuver phrase", voice_nav.maneuver_phrase("left", "Papaya St") ==
           "Turn left onto Papaya Street.")
-    check("voice style vader", voice_nav.normalize_voice_style("vader") == "vader")
+    check("female voice only", voice_nav.normalize_voice_style("vader") == "female")
     check("pyttsx3 import", voice_nav.tts_available(), voice_nav.tts_error() or "missing")
 
 
@@ -127,8 +127,8 @@ def test_web_assets():
     idx = open(os.path.join(WEB_DIR, "index.html"), encoding="utf-8").read()
     check("style glyphs", "glyphs:" in style)
     check("style buildings", "buildings-fill" in style)
-    check("style addresses", "address-labels" in style)
-    check("app max zoom 16", "MAX_ZOOM = 16" in appjs)
+    check("no address clutter", "address-labels" not in style)
+    check("follow street zoom", "FOLLOW_ZOOM = 13" in appjs)
     check("nav banner html", "navbar" in idx and "nav-arrow" in idx)
     for rel in ("vendor/maplibre-gl.js", "vendor/pmtiles.js", "style.js", "app.js"):
         check(f"file {rel}", os.path.isfile(os.path.join(WEB_DIR, rel)))
@@ -144,6 +144,10 @@ def test_local_server():
             body = r.read(8000).decode("utf-8", errors="replace")
         check("index served", "Traffic Deployer Map" in body)
         check("app.js linked", "app.js" in body)
+        font_url = f"http://127.0.0.1:{port}/vendor/fonts/Noto%20Sans%20Regular/0-255.pbf"
+        with urllib.request.urlopen(font_url, timeout=5) as fr:
+            fb = fr.read(200)
+        check("label font served", len(fb) > 50)
     except Exception as exc:
         check("index served", False, str(exc))
     local_server.stop()
@@ -187,10 +191,10 @@ def test_state_voice_persist():
     d = tempfile.mkdtemp()
     st = RouteState(d, profile="SMOKE")
     st.voice_nav = True
-    st.voice_style = "vader"
+    st.voice_style = "female"
     st.save()
     st2 = RouteState(d, profile="SMOKE")
-    check("voice_style saved", st2.load() and st2.voice_style == "vader")
+    check("voice_style saved", st2.load() and st2.voice_style == "female")
 
 
 def test_field_ready():

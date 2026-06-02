@@ -1,6 +1,7 @@
 """Headless desk test: demo Excel + EST through full pipeline."""
 from __future__ import annotations
 
+import math
 import os
 import sys
 import tempfile
@@ -66,6 +67,10 @@ def main() -> int:
             check("optimize", len(ordered) == len(stops))
             route = routing.build_route(ordered, HOME, DATA)
             check("build route", bool(route.get("polyline")) and route.get("miles", 0) > 0)
+            poly = route.get("polyline") or []
+            if len(poly) >= 2:
+                d_home = math.hypot(poly[-1][0] - HOME[0], poly[-1][1] - HOME[1])
+                check("route returns home", d_home < 0.02, f"tail delta {d_home:.4f}")
         except Exception as exc:
             check("routing", False, str(exc))
     else:

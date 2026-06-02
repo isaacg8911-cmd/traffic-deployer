@@ -32,11 +32,31 @@ if errorlevel 1 (
     pip install -r requirements.txt
 )
 
-REM One-time map download (California basemap + map libraries) if missing.
-if not exist "tds_data\california.pmtiles" (
-    echo.
-    echo Downloading the California map for offline use - one time, needs internet...
+REM One-time map download (California basemap + map libraries) if missing or incomplete.
+set "PMTILES=tds_data\california.pmtiles"
+set "NEED_MAP=1"
+if exist "%PMTILES%" (
+    for %%A in ("%PMTILES%") do if %%~zA GTR 104857600 set "NEED_MAP=0"
+)
+if "%NEED_MAP%"=="1" (
+    if exist "%PMTILES%" (
+        echo.
+        echo California map file looks incomplete - re-downloading ^(needs internet^)...
+        del "%PMTILES%"
+    ) else (
+        echo.
+        echo Downloading the California map for offline use - one time, needs internet...
+    )
     python setup_maps.py
+    if errorlevel 1 (
+        echo.
+        echo MAP DOWNLOAD FAILED. Work Wi-Fi often blocks map hosts.
+        echo Run:  .venv\Scripts\python.exe scripts\diagnose_network.py
+        echo Or copy the whole tds_data folder from your home PC, then run START.bat again.
+        echo.
+        pause
+        exit /b 1
+    )
 )
 
 REM Verify label fonts (street names offline).
@@ -46,6 +66,15 @@ if not exist "web\vendor\fonts\Noto Sans Regular\0-255.pbf" (
         echo Label fonts missing — refreshing map assets ^(needs internet^)...
         python setup_maps.py
     )
+)
+
+echo.
+echo Quick network check ^(road download on work Wi-Fi^)...
+python scripts\diagnose_network.py
+if errorlevel 1 (
+    echo.
+    echo Tip: copy tds_data from home if downloads are blocked here.
+    echo.
 )
 
 echo.

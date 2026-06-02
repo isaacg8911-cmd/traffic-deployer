@@ -2,7 +2,7 @@
 
 A Streets-&-Trips-style window: native side panels + an embedded offline
 California map. Keeps every existing tool (USB GPS, .EST/Excel ingest, encrypted
-save) and routes on the real road network, with live turn-by-turn driving.
+save) and routes on the real road network (origin → stops → origin).
 
 Run:  python main.py     (START.bat does the venv + launch for you)
 """
@@ -24,10 +24,10 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
 import json
 import math
 
-from PySide6.QtCore import Qt, QTimer, QUrl, QFile, QIODevice, QThread, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, QThread
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
@@ -39,164 +39,20 @@ from PySide6.QtWidgets import (
 import gps_reader
 import local_server
 import road_router
+import voice_nav
+from voice_nav import DriveVoiceAnnouncer, NavVoice
 from bridge import MapBridge
 from core import export, geo, ingest, validate
 from core.field_ready import TOMORROW_STEPS, check_all
+from core.offline_gate import evaluate as offline_gate_eval
 from core.state import RouteState, ca_now
+from ui.paths import (
+    APP_DIR, DATA_DIR, DEMO_CSV, DEMO_DIR, DEMO_EST, DIRECTIONS, UNDO_FIELDS, VENDOR_DIR, WEB_DIR,
+)
+from ui.threads import DownloadRoadsThread, RouteOptimizeThread, SmokeTestThread
+from ui.web_page import AppWebPage, ensure_qwebchannel_js
 from ui_themes import normalize_theme, qt_stylesheet
 from version import APP_NAME, APP_VERSION, APP_TAGLINE
-from voice_nav import DriveVoiceAnnouncer, NavVoice, tts_available, tts_error
-
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-WEB_DIR = os.path.join(APP_DIR, "web")
-VENDOR_DIR = os.path.join(WEB_DIR, "vendor")
-DATA_DIR = os.path.join(APP_DIR, "tds_data")
-DEMO_DIR = os.path.join(APP_DIR, "demo_data")
-DEMO_CSV = os.path.join(DEMO_DIR, "demo_sites.csv")
-DEMO_EST = os.path.join(DEMO_DIR, "DemoDay.EST")
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(VENDOR_DIR, exist_ok=True)
-
-DIRECTIONS = ["n", "e", "s", "w"]
-
-_UNDO_FIELDS = (
-    "installed", "skipped", "picked_up",
-    "field_lat", "field_lon", "serial", "lanes", "direction", "notes",
-    "date", "exact_time", "street", "street_warning",
-)
-
-
-class _SmokeTestThread(QThread):
-    finished_result = Signal(int, str)
-
-    def run(self):
-        import subprocess
-        py = os.path.join(APP_DIR, ".venv", "Scripts", "python.exe")
-        if not os.path.isfile(py):
-            py = sys.executable
-        script = os.path.join(APP_DIR, "scripts", "smoke_full.py")
-        try:
-            proc = subprocess.run(
-                [py, script], capture_output=True, text=True, timeout=120, cwd=APP_DIR)
-            out = (proc.stdout or "") + (proc.stderr or "")
-            self.finished_result.emit(proc.returncode, out)
-        except Exception as exc:
-            self.finished_result.emit(1, str(exc))
-
-
-class _DownloadRoadsThread(QThread):
-    """Download osmnx graph in a thread (network-bound; avoids flaky QProcess on Windows)."""
-    finished_result = Signal(dict)
-
-    def __init__(self, points: list, data_dir: str):
-        super().__init__()
-        self.points = points
-        self.data_dir = data_dir
-
-    def run(self):
-        if self.isInterruptionRequested():
-            return
-        try:
-            info = road_router.download_area(self.points, self.data_dir)
-            if self.isInterruptionRequested():
-                return
-            self.finished_result.emit({"ok": True, **info})
-        except Exception as exc:  # noqa: BLE001
-            if not self.isInterruptionRequested():
-                self.finished_result.emit({"ok": False, "error": str(exc)})
-
-
-class _RouteOptimizeThread(QThread):
-    """Optimize + build route in a thread (same fix as download — no QProcess)."""
-    finished_result = Signal(dict)
-    progress_text = Signal(str)
-
-    def __init__(self, stops: list, home: tuple, data_dir: str):
-        super().__init__()
-        self.stops = stops
-        self.home = home
-        self.data_dir = data_dir
-
-    def run(self):
-        import traceback
-        from core import routing
-        if self.isInterruptionRequested():
-            return
-        try:
-            self.progress_text.emit("Ordering stops (fast pass)...")
-            res = routing.optimize(self.stops, self.home, self.data_dir)
-            if self.isInterruptionRequested():
-                return
-            ordered = res["order"]
-            n = len(ordered)
-            self.progress_text.emit(
-                f"Drawing route on real streets ({n} stops — about {max(15, n // 2)}–{max(30, n)} sec)...")
-            route = routing.build_route(ordered, self.home, self.data_dir)
-            if self.isInterruptionRequested():
-                return
-            self.finished_result.emit({
-                "ok": True, "order": ordered, "route": route, "graph": res["graph"],
-            })
-        except Exception as exc:  # noqa: BLE001
-            if not self.isInterruptionRequested():
-                self.finished_result.emit({
-                    "ok": False, "error": str(exc), "trace": traceback.format_exc(),
-                })
-
-
-class _NavPlanThread(QThread):
-    finished_result = Signal(dict)
-
-    def __init__(self, start: tuple, stops: list, home: tuple, data_dir: str):
-        super().__init__()
-        self.start = start
-        self.stops = stops
-        self.home = home
-        self.data_dir = data_dir
-
-    def run(self):
-        import traceback
-        from core import routing
-        if self.isInterruptionRequested():
-            return
-        try:
-            if not (road_router.HAS_ROUTING and road_router.has_graph(self.data_dir)):
-                self.finished_result.emit({"ok": True, "plan": [], "polyline": [], "miles": 0.0, "graph": False})
-                return
-            graph = road_router.load_graph(self.data_dir)
-            pts = [self.start] + [routing._stop_pt(s) for s in self.stops]
-            plan = road_router.nav_plan(graph, pts)
-            if self.isInterruptionRequested():
-                return
-            self.finished_result.emit({"ok": True, **plan, "graph": True})
-        except Exception as exc:  # noqa: BLE001
-            if not self.isInterruptionRequested():
-                self.finished_result.emit({"ok": False, "error": str(exc), "trace": traceback.format_exc()})
-
-
-def ensure_qwebchannel_js():
-    dest = os.path.join(VENDOR_DIR, "qwebchannel.js")
-    if os.path.exists(dest):
-        return
-    src = QFile(":/qtwebchannel/qwebchannel.js")
-    if src.open(QIODevice.ReadOnly):
-        data = bytes(src.readAll().data())
-        src.close()
-        with open(dest, "wb") as f:
-            f.write(data)
-
-
-class _AppWebPage(QWebEnginePage):
-    """Intercept tdstop:// clicks from numbered map badges (QWebChannel is unreliable)."""
-    stopClicked = Signal(str)
-
-    def acceptNavigationRequest(self, url, nav_type, isMainFrame):
-        if url.scheme() == "tdstop" and isMainFrame:
-            uid = url.path().lstrip("/") or url.host()
-            if uid:
-                self.stopClicked.emit(uid)
-            return False
-        return super().acceptNavigationRequest(url, nav_type, isMainFrame)
 
 
 class MainWindow(QMainWindow):
@@ -220,8 +76,12 @@ class MainWindow(QMainWindow):
         self.est_paths = [p for p in self.state.est_paths if os.path.isfile(p)]
         self.state.excel_paths = list(self.excel_paths)
         self.state.est_paths = list(self.est_paths)
+        self._map_preview_stops: list[dict] = []
         self.nav: dict = {"active": False}
         self._nav_thread = None
+        self.voice = NavVoice()
+        self.voice.enabled = bool(getattr(self.state, "voice_nav", True))
+        self.voice_announcer = DriveVoiceAnnouncer(self.voice)
         self._undo_stack: list[dict] = []
         self._last_leg_push = 0.0
         self._autosave_timer = QTimer(self)
@@ -237,7 +97,7 @@ class MainWindow(QMainWindow):
         ensure_qwebchannel_js()
         port = local_server.start(WEB_DIR, DATA_DIR)
         self.view = QWebEngineView()
-        page = _AppWebPage(QWebEngineProfile.defaultProfile(), self.view)
+        page = AppWebPage(QWebEngineProfile.defaultProfile(), self.view)
         page.stopClicked.connect(self._on_stop_clicked)
         self.view.setPage(page)
         self.bridge = MapBridge()
@@ -252,10 +112,6 @@ class MainWindow(QMainWindow):
         self._map_ready_polls = 0
         self._map_js_ready = False
         self.view.load(QUrl(f"http://127.0.0.1:{port}/index.html"))
-
-        self._nav_voice = NavVoice()
-        self._nav_voice.enabled = bool(self.state.voice_nav)
-        self._voice_announcer = DriveVoiceAnnouncer(self._nav_voice)
 
         self._build_ui()
         self._setup_shortcuts()
@@ -280,8 +136,9 @@ class MainWindow(QMainWindow):
         self.gps_timer.timeout.connect(self._tick_gps)
         self.gps_timer.start(1000)
 
-        QTimer.singleShot(1200, self._refresh_voice_ui)
         QTimer.singleShot(800, self._refresh_field_ready)
+        QTimer.singleShot(900, self._refresh_map_preview)
+        QTimer.singleShot(1200, self._refresh_voice_hint)
         QTimer.singleShot(2500, self._maybe_field_startup_dialog)
 
     # ------------------------------------------------------------------ UI
@@ -393,14 +250,12 @@ class MainWindow(QMainWindow):
     def _show_about(self):
         maps = "Yes" if os.path.isfile(os.path.join(DATA_DIR, "california.pmtiles")) else "No — run setup_maps.py"
         roads = "Yes" if road_router.has_graph(DATA_DIR) else "No — download in Setup"
-        voice = self._nav_voice.voice_name if getattr(self, "_nav_voice", None) and self._nav_voice.ready else "starting…"
         QMessageBox.information(
             self, APP_NAME,
             f"<b>{APP_NAME} v{APP_VERSION}</b><br><br>"
             f"{APP_TAGLINE}<br><br>"
             f"<b>Offline basemap:</b> {maps}<br>"
-            f"<b>Road routing graph:</b> {roads}<br>"
-            f"<b>Voice:</b> {voice}<br><br>"
+            f"<b>Road routing graph:</b> {roads}<br><br>"
             f"Profile: {self.state.profile}<br>"
             f"Smoke test: <code>scripts\\smoke.bat</code>",
         )
@@ -422,7 +277,12 @@ class MainWindow(QMainWindow):
         self._update_right()
 
     def _update_right(self, force_map: bool = False):
-        show_map = force_map or self.nav.get("active") or bool(self.state.stops)
+        show_map = (
+            force_map
+            or self.nav.get("active")
+            or bool(self.state.stops)
+            or bool(getattr(self, "_map_preview_stops", None))
+        )
         was_hidden = self.right_stack.currentIndex() == 0
         self.right_stack.setCurrentIndex(1 if show_map else 0)
         if show_map and (was_hidden or force_map) and self.state.stops:
@@ -554,22 +414,21 @@ class MainWindow(QMainWindow):
         b_roads.clicked.connect(self._download_roads)
         self.btn_download_roads = b_roads
         v.addWidget(b_roads)
+        b_import_roads = QPushButton("Import road map from file (.graphml)")
+        b_import_roads.clicked.connect(self._import_roads)
+        self.btn_import_roads = b_import_roads
+        v.addWidget(b_import_roads)
+        self.lbl_roads_hint = QLabel(
+            "Work Wi‑Fi often blocks download — copy road_graph.graphml from home, then Import.")
+        self.lbl_roads_hint.setWordWrap(True)
+        self.lbl_roads_hint.setStyleSheet("color:#6b7280;font-size:12px;")
+        v.addWidget(self.lbl_roads_hint)
         b_sync = QPushButton("BUILD OPTIMIZED ROUTE")
         b_sync.setObjectName("primary")
         b_sync.clicked.connect(self._build_route_from_uploads)
         v.addWidget(b_sync)
         v.addStretch(1)
         return w
-
-    def _sync_prefs_ui(self):
-        """Reload voice toggles from state (after profile switch)."""
-        if hasattr(self, "chk_voice_nav"):
-            self.chk_voice_nav.blockSignals(True)
-            self.chk_voice_nav.setChecked(bool(self.state.voice_nav))
-            self.chk_voice_nav.blockSignals(False)
-        if hasattr(self, "_nav_voice"):
-            self._nav_voice.enabled = bool(self.state.voice_nav)
-        self._refresh_voice_ui()
 
     def _refresh_field_ready(self):
         if not hasattr(self, "lbl_field_score"):
@@ -624,7 +483,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Smoke test already running…", 3000)
             return
         self.statusBar().showMessage("Running smoke test… (app stays responsive)", 5000)
-        thread = _SmokeTestThread()
+        thread = SmokeTestThread()
         self._smoke_thread = thread
 
         def done(code: int, out: str):
@@ -639,43 +498,6 @@ class MainWindow(QMainWindow):
         thread.finished_result.connect(done)
         thread.start()
 
-    def _on_voice_toggle(self):
-        on = self.chk_voice_nav.isChecked()
-        self.state.voice_nav = on
-        self._nav_voice.enabled = on
-        self.state.save()
-        self._refresh_voice_ui()
-        if not on:
-            self._nav_voice.flush()
-
-    def _test_voice(self):
-        if not tts_available():
-            self._warn(
-                "Voice engine not installed.\n\n"
-                f"Run: pip install pyttsx3\n\nDetail: {tts_error() or 'unknown'}")
-            return
-        if not self.chk_voice_nav.isChecked():
-            self.chk_voice_nav.setChecked(True)
-            self._on_voice_toggle()
-        self._nav_voice.test()
-        self.statusBar().showMessage("Playing voice test…", 3000)
-
-    def _refresh_voice_ui(self):
-        if not hasattr(self, "lbl_voice_status") or not hasattr(self, "_nav_voice"):
-            return
-        if not tts_available():
-            self.lbl_voice_status.setText(
-                f"Voice unavailable — install pyttsx3. ({tts_error() or 'missing'})")
-            self.btn_test_voice.setEnabled(False)
-            return
-        self.btn_test_voice.setEnabled(True)
-        if self._nav_voice.ready:
-            name = self._nav_voice.voice_name
-            on = "ON" if self.state.voice_nav else "off"
-            self.lbl_voice_status.setText(f"Offline voice {on} — {name}")
-        else:
-            self.lbl_voice_status.setText("Voice engine starting…")
-
     # ---------------------------------------------------------- Route page
     def _page_route(self) -> QWidget:
         w = QWidget()
@@ -684,6 +506,26 @@ class MainWindow(QMainWindow):
         v.addWidget(self._h("ROUTE"))
         self.lbl_route_stats = QLabel("No route yet.")
         v.addWidget(self.lbl_route_stats)
+        self.lbl_drive_banner = QLabel("")
+        self.lbl_drive_banner.setWordWrap(True)
+        self.lbl_drive_banner.setStyleSheet(
+            "background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;"
+            "padding:8px;font-weight:700;font-size:13px;color:#0d47a1;")
+        self.lbl_drive_banner.hide()
+        v.addWidget(self.lbl_drive_banner)
+        self.chk_voice = QCheckBox("Voice guidance (offline)")
+        self.chk_voice.setChecked(bool(self.state.voice_nav))
+        self.chk_voice.stateChanged.connect(self._on_voice_toggle)
+        v.addWidget(self.chk_voice)
+        row_voice = QHBoxLayout()
+        b_voice_test = QPushButton("Test voice")
+        b_voice_test.clicked.connect(self._test_voice)
+        row_voice.addWidget(b_voice_test)
+        self.lbl_voice_hint = QLabel("")
+        self.lbl_voice_hint.setStyleSheet("color:#6b7280;font-size:11px;")
+        row_voice.addWidget(self.lbl_voice_hint, 1)
+        v.addLayout(row_voice)
+        self._refresh_voice_hint()
         self.chk_show_guide = QCheckBox("Show guiding route (blue)")
         self.chk_show_guide.setChecked(True)
         self.chk_show_guide.stateChanged.connect(lambda: self._push_state())
@@ -702,20 +544,11 @@ class MainWindow(QMainWindow):
         self.btn_start.setObjectName("go")
         self.btn_start.clicked.connect(self._toggle_drive)
         v.addWidget(self.btn_start)
-        self.chk_voice_nav = QCheckBox("Voice directions (offline)")
-        self.chk_voice_nav.setChecked(bool(self.state.voice_nav))
-        self.chk_voice_nav.stateChanged.connect(self._on_voice_toggle)
-        v.addWidget(self.chk_voice_nav)
-        row_voice = QHBoxLayout()
-        self.lbl_voice_status = QLabel("")
-        self.lbl_voice_status.setWordWrap(True)
-        self.lbl_voice_status.setStyleSheet("color:#475569;font-size:12px;")
-        row_voice.addWidget(self.lbl_voice_status, 1)
-        self.btn_test_voice = QPushButton("Test voice")
-        self.btn_test_voice.clicked.connect(self._test_voice)
-        row_voice.addWidget(self.btn_test_voice)
-        v.addLayout(row_voice)
-        self._refresh_voice_ui()
+        lbl_drive = QLabel(
+            "While driving: map follow + blue leg. Banner shows next turn; voice optional below.")
+        lbl_drive.setWordWrap(True)
+        lbl_drive.setStyleSheet("color:#475569;font-size:12px;")
+        v.addWidget(lbl_drive)
         b_fit = QPushButton("Zoom to all stops")
         b_fit.clicked.connect(lambda: self._push_state(fit=True))
         v.addWidget(b_fit)
@@ -946,16 +779,106 @@ class MainWindow(QMainWindow):
         return [s for s in self.nav.get("stops", self.state.stops)
                 if not s.get("installed") and not s.get("skipped")]
 
-    def _set_nav_leg(self, from_pt: tuple[float, float], target: dict, *, push_map: bool = True):
-        to_pt = self.state.point(target)
+    def _set_nav_leg(
+        self,
+        from_pt: tuple[float, float],
+        target: dict,
+        *,
+        push_map: bool = True,
+        to_pt: tuple[float, float] | None = None,
+    ):
+        if to_pt is None:
+            to_pt = self.state.point(target)
         leg = self._compute_leg_poly(from_pt, to_pt)
         self.nav["leg_poly"] = leg
         self.nav["leg_miles"] = self._dist_m(from_pt[0], from_pt[1], to_pt[0], to_pt[1]) / 1609.34
+        self.nav["maneuvers"] = []
+        self.nav["step"] = 0
+        if road_router.has_graph(DATA_DIR):
+            try:
+                g = road_router.load_graph(DATA_DIR)
+                plan = road_router.leg_plan(g, from_pt, to_pt, stop_index=0)
+                self.nav["maneuvers"] = plan.get("maneuvers") or []
+            except Exception:
+                pass
+        self._update_drive_banner(from_pt, to_pt, target)
         if push_map:
             g = self.gps.latest()
             if g.get("fix") and g.get("lat") is not None:
                 leg = self._trim_poly_ahead(leg, g["lat"], g["lon"])
             self.bridge.send_drive_leg(leg, active=True)
+
+    def _update_drive_banner(
+        self,
+        from_pt: tuple[float, float],
+        to_pt: tuple[float, float],
+        target: dict | None = None,
+    ):
+        if not hasattr(self, "lbl_drive_banner"):
+            return
+        if not self.nav.get("active"):
+            self.lbl_drive_banner.hide()
+            return
+        maneuvers = self.nav.get("maneuvers") or []
+        step = int(self.nav.get("step", 0))
+        if self.nav.get("phase") == "home":
+            d = self._dist_m(from_pt[0], from_pt[1], to_pt[0], to_pt[1]) / 1609.34
+            self.lbl_drive_banner.setText(f"Return to start — {d:.1f} mi")
+        elif target:
+            tid = target.get("id", "")
+            st = self._street_label(target)
+            if step < len(maneuvers):
+                m = maneuvers[step]
+                mt = str(m.get("type", "straight")).replace("_", " ").title()
+                street = str(m.get("street", "") or "").strip()
+                extra = f" on {street}" if street else ""
+                self.lbl_drive_banner.setText(f"Site {tid} — {mt}{extra}  ({st})")
+            else:
+                d = self._dist_m(from_pt[0], from_pt[1], to_pt[0], to_pt[1]) / 1609.34
+                self.lbl_drive_banner.setText(f"Site {tid} — {d:.1f} mi  ({st})")
+        else:
+            self.lbl_drive_banner.setText("Driving…")
+        self.lbl_drive_banner.show()
+
+    def _advance_nav_voice(self, lat: float, lon: float, target: dict | None = None):
+        maneuvers = self.nav.get("maneuvers") or []
+        if not maneuvers or not self.state.voice_nav:
+            return
+        step = int(self.nav.get("step", 0))
+        if step >= len(maneuvers):
+            return
+        m = maneuvers[step]
+        dist_ft = self._dist_m(lat, lon, m["lat"], m["lon"]) * 3.28084
+        site_id = str(target.get("id", "")) if target else None
+        self.voice_announcer.on_step(
+            step, m.get("type", "straight"), m.get("street", ""), dist_ft, site_id=site_id)
+        if dist_ft < 80 and step < len(maneuvers) - 1:
+            self.nav["step"] = step + 1
+
+    def _on_voice_toggle(self):
+        on = self.chk_voice.isChecked()
+        self.state.voice_nav = on
+        self.voice.enabled = on
+        self.state.save()
+        if not on:
+            self.voice.flush()
+
+    def _test_voice(self):
+        if not voice_nav.tts_available():
+            self._warn(f"Voice not available:\n\n{voice_nav.tts_error() or 'pyttsx3 missing'}")
+            return
+        self.voice.test()
+        self._refresh_voice_hint()
+
+    def _refresh_voice_hint(self):
+        if not hasattr(self, "lbl_voice_hint"):
+            return
+        if not voice_nav.tts_available():
+            self.lbl_voice_hint.setText("Voice unavailable — install pyttsx3")
+        elif self.voice.ready:
+            self.lbl_voice_hint.setText(f"Voice: {self.voice.voice_name}")
+        else:
+            self.lbl_voice_hint.setText("Voice starting…")
 
     def _refresh_drive_leg_trim(self, lat: float, lon: float):
         import time as _time
@@ -990,12 +913,36 @@ class MainWindow(QMainWindow):
         self.state.map_day_filter = self.combo_day.currentText()
 
     def _stops_for_map(self) -> list[dict]:
+        base = self.state.stops or getattr(self, "_map_preview_stops", []) or []
         if not hasattr(self, "combo_day"):
-            return self.state.stops
+            return base
         day = self.combo_day.currentText()
         if day == "All maps":
-            return self.state.stops
-        return [s for s in self.state.stops if s.get("sheet") == day]
+            return base
+        return [s for s in base if s.get("sheet") == day]
+
+    def _refresh_map_preview(self):
+        """Show every site begin/end line as soon as Excel + .EST are loaded (before BUILD ROUTE)."""
+        if self.state.stops:
+            self._map_preview_stops = []
+            return
+        if not self.excel_paths or not self.est_paths:
+            self._map_preview_stops = []
+            self._update_right()
+            if self._map_js_ready:
+                self._push_state()
+            return
+        try:
+            from core import routing
+            sites = ingest.parse_excel_sites(self.excel_paths)
+            raw = ingest.match_est_files(self._est_configs(), sites, self.state.home)
+            self._map_preview_stops = routing.assign_crossings_for_display(
+                raw, self.state.home, DATA_DIR)
+        except Exception:
+            self._map_preview_stops = []
+        self._update_right(force_map=bool(self._map_preview_stops))
+        if self._map_js_ready:
+            self._push_state(fit=bool(self._map_preview_stops))
 
     def _warn_missing_upload_paths(self):
         saved_e = len(getattr(self.state, "excel_paths", []) or [])
@@ -1008,6 +955,7 @@ class MainWindow(QMainWindow):
 
     def _push_state(self, fit: bool = False):
         driving = bool(self.nav.get("active"))
+        preview = bool(self._map_preview_stops) and not self.state.stops
         st = {
             "theme": self.state.theme,
             "home": list(self.state.home),
@@ -1015,9 +963,12 @@ class MainWindow(QMainWindow):
             "route": self._display_route(),
             "fit": fit,
             "driving": driving,
-            "drive_target_uid": self._remaining_drive_stops()[0]["uid"] if driving and self._remaining_drive_stops() else None,
+            "map_mode": "drive" if driving else ("preview" if preview else "plan"),
+            "drive_target_uid": self.nav.get("drive_target_uid") if driving else None,
             "show_guide": False if driving else self.chk_show_guide.isChecked(),
-            "show_segments": False if driving else self.chk_show_segments.isChecked(),
+            "show_segments": self.chk_show_segments.isChecked(),
+            "show_crossings": self.chk_show_segments.isChecked() and not driving,
+            "show_badges": True,
         }
         self.bridge.send_state(st)
         if driving and self.nav.get("leg_poly"):
@@ -1050,7 +1001,7 @@ class MainWindow(QMainWindow):
             self._update_compass_labels(g)
             self.status_gps.setText(f"GPS: FIX  {g.get('satellites', 0)} sats   {lat:.5f}, {lon:.5f}")
             if self.nav.get("active"):
-                self._nav_update(lat, lon)
+                self._drive_update(lat, lon)
             if hasattr(self, "lbl_field_score") and not hasattr(self, "_gps_ready_refreshed"):
                 self._gps_ready_refreshed = True
                 self._refresh_field_ready()
@@ -1198,14 +1149,36 @@ class MainWindow(QMainWindow):
         if self.state.offline_mode:
             self._info("Already in offline mode. All field data saves locally.")
             return
-        if not self.state.stops and not road_router.has_graph(DATA_DIR):
-            self._warn("Build a route and download the road map first (while online), then go offline.")
+        r = check_all(APP_DIR, probe_gps=False, stop_server_after=False)
+        gate = offline_gate_eval(
+            r,
+            has_stops=bool(self.state.stops),
+            route_miles=float(self.state.route.get("miles", 0) or 0),
+            graph_loaded=road_router.has_graph(DATA_DIR),
+        )
+        if gate["blockers"]:
+            body = "\n".join(f"• {b}" for b in gate["blockers"])
+            self._warn(f"Cannot go offline yet:\n\n{body}\n\nFix items on Setup → Field Readiness.")
             return
+        if gate["warns"]:
+            body = "\n".join(f"• {w}" for w in gate["warns"])
+            if QMessageBox.question(
+                self, "Ready for offline?",
+                f"Warnings:\n\n{body}\n\nContinue to offline mode anyway?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            ) != QMessageBox.Yes:
+                return
         self.state.offline_mode = True
         self.state.save()
         self._refresh_offline_ui()
         self.statusBar().showMessage("OFFLINE MODE — field ready. No online calls on the road.", 10000)
-        self._info("Ready for offline.\n\n- Route and road map are stored locally\n- GPS and installs auto-save\n- No address lookup or map downloads on the road")
+        self._info(
+            "Ready for offline.\n\n"
+            "• Route and road map stored locally\n"
+            "• GPS, installs, and exports work offline\n"
+            "• No address lookup or map downloads on the road"
+        )
 
     def _refresh_offline_ui(self):
         on = self.state.offline_mode
@@ -1222,6 +1195,8 @@ class MainWindow(QMainWindow):
             self.btn_address.setEnabled(not on)
         if hasattr(self, "btn_download_roads"):
             self.btn_download_roads.setEnabled(not on)
+        if hasattr(self, "btn_import_roads"):
+            self.btn_import_roads.setEnabled(not on)
 
     def _schedule_autosave(self):
         if not self.state.stops or self.current_index >= len(self.state.stops):
@@ -1330,6 +1305,7 @@ class MainWindow(QMainWindow):
 
     def _origin_from_coords(self):
         self._set_origin(self.spin_lat.value(), self.spin_lon.value(), "Origin saved.")
+        self._refresh_map_preview()
 
     def _sync_upload_paths(self):
         self.state.excel_paths = list(self.excel_paths)
@@ -1353,6 +1329,7 @@ class MainWindow(QMainWindow):
                 self.excel_paths.append(p)
         self._refresh_file_lists()
         self._sync_upload_paths()
+        self._refresh_map_preview()
 
     def _pick_est(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "Add .EST maps", "",
@@ -1362,6 +1339,7 @@ class MainWindow(QMainWindow):
                 self.est_paths.append(p)
         self._refresh_file_lists()
         self._sync_upload_paths()
+        self._refresh_map_preview()
 
     def _clear_files(self):
         if QMessageBox.question(
@@ -1376,6 +1354,7 @@ class MainWindow(QMainWindow):
         self.est_paths = []
         self._refresh_file_lists()
         self._sync_upload_paths()
+        self._refresh_map_preview()
         self.statusBar().showMessage("File lists cleared — shift data unchanged.", 5000)
 
     def _load_demo_files(self):
@@ -1391,9 +1370,10 @@ class MainWindow(QMainWindow):
             added = True
         self._refresh_file_lists()
         self._sync_upload_paths()
+        self._refresh_map_preview()
         msg = "Demo files loaded (5 sites)." if added else "Demo files already in the list."
         self.statusBar().showMessage(
-            f"{msg} Download road map → BUILD OPTIMIZED ROUTE.", 8000)
+            f"{msg} Blue/red dots = begin/end of each line. BUILD ROUTE when ready.", 8000)
 
     @staticmethod
     def _est_label_from_path(path: str) -> str:
@@ -1445,6 +1425,17 @@ class MainWindow(QMainWindow):
         if len(pts) < 2:
             self._warn("Add your Excel + .EST files first so I know the area.")
             return
+        try:
+            _w, _s, _e, _n, span_mi = road_router.bbox_for_points(pts)
+        except ValueError as exc:
+            self._warn(str(exc))
+            return
+        net_err = road_router.probe_roads_internet()
+        if net_err:
+            self.statusBar().showMessage(
+                "Road servers look blocked — trying download anyway (use hotspot if this fails)...",
+                12000,
+            )
 
         dlg = QProgressDialog("Downloading road map (needs internet)...", "Cancel", 0, 0, self)
         dlg.setWindowTitle("Downloading")
@@ -1457,14 +1448,16 @@ class MainWindow(QMainWindow):
         t0 = _time.time()
         etimer = QTimer(self)
 
-        thread = _DownloadRoadsThread(pts, DATA_DIR)
+        thread = DownloadRoadsThread(pts, DATA_DIR)
         self._dl_thread = thread
 
         def tick():
             dlg.setLabelText(
                 f"Downloading road map from OpenStreetMap...\n\n"
-                f"Elapsed: {int(_time.time() - t0)}s\n"
-                f"(Usually 30–90 seconds for your work area)")
+                f"Elapsed: {int(_time.time() - t0)}s  (~{span_mi:.0f} mi work area)\n\n"
+                f"Usually 30-90 seconds on home Wi-Fi.\n"
+                f"If this passes 3 minutes, work firewall may be blocking it — Cancel, "
+                f"then copy tds_data\\road_graph.graphml from home.")
 
         def done(res):
             etimer.stop()
@@ -1480,7 +1473,15 @@ class MainWindow(QMainWindow):
                     "Road map downloaded — build your route next.", 8000)
                 self._refresh_field_ready()
             else:
-                self._warn(f"Road map download failed: {res.get('error', 'unknown')}")
+                err = res.get("error", "unknown")
+                self._warn(
+                    f"Road map download failed:\n\n{err}\n\n"
+                    "On work Wi‑Fi: use phone hotspot and try again, OR\n"
+                    "copy tds_data\\road_graph.graphml from your home PC and tap\n"
+                    "Import road map from file.\n\n"
+                    "Cmd download:\n"
+                    "  .venv\\Scripts\\python.exe scripts\\download_road_map.py --demo"
+                )
 
         def canceled():
             etimer.stop()
@@ -1495,6 +1496,39 @@ class MainWindow(QMainWindow):
         thread.start()
         dlg.show()
         tick()
+
+    def _import_roads(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import road map",
+            DATA_DIR,
+            "Road graph (*.graphml);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            info = road_router.import_graph(path, DATA_DIR)
+        except Exception as exc:  # noqa: BLE001
+            self._warn(f"Could not import road map:\n\n{exc}")
+            return
+        nodes = info.get("nodes", 0)
+        if nodes:
+            self._info(
+                f"Road map imported: {nodes:,} intersections.\n"
+                "Now press BUILD OPTIMIZED ROUTE.")
+        elif road_router.has_graph(DATA_DIR):
+            g = road_router.load_graph(DATA_DIR)
+            n = len(g.nodes) if g else 0
+            self._info(f"Road map imported and loaded ({n:,} nodes).\nNow press BUILD OPTIMIZED ROUTE.")
+        else:
+            mb = info.get("size_mb", "?")
+            self._warn(
+                f"File copied ({mb} MB) but graph did not load.\n\n"
+                "Launch via START.bat (.venv) or re-copy road_graph.graphml from home PC."
+            )
+            return
+        self.statusBar().showMessage("Road map imported from file.", 8000)
+        self._refresh_field_ready()
 
     def _build_route_from_uploads(self):
         if not self.excel_paths or not self.est_paths:
@@ -1539,6 +1573,7 @@ class MainWindow(QMainWindow):
                 f"Re-build: kept install/pickup data on {kept} site(s).", 6000)
 
         self.state.stops = merged
+        self._map_preview_stops = []
         self.state.route = {"polyline": [], "miles": 0.0, "graph": False}
         self._persist_shift(quiet=True)
         self.current_index = min(self.current_index, max(0, len(self.state.stops) - 1))
@@ -1577,7 +1612,7 @@ class MainWindow(QMainWindow):
         import time as _time
         t0 = _time.time()
         etimer = QTimer(self)
-        thread = _RouteOptimizeThread(list(stops), tuple(self.state.home), DATA_DIR)
+        thread = RouteOptimizeThread(list(stops), tuple(self.state.home), DATA_DIR)
         self._route_thread = thread
 
         def on_progress(msg: str):
@@ -1676,72 +1711,35 @@ class MainWindow(QMainWindow):
             self._start_drive()
 
     def _activate_drive(self, remaining: list[dict]):
-        """Turn on driving mode immediately (no blocking dialog)."""
+        """Map follow + blue leg to next stop (no turn-by-turn banner or voice)."""
         start = self._drive_start_point()
         self.nav = {
             "active": True,
-            "plan": [],
-            "poly": [],
-            "legs": [],
             "leg_index": 0,
             "leg_poly": [],
             "stops": remaining,
-            "step": 0,
             "graph": road_router.has_graph(DATA_DIR),
-            "miles": 0.0,
             "off_route_n": 0,
             "_last_reroute": 0.0,
+            "phase": "stops",
+            "drive_target_uid": remaining[0]["uid"] if remaining else None,
         }
         self._last_leg_push = 0.0
-        self._voice_announcer.reset()
-        if self.state.voice_nav:
-            self._voice_announcer.navigation_started(
-                str(remaining[0]["id"]), str(remaining[0].get("street", "")))
         self._set_nav_leg(start, remaining[0], push_map=True)
         self.bridge.set_follow(True)
+        self.voice_announcer.reset()
+        if self.state.voice_nav and remaining:
+            self.voice_announcer.navigation_started(
+                str(remaining[0].get("id", "")),
+                self._street_label(remaining[0]),
+            )
         self._update_right(force_map=True)
         self._push_state()
         self._refresh_route_list()
         self._go_page(1)
         g = self.gps.latest()
         if g.get("fix"):
-            self._nav_update(g["lat"], g["lon"])
-        else:
-            self.bridge.send_nav({
-                "active": True, "arrow": "straight",
-                "text": f"Drive to Site {remaining[0]['id']}",
-                "sub": remaining[0].get("street", ""),
-            })
-
-    def _on_nav_plan_ready(self, res: dict):
-        self._nav_thread = None
-        if not self.nav.get("active"):
-            return
-        if not res.get("ok"):
-            self.statusBar().showMessage(
-                f"Detail turn-by-turn unavailable: {res.get('error', 'unknown')}", 10000)
-            return
-        if res.get("plan"):
-            self.nav["plan"] = res["plan"]
-        if res.get("legs"):
-            self.nav["legs"] = res["legs"]
-            idx = int(self.nav.get("leg_index", 0))
-            if idx < len(res["legs"]) and res["legs"][idx]:
-                self.nav["leg_poly"] = res["legs"][idx]
-        elif res.get("polyline"):
-            self.nav["poly"] = res["polyline"]
-        if res.get("miles"):
-            self.nav["miles"] = res["miles"]
-        remaining = self._remaining_drive_stops()
-        if remaining:
-            self._set_nav_leg(self._drive_start_point(), remaining[0], push_map=True)
-        self._push_state()
-        g = self.gps.latest()
-        if g.get("fix"):
-            self._nav_update(g["lat"], g["lon"])
-        self.statusBar().showMessage("Turn-by-turn directions ready.", 5000)
-        if self.state.voice_nav:
-            self._voice_announcer.plan_ready()
+            self._drive_update(g["lat"], g["lon"])
 
     def _start_drive(self):
         if not self.state.stops:
@@ -1751,54 +1749,31 @@ class MainWindow(QMainWindow):
         if not remaining:
             self._info("All stops are already done.")
             return
-        if getattr(self, "_nav_thread", None) and self._nav_thread.isRunning():
-            self._warn("Navigation is still loading — wait a moment.")
-            return
         if not road_router.has_graph(DATA_DIR):
             self._warn(
                 "No offline road map for this area yet.\n\n"
                 "Driving will use straight lines only.\n"
                 "On WiFi: Setup → Download road map → BUILD ROUTE.")
-
         self._activate_drive(remaining)
+        n = len(remaining)
         self.statusBar().showMessage(
-            "Driving started — turn-by-turn loads in the background.", 8000)
-
-        start = self._drive_start_point()
-        thread = _NavPlanThread(start, remaining, tuple(self.state.home), DATA_DIR)
-        self._nav_thread = thread
-        thread.finished_result.connect(self._on_nav_plan_ready)
-        thread.start()
+            f"Driving — follow map to Site {remaining[0]['id']} ({n} stop(s), then return to start).",
+            10000,
+        )
 
     def _stop_drive(self):
         self.nav = {"active": False}
-        self._nav_voice.flush()
-        self._voice_announcer.reset()
+        self.voice.flush()
+        self.voice_announcer.reset()
         self.bridge.send_drive_leg([], active=False)
-        self.bridge.send_nav({"active": False})
+        if hasattr(self, "lbl_drive_banner"):
+            self.lbl_drive_banner.hide()
         self.btn_start.setText("START DRIVING")
         self.btn_start.setObjectName("go")
-        self.btn_start.style().unpolish(self.btn_start); self.btn_start.style().polish(self.btn_start)
+        self.btn_start.style().unpolish(self.btn_start)
+        self.btn_start.style().polish(self.btn_start)
         self._push_state()
-
-    _VERB = {"left": "Turn left onto", "right": "Turn right onto", "straight": "Continue on",
-             "uturn": "Make a U-turn onto", "depart": "Head out on", "continue": "Continue on"}
-
-    @staticmethod
-    def _nav_leg_bounds(plan: list, leg_index: int) -> tuple[int, int]:
-        """Index range [start, end) in plan for one driving leg."""
-        leg_start = 0
-        if leg_index > 0:
-            for i, m in enumerate(plan):
-                if m.get("stop_index") == leg_index - 1:
-                    leg_start = i + 1
-                    break
-        leg_end = len(plan)
-        for i, m in enumerate(plan):
-            if m.get("stop_index") == leg_index:
-                leg_end = i + 1
-                break
-        return leg_start, leg_end
+        self.statusBar().showMessage("Driving stopped.", 5000)
 
     def _maybe_reroute(self, lat: float, lon: float):
         """Offline reroute: one Dijkstra on the saved graph when GPS leaves the leg line."""
@@ -1815,127 +1790,72 @@ class MainWindow(QMainWindow):
             nav["off_route_n"] = 0
         if nav.get("off_route_n", 0) < 3:
             return
+        if hasattr(self, "lbl_drive_banner"):
+            self.lbl_drive_banner.setText("Off route — recalculating…")
         nav["off_route_n"] = 0
         import time as _time
         if _time.time() - float(nav.get("_last_reroute", 0)) < 12:
             return
+        if self.state.voice_nav:
+            self.voice_announcer.reroute()
         self._reroute_current_leg(lat, lon)
 
     def _reroute_current_leg(self, lat: float, lon: float):
-        remaining = self._remaining_drive_stops()
-        if not remaining:
-            return
-        li = int(self.nav.get("leg_index", 0))
-        target = remaining[0]
-        to_pt = self.state.point(target)
-        G = road_router.load_graph(DATA_DIR)
         import time as _time
-        if G is None:
-            self._set_nav_leg((lat, lon), target, push_map=True)
-            self.nav["_last_reroute"] = _time.time()
-            return
-        leg = road_router.leg_plan(G, (lat, lon), to_pt, stop_index=li)
-        plan = self.nav.get("plan") or []
-        leg_start, leg_end = self._nav_leg_bounds(plan, li)
-        self.nav["plan"] = plan[:leg_start] + (leg.get("maneuvers") or []) + plan[leg_end:]
-        self.nav["step"] = leg_start
-        self.nav["leg_poly"] = leg.get("polyline") or []
-        legs = list(self.nav.get("legs") or [])
-        while len(legs) <= li:
-            legs.append([])
-        legs[li] = self.nav["leg_poly"]
-        self.nav["legs"] = legs
-        self.bridge.send_drive_leg(self.nav["leg_poly"], active=True)
+        remaining = self._remaining_drive_stops()
+        if self.nav.get("phase") == "home":
+            home = tuple(self.state.home)
+            self._set_nav_leg((lat, lon), {}, push_map=True, to_pt=home)
+        elif remaining:
+            self._set_nav_leg((lat, lon), remaining[0], push_map=True)
         self.nav["_last_reroute"] = _time.time()
-        self.statusBar().showMessage("Recalculated route from your position (offline).", 5000)
-        if self.state.voice_nav:
-            self._voice_announcer.reroute()
+        self.bridge.send_drive_leg(self.nav.get("leg_poly") or [], active=True)
+        self.statusBar().showMessage("Recalculated leg from your position.", 5000)
 
-    def _nav_update(self, lat, lon):
-        if self.nav.get("active"):
-            self._refresh_drive_leg_trim(lat, lon)
-            self._maybe_reroute(lat, lon)
-        nav = self.nav
-        plan = nav.get("plan") or []
-        if not plan:
-            targets = [s for s in nav["stops"] if not s.get("installed") and not s.get("skipped")]
-            if not targets:
-                self._stop_drive(); return
-            t = targets[0]
-            tlat, tlon = self.state.point(t)
-            d = self._dist_m(lat, lon, tlat, tlon)
-            if d < 35:
-                gi = self.state.index_of(t["uid"])
-                if gi >= 0:
-                    self.current_index = gi
-                rest = self._remaining_drive_stops()
-                if len(rest) > 1:
-                    self.nav["leg_index"] = int(self.nav.get("leg_index", 0)) + 1
-                    self._set_nav_leg((lat, lon), rest[1], push_map=True)
-            self.bridge.send_nav({"active": True, "arrow": "straight",
-                                  "text": f"Drive to Site {t['id']}",
-                                  "sub": f"{d / 1609.34:.1f} mi - {t.get('street', '')}"})
+    def _drive_update(self, lat: float, lon: float):
+        if not self.nav.get("active"):
+            return
+        self._refresh_drive_leg_trim(lat, lon)
+        self._maybe_reroute(lat, lon)
+        remaining = self._remaining_drive_stops()
+        home = tuple(self.state.home)
+
+        if not remaining:
+            d_home = self._dist_m(lat, lon, home[0], home[1])
+            if self.nav.get("phase") != "home":
+                self.nav["phase"] = "home"
+                self.nav["drive_target_uid"] = None
+                self._set_nav_leg((lat, lon), {}, push_map=True, to_pt=home)
+                self._push_state()
+            self.status_route.setText(f"Return to start — {d_home / 1609.34:.1f} mi")
+            if d_home < 45:
+                self._stop_drive()
+                self.statusBar().showMessage("Back at start — driving ended.", 8000)
             return
 
-        step = nav["step"]
-        while step < len(plan) - 1 and self._dist_m(lat, lon, plan[step]["lat"], plan[step]["lon"]) < 25:
-            if plan[step].get("stop_index") is not None:
-                self._nav_arrived(plan[step]["stop_index"])
-            step += 1
-        nav["step"] = step
-
-        man = plan[step]
-        arrive_idx = next((k for k in range(step, len(plan)) if plan[k].get("stop_index") is not None), None)
-        d_next = self._dist_m(lat, lon, man["lat"], man["lon"])
-        extra = sum(plan[k].get("dist_m", 0.0) for k in range(step, arrive_idx)) if arrive_idx is not None else 0.0
-        miles = (d_next + extra) / 1609.34
-        target = nav["stops"][plan[arrive_idx]["stop_index"]] if arrive_idx is not None else None
-
-        if man["type"] == "arrive":
-            tid = target["id"] if target else ""
-            text = f"Arrive at Site {tid}"
-            arrow = "arrive"
-        else:
-            arrow = man["type"]
-            text = f"{self._VERB.get(man['type'], 'Continue on')} {man.get('street', '')}".strip()
-        if target:
-            if miles < 0.15:
-                sub = f"In {int(miles * 5280)} ft — Site {target['id']}"
-            else:
-                sub = f"{miles:.1f} mi to Site {target['id']}"
-        else:
-            sub = "Route complete"
-        self.bridge.send_nav({"active": True, "arrow": arrow, "text": text, "sub": sub})
-        if self.nav.get("active") and self.state.voice_nav:
-            dist_ft = miles * 5280.0
-            self._voice_announcer.on_step(
-                step,
-                man["type"],
-                man.get("street", ""),
-                dist_ft,
-                site_id=str(target["id"]) if target else None,
-            )
-
-    def _nav_arrived(self, si: int):
-        try:
-            s = self.nav["stops"][si]
-        except (IndexError, KeyError):
-            return
-        gi = self.state.index_of(s["uid"])
+        self.nav["phase"] = "stops"
+        target = remaining[0]
+        tlat, tlon = self.state.point(target)
+        d = self._dist_m(lat, lon, tlat, tlon)
+        gi = self.state.index_of(target["uid"])
         if gi >= 0:
             self.current_index = gi
-        g = self.gps.latest()
-        from_pt = (g["lat"], g["lon"]) if g.get("fix") else self.state.point(s)
-        rest = [x for x in self._remaining_drive_stops() if x["uid"] != s.get("uid")]
-        if rest:
+        if self.nav.get("drive_target_uid") != target["uid"]:
+            self.nav["drive_target_uid"] = target["uid"]
+            self._set_nav_leg((lat, lon), target, push_map=True)
+            self._push_state()
+        self._advance_nav_voice(lat, lon, target)
+        self._update_drive_banner((lat, lon), (tlat, tlon), target)
+        left = len(remaining)
+        self.status_route.setText(
+            f"Next: Site {target['id']} — {d / 1609.34:.1f} mi"
+            f" ({left} left, then home) — {self._street_label(target)}")
+        if d < 40 and len(remaining) > 1:
+            nxt = remaining[1]
             self.nav["leg_index"] = int(self.nav.get("leg_index", 0)) + 1
-            legs = self.nav.get("legs") or []
-            idx = self.nav["leg_index"]
-            if idx < len(legs) and legs[idx]:
-                self.nav["leg_poly"] = legs[idx]
-                self.bridge.send_drive_leg(legs[idx], active=True)
-            else:
-                self._set_nav_leg(from_pt, rest[0], push_map=True)
+            self.nav["drive_target_uid"] = nxt["uid"]
+            self._set_nav_leg((lat, lon), nxt, push_map=True)
+            self._push_state()
 
     # ------------------------------------------------------- Install UI/flow
     def _refresh_install(self):
@@ -1956,6 +1876,24 @@ class MainWindow(QMainWindow):
         fl, fo = s.get("field_lat"), s.get("field_lon")
         self.lbl_grab.setText(f"Field GPS: {fl:.5f}, {fo:.5f}" if fl else "")
         warn = str(s.get("street_warning") or "").strip()
+        if not warn and road_router.has_graph(DATA_DIR):
+            try:
+                from core import street_intel
+                g = road_router.load_graph(DATA_DIR)
+                cross = None
+                if s.get("cross_lat") is not None:
+                    cross = (float(s["cross_lat"]), float(s["cross_lon"]))
+                r = street_intel.analyze_segment(
+                    g,
+                    (float(s["begin_lat"]), float(s["begin_lon"])),
+                    (float(s["end_lat"]), float(s["end_lon"])),
+                    cross,
+                )
+                warn = str(r.get("message") or "").strip()
+                if warn:
+                    s["street_warning"] = warn
+            except Exception:
+                pass
         self.lbl_street_warn.setText(warn)
         self.lbl_street_warn.setVisible(bool(warn))
         self._update_compass_labels(self.gps.latest())
@@ -1995,6 +1933,18 @@ class MainWindow(QMainWindow):
             else:
                 self.statusBar().showMessage(
                     "Install GPS saved. Type street or download road map for offline names.", 6000)
+        if road_router.has_graph(DATA_DIR):
+            try:
+                from core import street_intel
+                g = road_router.load_graph(DATA_DIR)
+                r = street_intel.analyze_point(g, lat, lon)
+                msg = str(r.get("message") or "").strip()
+                if msg:
+                    s["street_warning"] = msg
+                    self.lbl_street_warn.setText(msg)
+                    self.lbl_street_warn.setVisible(True)
+            except Exception:
+                pass
         self._flush_install_form()
         self._persist_shift(quiet=True)
         self._push_state()
@@ -2102,7 +2052,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------- Undo / shortcuts
     @staticmethod
     def _snapshot_stop(s: dict) -> dict:
-        return {k: s.get(k) for k in _UNDO_FIELDS}
+        return {k: s.get(k) for k in UNDO_FIELDS}
 
     def _push_undo(self, kind: str, uid: str, snapshot: dict, **extra):
         self._undo_stack.append({"kind": kind, "uid": uid, "snapshot": snapshot, **extra})
@@ -2202,9 +2152,12 @@ class MainWindow(QMainWindow):
         self.lbl_export_hint.setText(f"Default folder:\n{folder}\n\nNext quick export:\n{os.path.basename(xlsx)}")
 
     def _export_excel(self):
-        data = export.to_excel_bytes(self.state.stops)
+        data, err = export.to_excel_result(self.state.stops)
         if data is None:
-            self._warn("Nothing to export yet (no installed/skipped sites).")
+            if err:
+                self._warn(err)
+            else:
+                self._warn("Nothing to export yet (no installed/skipped sites).")
             return
         default = export.default_report_path(DATA_DIR, self.state.profile, "xlsx")
         path, _ = QFileDialog.getSaveFileName(
@@ -2215,9 +2168,12 @@ class MainWindow(QMainWindow):
             self._info(f"Excel report saved.\n\n{path}")
 
     def _export_excel_quick(self):
-        data = export.to_excel_bytes(self.state.stops)
+        data, err = export.to_excel_result(self.state.stops)
         if data is None:
-            self._warn("Nothing to export yet (no installed/skipped sites).")
+            if err:
+                self._warn(err)
+            else:
+                self._warn("Nothing to export yet (no installed/skipped sites).")
             return
         path = export.default_report_path(DATA_DIR, self.state.profile, "xlsx")
         with open(path, "wb") as f:
@@ -2300,7 +2256,7 @@ class MainWindow(QMainWindow):
                 self._flush_install_form()
             self._persist_shift(quiet=True)
             self.gps.stop()
-            self._nav_voice.shutdown()
+            self.voice.shutdown()
         except Exception:
             pass
         super().closeEvent(event)

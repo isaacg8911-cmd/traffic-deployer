@@ -1,8 +1,4 @@
 @echo off
-REM ============================================================
-REM  Traffic Deployer — full smoke test (no GUI)
-REM  Double-click or: scripts\smoke.bat
-REM ============================================================
 cd /d "%~dp0\.."
 
 if not exist ".venv\Scripts\python.exe" (
@@ -14,17 +10,30 @@ if not exist ".venv\Scripts\python.exe" (
     call ".venv\Scripts\activate.bat"
 )
 
-".venv\Scripts\python.exe" scripts\smoke_full.py
-set EXITCODE=%ERRORLEVEL%
+set FAIL=0
 echo.
-if %EXITCODE%==0 (
+echo === [1/3] smoke_full ===
+".venv\Scripts\python.exe" scripts\smoke_full.py
+if errorlevel 1 set FAIL=1
+
+echo.
+echo === [2/3] demo_workflow ===
+".venv\Scripts\python.exe" scripts\demo_workflow.py
+if errorlevel 1 set FAIL=1
+
+echo.
+echo === [3/3] quick_preflight ===
+".venv\Scripts\python.exe" scripts\quick_preflight.py
+if errorlevel 1 set FAIL=1
+
+echo.
+if %FAIL%==0 (
     echo ========================================
-    echo   SMOKE PASS — ready for field / demo
+    echo   PROVE PASS — ready for field / demo
     echo ========================================
 ) else (
     echo ========================================
-    echo   SMOKE FAILED — fix errors above
+    echo   PROVE FAILED — see errors above
     echo ========================================
 )
-pause
-exit /b %EXITCODE%
+exit /b %FAIL%

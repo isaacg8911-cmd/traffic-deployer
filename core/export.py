@@ -60,24 +60,72 @@ def audit(stops: list[dict]) -> dict:
     return {"ok": not missing, "missing": missing, "count": len(done)}
 
 
-def to_excel_bytes(stops: list[dict]) -> bytes | None:
-    """Build an .xlsx in memory. Returns None if the Excel engine is unavailable."""
+def _excel_engines() -> list[str]:
+    engines: list[str] = []
+    try:
+        import xlsxwriter  # noqa: F401
+
+        engines.append("xlsxwriter")
+    except ImportError:
+        pass
+    try:
+        import openpyxl  # noqa: F401
+
+        engines.append("openpyxl")
+    except ImportError:
+        pass
+    return engines
+
+
+def excel_engine_ok() -> tuple[bool, str]:
+    """Whether Audit Excel export can run in this Python environment."""
+    engines = _excel_engines()
+    if not engines:
+        return False, "Install dependencies via START.bat (xlsxwriter or openpyxl)."
+    if "xlsxwriter" not in engines:
+        return True, "Using openpyxl fallback (run START.bat for xlsxwriter)."
+    return True, ""
+
+
+def _write_workbook(df: pd.DataFrame, engine: str) -> bytes:
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine=engine) as writer:
+        df.drop(columns=["_Sheet"], errors="ignore")[_EXPORT_COLS].to_excel(
+            writer, sheet_name="Master List", index=False)
+        for sheet in df["_Sheet"].unique():
+            safe = "".join(c for c in str(sheet) if c not in '[]:*?/\\')[:31] or "Map"
+            sub = df[df["_Sheet"] == sheet].drop(columns=["_Sheet"], errors="ignore")
+            sub[_EXPORT_COLS].to_excel(writer, sheet_name=safe, index=False)
+    return out.getvalue()
+
+
+def to_excel_result(stops: list[dict]) -> tuple[bytes | None, str | None]:
+    """Build .xlsx bytes. Returns (data, error_message). error is None on success."""
     done = [s for s in stops if s.get("installed") or s.get("skipped")]
     if not done:
-        return None
+        return None, None
+    engines = _excel_engines()
+    if not engines:
+        return None, (
+            "Excel export is not available in this Python environment. "
+            "Use START.bat or SMOKE.bat (project .venv), not bare python."
+        )
     df = pd.DataFrame([_row(s) for s in done])
-    try:
-        out = io.BytesIO()
-        with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
-            df.drop(columns=["_Sheet"], errors="ignore")[_EXPORT_COLS].to_excel(
-                writer, sheet_name="Master List", index=False)
-            for sheet in df["_Sheet"].unique():
-                safe = "".join(c for c in str(sheet) if c not in '[]:*?/\\')[:31] or "Map"
-                sub = df[df["_Sheet"] == sheet].drop(columns=["_Sheet"], errors="ignore")
-                sub[_EXPORT_COLS].to_excel(writer, sheet_name=safe, index=False)
-        return out.getvalue()
-    except Exception:
-        return None
+    last_err = ""
+    for engine in engines:
+        try:
+            return _write_workbook(df, engine), None
+        except ImportError as exc:
+            last_err = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            last_err = str(exc)
+    return None, f"Excel export failed: {last_err or 'unknown error'}"
+
+
+def to_excel_bytes(stops: list[dict]) -> bytes | None:
+    """Build an .xlsx in memory. Returns None if nothing to export or on failure."""
+    data, _err = to_excel_result(stops)
+    return data
 
 
 def to_csv_text(stops: list[dict]) -> str:

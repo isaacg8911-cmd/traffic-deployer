@@ -46,10 +46,14 @@ def check_all(
 
     if os.path.isfile(pmtiles):
         mb = os.path.getsize(pmtiles) / (1024 * 1024)
-        items.append(_item("basemap", f"California offline map ({mb:.0f} MB)", True))
+        if mb < 100:
+            items.append(_item("basemap", "California offline map", False, level="fail",
+                               detail=f"Incomplete download ({mb:.0f} MB) — delete california.pmtiles and re-run START.bat on WiFi"))
+        else:
+            items.append(_item("basemap", f"California offline map ({mb:.0f} MB)", True))
     else:
         items.append(_item("basemap", "California offline map", False, level="fail",
-                           detail="Run setup_maps.py once on WiFi"))
+                           detail="Run START.bat once on WiFi, or copy tds_data from home PC"))
 
     items.append(_item("fonts", "Street label fonts", os.path.isfile(fonts), level="fail",
                        detail="Re-run setup_maps.py"))
@@ -62,24 +66,33 @@ def check_all(
 
     try:
         import road_router
-        has_g = road_router.has_graph(data)
-        if has_g:
+        if road_router.has_graph(data):
             g = road_router.load_graph(data)
             n = len(g.nodes) if g else 0
-            items.append(_item("roads", f"Road routing graph ({n:,} nodes)", True))
+            items.append(_item("roads", f"Road routing graph ({n:,} nodes)", n > 0))
+        elif road_router.graph_file_exists(data):
+            detail = "File on disk but will not load"
+            if not road_router.HAS_ROUTING:
+                detail = "road_graph.graphml present — launch via START.bat (osmnx in .venv)"
+            else:
+                detail = "road_graph.graphml may be corrupt — re-download or re-import"
+            items.append(_item("roads", "Road routing graph", False, level="warn", detail=detail))
         else:
             items.append(_item("roads", "Road routing graph", False, level="warn",
-                               detail="Setup → Download road map (needs WiFi + your sites)"))
+                               detail="Setup → Download (WiFi) or Import road_graph.graphml from home PC"))
     except Exception as exc:
         items.append(_item("roads", "Road routing graph", False, level="warn", detail=str(exc)))
 
     try:
-        import voice_nav
-        items.append(_item("voice", "Voice navigation (pyttsx3)",
-                           voice_nav.tts_available(), level="warn",
-                           detail=voice_nav.tts_error() or "pip install pyttsx3"))
+        from core import export
+        eng_ok, eng_detail = export.excel_engine_ok()
+        items.append(_item(
+            "excel", "Excel export engine", eng_ok,
+            level="warn" if not eng_ok else "ok",
+            detail=eng_detail,
+        ))
     except Exception as exc:
-        items.append(_item("voice", "Voice navigation", False, level="warn", detail=str(exc)))
+        items.append(_item("excel", "Excel export engine", False, level="warn", detail=str(exc)))
 
     try:
         import persistence
@@ -133,8 +146,8 @@ def check_all(
 
 
 TOMORROW_STEPS = [
-    "Tonight (WiFi): Excel + .EST loaded → Download road map → BUILD ROUTE → Test voice (Zira).",
+    "Tonight (WiFi): Excel + .EST loaded → Download road map → BUILD ROUTE.",
     "Tap READY FOR OFFLINE before you leave.",
-    "In the field: plug GPS → START DRIVING → Follow Me (street-name zoom).",
+    "In the field: plug GPS → START DRIVING → Follow Me on the map.",
     "Each stop: Grab GPS → INSTALL or SKIP → end of day Audit export.",
 ]

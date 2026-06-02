@@ -24,16 +24,68 @@ except Exception:
     HAS_ROUTING = False
 
 GRAPH_FILENAME = "road_graph.graphml"
+# osmnx appends "/interpreter" to overpass_url — bases must NOT include that suffix.
+# Order: mirrors that work on corporate Wi‑Fi first; overpass-api.de is often blocked.
+OVERPASS_MIRRORS = (
+    "https://overpass.kumi.systems/api",
+    "https://overpass.private.coffee/api",
+    "https://z.overpass-api.de/api",
+    "https://lz4.overpass-api.de/api",
+    "https://overpass-api.de/api",
+)
+# Warn when the download box is huge (slow / more likely to time out on work networks).
+MAX_BBOX_SPAN_MI_WARN = 85.0
 _GRAPH_CACHE: dict = {}
 _NODE_ARRAYS: dict = {}
+
+
+def normalize_overpass_base(url: str) -> str:
+    """Strip trailing slashes and a mistaken /interpreter suffix."""
+    u = (url or "").strip().rstrip("/")
+    if u.endswith("/interpreter"):
+        u = u[: -len("/interpreter")]
+    return u
+
+
+def overpass_interpreter_url(base: str) -> str:
+    return normalize_overpass_base(base) + "/interpreter"
+
+
+def _configure_osmnx_for_download() -> None:
+    """Tune osmnx HTTP for one-shot road downloads (work Wi‑Fi, proxies, long queries)."""
+    if not HAS_ROUTING:
+        return
+    for attr, val in (("requests_timeout", 300), ("timeout", 300)):
+        try:
+            setattr(ox.settings, attr, val)
+        except Exception:
+            pass
+    ox.settings.http_user_agent = "TrafficDeployer/1.0 (offline routing; +https://github.com)"
+    ox.settings.http_referer = "TrafficDeployer"
+    # Google's DoH often works when corporate DNS blocks overpass hostnames.
+    ox.settings.doh_url_template = "https://dns.google/resolve?name={hostname}"
+    proxies: dict[str, str] = {}
+    for key, env in (("https", "HTTPS_PROXY"), ("https", "https_proxy"),
+                     ("http", "HTTP_PROXY"), ("http", "http_proxy")):
+        val = os.environ.get(env, "").strip()
+        if val and key not in proxies:
+            proxies[key] = val
+    if proxies:
+        ox.settings.requests_kwargs = {"proxies": proxies}
 
 
 def graph_path(data_dir: str) -> str:
     return os.path.join(data_dir, GRAPH_FILENAME)
 
 
+def graph_file_exists(data_dir: str) -> bool:
+    """True if road_graph.graphml is on disk (may still fail to load)."""
+    return os.path.isfile(graph_path(data_dir))
+
+
 def has_graph(data_dir: str) -> bool:
-    return os.path.exists(graph_path(data_dir))
+    """True only when the graph file loads into memory (osmnx required)."""
+    return load_graph(data_dir) is not None
 
 
 def _haversine_m(lat1, lon1, lat2, lon2):
@@ -42,6 +94,171 @@ def _haversine_m(lat1, lon1, lat2, lon2):
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def bbox_for_points(points, buffer_m: float = 1500) -> tuple[float, float, float, float, float]:
+    """Return west, south, east, north, span_mi for (lat, lon) points."""
+    pts = [(float(p[0]), float(p[1])) for p in points if p and p[0] and p[1]]
+    if not pts:
+        raise ValueError("No valid points to cover.")
+    lats = [p[0] for p in pts]
+    lons = [p[1] for p in pts]
+    mlat = (min(lats) + max(lats)) / 2.0
+    dlat = buffer_m / 111320.0
+    dlon = buffer_m / (111320.0 * max(math.cos(math.radians(mlat)), 0.1))
+    north, south = max(lats) + dlat, min(lats) - dlat
+    east, west = max(lons) + dlon, min(lons) - dlon
+    span_mi = _haversine_m(south, west, north, east) / 1609.34
+    return west, south, east, north, span_mi
+
+
+def _fetch_bbox_graph(
+    west: float,
+    south: float,
+    east: float,
+    north: float,
+    *,
+    network_type: str = "drive",
+):
+    _configure_osmnx_for_download()
+    errors: list[str] = []
+    for raw in OVERPASS_MIRRORS:
+        base = normalize_overpass_base(raw)
+        try:
+            ox.settings.overpass_url = base
+            print(f"[road download] trying {base}", flush=True)
+            return ox.graph_from_bbox(
+                bbox=(west, south, east, north), network_type=network_type, simplify=True
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{base}: {exc}")
+            print(f"[road download] failed {base}: {exc}", flush=True)
+    raise RuntimeError(
+        "All Overpass servers failed. "
+        + ("; ".join(errors[-4:]) if errors else "unknown")
+        + ". Try phone hotspot, copy tds_data\\road_graph.graphml from home, "
+        "or use Setup → Import road map from file."
+    )
+
+
+def _download_tiled(
+    west: float,
+    south: float,
+    east: float,
+    north: float,
+    *,
+    network_type: str = "drive",
+    max_tile_mi: float = 55.0,
+):
+    """Split a huge bbox into smaller Overpass requests, then merge."""
+    lat_mid = (north + south) / 2.0
+    lon_mid = (west + east) / 2.0
+    lat_half_mi = _haversine_m(south, lon_mid, north, lon_mid) / 1609.34 / 2.0
+    lon_half_mi = _haversine_m(lat_mid, west, lat_mid, east) / 1609.34 / 2.0
+    n_lat = max(1, math.ceil(lat_half_mi * 2 / max_tile_mi))
+    n_lon = max(1, math.ceil(lon_half_mi * 2 / max_tile_mi))
+    dlat = (north - south) / n_lat
+    dlon = (east - west) / n_lon
+    graphs = []
+    for i in range(n_lat):
+        for j in range(n_lon):
+            s = south + i * dlat
+            n = south + (i + 1) * dlat
+            w = west + j * dlon
+            e = west + (j + 1) * dlon
+            print(f"[road download] tile {i + 1}/{n_lat} x {j + 1}/{n_lon}", flush=True)
+            graphs.append(_fetch_bbox_graph(w, s, e, n, network_type=network_type))
+    if len(graphs) == 1:
+        return graphs[0]
+    merged = graphs[0]
+    for g in graphs[1:]:
+        merged = nx.compose(merged, g)
+    return merged
+
+
+def probe_mirror(base: str, timeout_s: float = 14.0) -> tuple[bool, str]:
+    """POST a tiny drive-network query to one Overpass base URL."""
+    import urllib.error
+    import urllib.request
+
+    url = overpass_interpreter_url(base)
+    # Same style of query osmnx uses (way filter), but tiny bbox — catches real blocks.
+    data = (
+        b"[out:json][timeout:12];"
+        b"(way[highway](33.77,-117.95,33.78,-117.94);>;);out body;"
+    )
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "TrafficDeployer/1.0 (connectivity check)",
+    }
+    try:
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            if resp.status != 200:
+                return False, f"HTTP {resp.status}"
+            body = resp.read(4096).decode("utf-8", errors="replace")
+            if '"elements"' in body or '"remark"' in body:
+                return True, "OK"
+            return False, "unexpected response"
+    except urllib.error.HTTPError as exc:
+        return False, f"HTTP {exc.code}"
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+def probe_all_mirrors(timeout_s: float = 14.0) -> list[dict]:
+    """Status for each mirror — used by diagnose_network.py."""
+    out: list[dict] = []
+    for raw in OVERPASS_MIRRORS:
+        base = normalize_overpass_base(raw)
+        ok, detail = probe_mirror(base, timeout_s=timeout_s)
+        out.append({"base": base, "ok": ok, "detail": detail})
+    return out
+
+
+def probe_roads_internet(timeout_s: float = 14.0) -> str | None:
+    """Quick check that at least one Overpass mirror works. None = OK."""
+    if not HAS_ROUTING:
+        return "Routing libraries (osmnx) are not installed."
+    results = probe_all_mirrors(timeout_s=timeout_s)
+    for r in results:
+        if r["ok"]:
+            return None
+    last = results[-1]["detail"] if results else "unknown"
+    bases = ", ".join(normalize_overpass_base(u) for u in OVERPASS_MIRRORS[:3])
+    return (
+        "Cannot reach OpenStreetMap road servers (Overpass). "
+        f"Last error: {last}. Tried: {bases}, … "
+        "Work Wi‑Fi often blocks these — use hotspot, Import road map from file, "
+        "or copy tds_data\\road_graph.graphml from your home PC."
+    )
+
+
+def import_graph(src_path: str, data_dir: str) -> dict:
+    """Copy an existing road_graph.graphml (e.g. from home PC) into tds_data/."""
+    import shutil
+
+    src = os.path.abspath(src_path)
+    if not os.path.isfile(src):
+        raise FileNotFoundError(f"Road map file not found: {src}")
+    if not src.lower().endswith(".graphml"):
+        raise ValueError("Expected a .graphml file (road_graph.graphml from tds_data).")
+    os.makedirs(data_dir, exist_ok=True)
+    dest = graph_path(data_dir)
+    if os.path.normcase(os.path.abspath(src)) != os.path.normcase(os.path.abspath(dest)):
+        shutil.copy2(src, dest)
+    _GRAPH_CACHE.pop(data_dir, None)
+    if HAS_ROUTING:
+        g = ox.load_graphml(dest)
+        _GRAPH_CACHE[data_dir] = g
+        _NODE_ARRAYS.pop(id(g), None)
+        named = sum(
+            1 for _u, _v, _k, d in g.edges(keys=True, data=True)
+            if d.get("name") and (not isinstance(d.get("name"), list) or d["name"][0])
+        )
+        return {"nodes": len(g.nodes), "edges": len(g.edges), "named_edges": named, "imported": True}
+    mb = os.path.getsize(dest) / (1024 * 1024)
+    return {"nodes": 0, "edges": 0, "named_edges": 0, "imported": True, "size_mb": round(mb, 1)}
 
 
 def download_area(points, data_dir: str, buffer_m: float = 1500, network_type: str = "drive") -> dict:
@@ -57,26 +274,26 @@ def download_area(points, data_dir: str, buffer_m: float = 1500, network_type: s
     if not pts:
         raise ValueError("No valid points to cover.")
 
-    # Give Overpass a real, bounded timeout so a slow query fails loudly instead
-    # of hanging the UI forever.
-    for attr in ("requests_timeout", "timeout"):
-        try:
-            setattr(ox.settings, attr, 300)
-        except Exception:
-            pass
-
-    lats = [p[0] for p in pts]
-    lons = [p[1] for p in pts]
-    mlat = (min(lats) + max(lats)) / 2.0
-    dlat = buffer_m / 111320.0
-    dlon = buffer_m / (111320.0 * max(math.cos(math.radians(mlat)), 0.1))
-    north, south = max(lats) + dlat, min(lats) - dlat
-    east, west = max(lons) + dlon, min(lons) - dlon
-
+    west, south, east, north, span_mi = bbox_for_points(pts, buffer_m)
+    _configure_osmnx_for_download()
     os.makedirs(data_dir, exist_ok=True)
-    import sys
     print(f"[road download] bbox west={west:.4f} south={south:.4f} east={east:.4f} north={north:.4f}", flush=True)
-    G = ox.graph_from_bbox(bbox=(west, south, east, north), network_type=network_type, simplify=True)
+
+    def _pull(*, tiled: bool, tile_mi: float):
+        if tiled:
+            print(f"[road download] large area (~{span_mi:.0f} mi) - tiles ~{tile_mi:.0f} mi...", flush=True)
+            return _download_tiled(west, south, east, north, network_type=network_type, max_tile_mi=tile_mi)
+        return _fetch_bbox_graph(west, south, east, north, network_type=network_type)
+
+    try:
+        if span_mi > MAX_BBOX_SPAN_MI_WARN:
+            G = _pull(tiled=True, tile_mi=55.0)
+        else:
+            G = _pull(tiled=False, tile_mi=55.0)
+    except RuntimeError:
+        # Smaller tiles help when work firewalls drop long Overpass queries.
+        print("[road download] retrying with smaller tiles (work-network fallback)...", flush=True)
+        G = _pull(tiled=True, tile_mi=35.0)
     named = 0
     for _u, _v, _k, d in G.edges(keys=True, data=True):
         nm = d.get("name")
@@ -86,7 +303,6 @@ def download_area(points, data_dir: str, buffer_m: float = 1500, network_type: s
     ox.save_graphml(G, graph_path(data_dir))
     _GRAPH_CACHE[data_dir] = G
     _NODE_ARRAYS.pop(id(G), None)
-    span_mi = _haversine_m(south, west, north, east) / 1609.34
     return {
         "nodes": len(G.nodes),
         "edges": len(G.edges),
@@ -96,14 +312,17 @@ def download_area(points, data_dir: str, buffer_m: float = 1500, network_type: s
 
 
 def load_graph(data_dir: str):
-    """Load the cached graph (offline). Returns None if not downloaded yet."""
+    """Load the cached graph (offline). Returns None if missing or unloadable."""
     if not HAS_ROUTING:
         return None
     if data_dir in _GRAPH_CACHE:
         return _GRAPH_CACHE[data_dir]
-    if not has_graph(data_dir):
+    if not graph_file_exists(data_dir):
         return None
-    G = ox.load_graphml(graph_path(data_dir))
+    try:
+        G = ox.load_graphml(graph_path(data_dir))
+    except Exception:
+        return None
     _GRAPH_CACHE[data_dir] = G
     return G
 

@@ -18,7 +18,15 @@ Optional — skip map download on work laptop:
 
 Field use:
   - Load real Excel + .EST (or demo_data for desk test)
-  - Download road map → BUILD ROUTE → READY FOR OFFLINE
+  - Road map: Download (online) OR Setup → Import road_graph.graphml from home PC
+  - BUILD OPTIMIZED ROUTE → READY FOR OFFLINE
   - Voice: Route tab → Test voice (Windows Zira / female SAPI)
+
+Work Wi-Fi blocked download?
+  .venv\Scripts\python.exe scripts\diagnose_network.py  — mirrors + local graph load
+  Copy tds_data\road_graph.graphml from home → Setup → Import road map from file
+
+After updates:
+  SMOKE.bat  — must pass before field (uses .venv, not bare python)
 
 Version: 1.0.4 — see About in app.

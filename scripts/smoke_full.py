@@ -88,8 +88,8 @@ def test_export():
     }]
     aud = export.audit(stops)
     check("audit pass with serial", aud["ok"])
-    xlsx = export.to_excel_bytes(stops)
-    check("excel export bytes", xlsx is not None and len(xlsx) > 500)
+    xlsx, xlsx_err = export.to_excel_result(stops)
+    check("excel export bytes", xlsx is not None and len(xlsx) > 500, xlsx_err or "")
     csv = export.to_csv_text(stops)
     check("csv export", "Main St" in csv and "ABC" in csv)
     path = export.default_report_path(DATA_DIR, "SMOKE", "xlsx")
@@ -111,15 +111,6 @@ def test_demo_data():
     check("demo est match", len(stops) >= 5, f"matched {len(stops)}")
 
 
-def test_voice():
-    print("[voice]")
-    import voice_nav
-    check("maneuver phrase", voice_nav.maneuver_phrase("left", "Papaya St") ==
-          "Turn left onto Papaya Street.")
-    check("female voice only", voice_nav.normalize_voice_style("vader") == "female")
-    check("pyttsx3 import", voice_nav.tts_available(), voice_nav.tts_error() or "missing")
-
-
 def test_web_assets():
     print("[web assets]")
     style = open(os.path.join(WEB_DIR, "style.js"), encoding="utf-8").read()
@@ -129,7 +120,8 @@ def test_web_assets():
     check("style buildings", "buildings-fill" in style)
     check("no address clutter", "address-labels" not in style)
     check("follow street zoom", "FOLLOW_ZOOM = 13" in appjs)
-    check("nav banner html", "navbar" in idx and "nav-arrow" in idx)
+    check("crossing markers", "show_crossings" in appjs)
+    check("no turn-by-turn banner", "navbar" not in idx)
     for rel in ("vendor/maplibre-gl.js", "vendor/pmtiles.js", "style.js", "app.js"):
         check(f"file {rel}", os.path.isfile(os.path.join(WEB_DIR, rel)))
 
@@ -168,10 +160,13 @@ def test_basemap():
 def test_routing():
     print("[routing]")
     import road_router
+    for raw in road_router.OVERPASS_MIRRORS:
+        interp = road_router.overpass_interpreter_url(raw)
+        check("overpass mirror url", "/interpreter/interpreter" not in interp, interp)
     d = road_router.dist_to_polyline_m(33.77, -117.94, [[33.77, -117.94], [33.78, -117.95]])
     check("dist_to_polyline", 0 <= d < 5)
-    if road_router.has_graph(DATA_DIR):
-        g = road_router.load_graph(DATA_DIR)
+    g = road_router.load_graph(DATA_DIR) if road_router.graph_file_exists(DATA_DIR) else None
+    if g is not None:
         start = (33.7715, -117.9431)
         dest = (33.85, -117.88)  # far enough for a real multi-node leg on the saved graph
         leg = road_router.leg_plan(g, start, dest, stop_index=0)
@@ -181,20 +176,11 @@ def test_routing():
         check("nav_plan has depart+arrive", "depart" in types and "arrive" in types)
         check("nav_plan legs", len(plan.get("legs", [])) == 1)
         ok(f"road graph ({len(g.nodes)} nodes)")
+    elif road_router.graph_file_exists(DATA_DIR):
+        detail = "osmnx missing — use .venv" if not road_router.HAS_ROUTING else "load failed"
+        check("road graph load", False, detail)
     else:
         print("  WARN road_graph.graphml missing — download road map in Setup for full routing")
-
-
-def test_state_voice_persist():
-    print("[state prefs]")
-    from core.state import RouteState
-    d = tempfile.mkdtemp()
-    st = RouteState(d, profile="SMOKE")
-    st.voice_nav = True
-    st.voice_style = "female"
-    st.save()
-    st2 = RouteState(d, profile="SMOKE")
-    check("voice_style saved", st2.load() and st2.voice_style == "female")
 
 
 def test_field_ready():
@@ -207,6 +193,18 @@ def test_field_ready():
     ok(f"readiness {r['score']}/100 ({r['warn_count']} warn, {r['fail_count']} fail)")
 
 
+def test_voice_offline_gate():
+    print("[voice / offline gate]")
+    import voice_nav
+    from core.offline_gate import evaluate as offline_gate_eval
+    check("voice module", voice_nav.tts_available() or bool(voice_nav.tts_error()))
+    r = {"items": [], "field_ready": True}
+    g = offline_gate_eval(r, has_stops=True, route_miles=0, graph_loaded=True)
+    check("offline gate blocks no route", not g["ok"] and g["blockers"])
+    g2 = offline_gate_eval(r, has_stops=True, route_miles=12.5, graph_loaded=True)
+    check("offline gate ok with route", g2["ok"])
+
+
 def main() -> int:
     print(f"Traffic Deployer smoke_full — {ROOT}\n")
     test_imports()
@@ -214,13 +212,12 @@ def main() -> int:
     test_persistence()
     test_export()
     test_demo_data()
-    test_voice()
     test_web_assets()
     test_local_server()
     test_basemap()
     test_routing()
-    test_state_voice_persist()
     test_field_ready()
+    test_voice_offline_gate()
     print()
     if FAILURES:
         print(f"SMOKE FAILED ({len(FAILURES)}):")

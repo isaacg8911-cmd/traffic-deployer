@@ -3,9 +3,13 @@
 Each site is a street segment (begin -> end). Routing ignores the midpoint;
 it finds the best road approach to cross each segment line, orders segments to
 minimize total drive miles, traces real streets home -> crossings -> home.
+
+Full pipeline (ingest, road graph, matrix/2-opt, map trace, driving):
+see ROUTING_AND_MAP.md in the project root.
 """
 from __future__ import annotations
 
+import copy
 import math
 
 import road_router
@@ -72,23 +76,57 @@ def _home_to_segment(graph, home: tuple[float, float], acc: dict) -> float:
 
 
 def _assign_crossings(graph, home: tuple[float, float], ordered: list[dict]) -> list[dict]:
-    """Pick the cheapest end of each segment line to cross from the current road position."""
+    """Pick crossing on each segment line where the route meets it (project approach onto line)."""
     cur = (float(home[0]), float(home[1]))
     for stop in ordered:
+        seg_b, seg_e = _seg_endpoints(stop)
+        cross = _project_on_segment(seg_b, seg_e, cur)
         acc = _segment_access(graph, stop)
         d_b = _road_m(graph, cur, acc["begin"])
         d_e = _road_m(graph, cur, acc["end"])
-        seg_b, seg_e = _seg_endpoints(stop)
-        if d_b <= d_e:
-            attach = acc["begin"]
-            stop["cross_side"] = "begin"
-        else:
-            attach = acc["end"]
-            stop["cross_side"] = "end"
-        cross = _project_on_segment(seg_b, seg_e, attach)
+        stop["cross_side"] = "begin" if d_b <= d_e else "end"
         stop["cross_lat"], stop["cross_lon"] = cross
-        cur = attach
+        cur = cross
     return ordered
+
+
+def _tour_cost(graph, home: tuple[float, float], ordered: list[dict]) -> float:
+    """Total drive miles for an order after crossings are chosen (used to refine 2-opt)."""
+    if not ordered:
+        return 0.0
+    trial = _assign_crossings(graph, home, copy.deepcopy(ordered))
+    cur = (float(home[0]), float(home[1]))
+    total = 0.0
+    for s in trial:
+        if s.get("cross_lat") is not None and s.get("cross_lon") is not None:
+            pt = (float(s["cross_lat"]), float(s["cross_lon"]))
+        else:
+            pt = (float(s["lat"]), float(s["lon"]))
+        total += _road_m(graph, cur, pt)
+        cur = pt
+    total += _road_m(graph, cur, (float(home[0]), float(home[1])))
+    return total / 1609.34
+
+
+def _refine_tour_2opt(graph, home: tuple[float, float], ordered: list[dict]) -> list[dict]:
+    """Improve stop order using true segment-crossing tour cost (not matrix guess alone)."""
+    if graph is None or len(ordered) < 3:
+        return _assign_crossings(graph, home, ordered)
+    best = copy.deepcopy(ordered)
+    best_d = _tour_cost(graph, home, best)
+    improved, passes = True, 0
+    while improved and passes < 28:
+        improved, passes = False, passes + 1
+        n = len(best)
+        for i in range(n - 1):
+            for j in range(i + 1, n):
+                if j - i == 1:
+                    continue
+                cand = best[:i] + best[i : j + 1][::-1] + best[j + 1 :]
+                d = _tour_cost(graph, home, cand)
+                if d + 1e-4 < best_d:
+                    best, best_d, improved = cand, d, True
+    return _assign_crossings(graph, home, best)
 
 
 def _snap_leg_end(polyline: list, end: tuple[float, float]) -> list:
@@ -110,35 +148,34 @@ def _stop_pt(s: dict) -> tuple[float, float]:
 
 
 def _use_fast_order_matrix(graph, n_stops: int) -> bool:
-    """Full-graph Dijkstra ordering is minutes on large OSM extracts; haversine is seconds."""
+    """Straight-line matrix only when there is no graph or many stops (40+)."""
     if graph is None:
         return True
-    if n_stops > 12:
-        return True
-    try:
-        return graph.number_of_nodes() > 8000
-    except Exception:
-        return True
+    return n_stops > 40
 
 
-def _haversine_matrix(home: tuple[float, float], stops: list[dict]) -> list[list[float]]:
-    """Fast TSP matrix from straight-line distances (order only; route still uses real roads)."""
-    accs = [_segment_access(None, s) for s in stops]
+def _haversine_matrix(
+    home: tuple[float, float],
+    stops: list[dict],
+    graph=None,
+) -> list[list[float]]:
+    """TSP matrix from straight-line distances between segment ends (snapped to roads when possible)."""
+    accs = [_segment_access(graph, s) for s in stops]
     n = len(stops) + 1
     m = [[0.0] * n for _ in range(n)]
     for j, acc in enumerate(accs, start=1):
-        m[0][j] = m[j][0] = _home_to_segment(None, home, acc)
+        m[0][j] = m[j][0] = _home_to_segment(graph, home, acc)
     for i, ai in enumerate(accs, start=1):
         for j, aj in enumerate(accs, start=1):
             if i != j:
-                m[i][j] = _pair_dist(None, ai, aj)
+                m[i][j] = _pair_dist(graph, ai, aj)
     return m
 
 
 def _road_matrix(graph, home: tuple[float, float], stops: list[dict]) -> list[list[float]]:
     """Distance matrix: index 0 = home, 1..n = segment line (min road dist between access ends)."""
     if graph is None or _use_fast_order_matrix(graph, len(stops)):
-        return _haversine_matrix(home, stops)
+        return _haversine_matrix(home, stops, graph)
 
     accs = [_segment_access(graph, s) for s in stops]
     n = len(stops) + 1
@@ -235,8 +272,24 @@ def optimize(stops: list[dict], home: tuple[float, float], data_dir: str) -> dic
         route = _two_opt(matrix, 0, route, max_passes=12 if len(route) > 35 else 30)
 
     ordered = [stops[i - 1] for i in route]
-    ordered = _assign_crossings(graph, home, ordered)
+    if graph is not None and len(ordered) >= 3:
+        ordered = _refine_tour_2opt(graph, home, ordered)
+    else:
+        ordered = _assign_crossings(graph, home, ordered)
     return {"order": ordered, "graph": graph is not None}
+
+
+def assign_crossings_for_display(
+    stops: list[dict], home: tuple[float, float], data_dir: str
+) -> list[dict]:
+    """Set cross_lat/lon on stops for map preview (before full route build)."""
+    if not stops:
+        return stops
+    graph = None
+    if road_router.HAS_ROUTING and road_router.has_graph(data_dir):
+        graph = road_router.load_graph(data_dir)
+    out = copy.deepcopy(stops)
+    return _assign_crossings(graph, home, out)
 
 
 def build_route(ordered_stops: list[dict], home: tuple[float, float], data_dir: str) -> dict:

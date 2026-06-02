@@ -3,7 +3,7 @@
  *
  * Python -> JS : pushState(json)  redraw site segments + route + origin + theme
  *                pushGps(json)    move live GPS dot + extend the trail
- *                pushNav(json)    show/update/hide the big driving banner
+ *                pushNav(json)    (unused — map-only driving)
  *                flyTo(lat,lon,z) recenter
  * JS -> Python : onMapClick(lat,lon), onStopClick(uid), onReady()
  */
@@ -16,7 +16,7 @@
   var origin = window.location.origin;
   var pmtilesUrl = origin + '/data/california.pmtiles';
   var MAX_ZOOM = 15;
-  var FOLLOW_ZOOM = 13;  // street names visible; z15 shows house numbers we hide
+  var FOLLOW_ZOOM = 13;
 
   var map = new maplibregl.Map({
     container: 'map',
@@ -59,7 +59,6 @@
   var lastState = null;
 
   var followBtn = document.getElementById('follow-btn');
-  var navbar = document.getElementById('navbar');
   var compassNeedle = document.getElementById('compass-needle');
   var compassReadout = document.getElementById('compass-readout');
   var compassMode = document.getElementById('compass-mode');
@@ -120,61 +119,107 @@
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': '#81d4fa',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 16],
-          'line-opacity': 0.55,
-          'line-blur': 1
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 10],
+          'line-opacity': 0.45,
+          'line-blur': 0.5
         } });
       map.addLayer({ id: 'route-line', type: 'line', source: 'route',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': '#29b6f6',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 8],
-          'line-opacity': 0.95
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 5],
+          'line-opacity': 0.9
         } });
     }
     if (!map.getSource('segments')) {
       map.addSource('segments', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'segments-line', type: 'line', source: 'segments',
         layout: { 'line-cap': 'round' },
-        paint: { 'line-color': ['case', ['get', 'done'], '#2e7d32', ['get', 'skipped'], '#c62828', '#7b1fa2'],
-                 'line-width': 5, 'line-opacity': 0.85 } });
+        paint: {
+          'line-color': ['case', ['get', 'done'], '#2e7d32', ['get', 'skipped'], '#c62828', '#7b1fa2'],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4],
+          'line-opacity': 0.8
+        } });
     }
     if (!map.getSource('site-pts')) {
       map.addSource('site-pts', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'site-begin', type: 'circle', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'begin'],
-        paint: { 'circle-radius': 9, 'circle-color': '#1565ff', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 5],
+          'circle-color': '#1565ff',
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 1.2
+        } });
       map.addLayer({ id: 'site-end', type: 'circle', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'end'],
-        paint: { 'circle-radius': 9, 'circle-color': '#e53935', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 5],
+          'circle-color': '#e53935',
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 1.2
+        } });
     }
     if (!map.getSource('cross-pts')) {
       map.addSource('cross-pts', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'cross-pts', type: 'circle', source: 'cross-pts',
-        paint: { 'circle-radius': 5, 'circle-color': '#00e5ff', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2.5, 14, 4],
+          'circle-color': '#00acc1',
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 1
+        } });
     }
     if (!map.getSource('install-pts')) {
       map.addSource('install-pts', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'install-pts', type: 'circle', source: 'install-pts',
-        paint: { 'circle-radius': 8, 'circle-color': '#2e7d32', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 5],
+          'circle-color': '#2e7d32',
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 1.2
+        } });
     }
     if (!map.getSource('trail')) {
       map.addSource('trail', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'trail-line', type: 'line', source: 'trail',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#e91e63', 'line-width': 4, 'line-opacity': 0.8 } });
+        paint: { 'line-color': '#e91e63', 'line-width': 3, 'line-opacity': 0.75 } });
     }
   }
 
-  function makeBadge(label, status) {
-    var el = document.createElement('div');
+  function applyMapMode(mode) {
+    var drive = mode === 'drive';
+    var segW = drive
+      ? ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2.5]
+      : ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4];
+    var ptR = drive
+      ? ['interpolate', ['linear'], ['zoom'], 10, 2.5, 14, 4]
+      : ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 5];
+    var routeW = drive
+      ? ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4]
+      : ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 5];
+    var glowW = drive
+      ? ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 7]
+      : ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 10];
+    if (map.getLayer('segments-line')) map.setPaintProperty('segments-line', 'line-width', segW);
+    if (map.getLayer('site-begin')) map.setPaintProperty('site-begin', 'circle-radius', ptR);
+    if (map.getLayer('site-end')) map.setPaintProperty('site-end', 'circle-radius', ptR);
+    if (map.getLayer('route-line')) map.setPaintProperty('route-line', 'line-width', routeW);
+    if (map.getLayer('route-glow')) map.setPaintProperty('route-glow', 'line-width', glowW);
+  }
+
+  function makeBadge(label, status, highlight) {
     var color = status === 'installed' ? '#2e7d32'
               : status === 'skipped' ? '#c62828'
               : status === 'picked_up' ? '#1565c0' : '#f39c12';
+    var sz = highlight ? 22 : 17;
+    var el = document.createElement('div');
     el.style.cssText =
-      'width:26px;height:26px;border-radius:50%;background:' + color +
-      ';color:#fff;font:700 13px system-ui,sans-serif;display:flex;align-items:center;' +
-      'justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.5);cursor:pointer;';
+      'width:' + sz + 'px;height:' + sz + 'px;border-radius:50%;background:' + color +
+      ';color:#fff;font:700 ' + (highlight ? 12 : 10) + 'px system-ui,sans-serif;display:flex;' +
+      'align-items:center;justify-content:center;border:2px solid #fff;' +
+      'box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer;z-index:' + (highlight ? 5 : 2) + ';';
     el.textContent = label;
     return el;
   }
@@ -185,7 +230,7 @@
     lastState = state;
     window.__dbg.pushes++;
     window.__dbg.lastStops = (state.stops || []).length;
-    if (!styleReady) { pendingState = state; return; }  // map not ready yet; apply on load
+    if (!styleReady) { pendingState = state; return; }
     ensureSources();
     applyData(state);
   }
@@ -194,37 +239,46 @@
     if (homeMarker) { homeMarker.remove(); homeMarker = null; }
     if (state.home) {
       var hel = document.createElement('div');
-      hel.style.cssText = 'width:18px;height:18px;border-radius:3px;background:#1976d2;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);';
+      hel.style.cssText = 'width:12px;height:12px;border-radius:2px;background:#1976d2;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);';
       homeMarker = new maplibregl.Marker({ element: hel }).setLngLat([state.home[1], state.home[0]]).addTo(map);
     }
 
+    var mode = state.map_mode || (state.driving ? 'drive' : 'plan');
+    applyMapMode(mode);
+
     var driving = !!state.driving;
+    var showBadges = state.show_badges !== false;
     var targetUid = state.drive_target_uid;
     var segs = [], pts = [], crosses = [], installs = [];
     clearBadges();
     (state.stops || []).forEach(function (s, i) {
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
+      if (bLat == null || bLon == null || eLat == null || eLon == null) return;
       var done = !!s.installed, skipped = !!s.skipped;
       segs.push({ type: 'Feature', properties: { done: done, skipped: skipped },
                   geometry: { type: 'LineString', coordinates: [[bLon, bLat], [eLon, eLat]] } });
-      pts.push(pt(bLat, bLon, { kind: 'begin' }));
-      pts.push(pt(eLat, eLon, { kind: 'end' }));
-      if (s.cross_lat != null && s.cross_lon != null) {
-        crosses.push(pt(s.cross_lat, s.cross_lon, { uid: s.uid }));
-      }
-      if (s.field_lat != null && s.field_lon != null) {
+      pts.push(pt(bLat, bLon, { kind: 'begin', n: i + 1 }));
+      pts.push(pt(eLat, eLon, { kind: 'end', n: i + 1 }));
+      if (!driving && s.field_lat != null && s.field_lon != null) {
         installs.push(pt(s.field_lat, s.field_lon, { uid: s.uid }));
       }
-      if (!driving || s.uid === targetUid) {
+      if (s.cross_lat != null && s.cross_lon != null && state.show_crossings !== false) {
+        crosses.push(pt(s.cross_lat, s.cross_lon, { uid: s.uid, n: i + 1 }));
+      }
+      if (showBadges) {
         var status = done ? 'installed' : skipped ? 'skipped' : s.picked_up ? 'picked_up' : 'pending';
-        var el = makeBadge(String(i + 1), status);
+        var isTarget = driving && s.uid === targetUid;
+        var el = makeBadge(String(i + 1), status, isTarget);
         el.addEventListener('click', function (ev) {
           ev.stopPropagation();
           window.location.href = 'tdstop://' + encodeURIComponent(s.uid);
         });
-        var mLat = s.cross_lat != null ? s.cross_lat : s.lat;
-        var mLon = s.cross_lon != null ? s.cross_lon : s.lon;
-        badgeMarkers.push(new maplibregl.Marker({ element: el }).setLngLat([mLon, mLat]).addTo(map));
+        var mLat = (s.cross_lat != null) ? s.cross_lat : s.lat;
+        var mLon = (s.cross_lon != null) ? s.cross_lon : s.lon;
+        if (mLat != null && mLon != null) {
+          badgeMarkers.push(new maplibregl.Marker({ element: el, anchor: 'center' })
+            .setLngLat([mLon, mLat]).addTo(map));
+        }
       }
     });
     map.getSource('segments').setData({ type: 'FeatureCollection', features: segs });
@@ -242,6 +296,10 @@
     setLayerVis('route-glow', showGuide);
     setLayerVis('route-line', showGuide);
     setLayerVis('segments-line', showSegs);
+    setLayerVis('site-begin', true);
+    setLayerVis('site-end', true);
+    setLayerVis('cross-pts', !!(state.show_crossings && crosses.length && !driving));
+    setLayerVis('install-pts', installs.length > 0);
 
     window.__dbg.applied++;
     window.__dbg.segCount = segs.length;
@@ -257,7 +315,6 @@
     });
     if (state.home) { b.extend([state.home[1], state.home[0]]); any = true; }
     if (!any || b.isEmpty()) return;
-    // Defer to next frame so the canvas has its real size before fitting.
     requestAnimationFrame(function () {
       map.resize();
       map.fitBounds(b, { padding: 80, duration: 500, maxZoom: FOLLOW_ZOOM, linear: false });
@@ -265,7 +322,6 @@
   }
   window.__fit = function () { if (lastState) fitToData(lastState); };
 
-  // ---- live GPS ----
   function renderGps(g) {
     if (!g) return;
     updateCompass(g);
@@ -273,9 +329,9 @@
     if (!gpsMarker) {
       var el = document.createElement('div');
       el.innerHTML =
-        '<svg width="30" height="30" viewBox="0 0 30 30">' +
-        '<circle cx="15" cy="15" r="8" fill="#1e88e5" stroke="#fff" stroke-width="3"/>' +
-        '<polygon points="15,1 20,11 10,11" fill="#1e88e5" stroke="#fff" stroke-width="1.5"/></svg>';
+        '<svg width="22" height="22" viewBox="0 0 30 30">' +
+        '<circle cx="15" cy="15" r="7" fill="#1e88e5" stroke="#fff" stroke-width="2.5"/>' +
+        '<polygon points="15,2 19,11 11,11" fill="#1e88e5" stroke="#fff" stroke-width="1"/></svg>';
       gpsMarker = new maplibregl.Marker({ element: el }).setLngLat([g.lon, g.lat]).addTo(map);
     } else {
       gpsMarker.setLngLat([g.lon, g.lat]);
@@ -296,20 +352,10 @@
     }
   }
 
-  // ---- big driving banner ----
-  var ARROWS = { left: '\u21B0', right: '\u21B1', straight: '\u2191', uturn: '\u21BA',
-                 depart: '\u2191', arrive: '\u2691' };
-  function renderNav(n) {
-    if (!n || !n.active) { navbar.style.display = 'none'; return; }
-    navbar.style.display = 'flex';
-    navbar.querySelector('#nav-arrow').textContent = ARROWS[n.arrow] || '\u2191';
-    navbar.querySelector('#nav-text').textContent = n.text || '';
-    navbar.querySelector('#nav-sub').textContent = n.sub || '';
-  }
+  function renderNav() { /* turn-by-turn banner removed — map + status bar only */ }
 
   map.on('click', function (e) { if (bridge) bridge.onMapClick(e.lngLat.lat, e.lngLat.lng); });
 
-  // ---- bridge (decoupled from map load; retries until Qt injects the transport) ----
   function safe(fn, tag) {
     return function (j) {
       try { fn(JSON.parse(j)); }
@@ -342,7 +388,6 @@
   }
   initBridge();
 
-  // Direct Python -> JS entry points (via runJavaScript; does not need QWebChannel).
   window.__tdPushState = renderState;
   window.__tdPushGps = renderGps;
   window.__tdPushNav = renderNav;
@@ -353,6 +398,7 @@
   window.__tdSetFollow = setFollow;
   window.__tdSetDriveLeg = function (coords, active) {
     ensureSources();
+    applyMapMode('drive');
     var on = active && coords && coords.length >= 2;
     setLayerVis('route-glow', on);
     setLayerVis('route-line', on);

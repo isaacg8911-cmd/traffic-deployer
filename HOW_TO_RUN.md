@@ -5,6 +5,9 @@ offline **California street map**. Upload your `.EST` + Excel files, and it buil
 the **best driving route along real streets** using your USB GPS. Your field files
 **never leave this laptop**.
 
+**How routing and map tracing work (segment lines, road graph, efficient order):**
+see **[ROUTING_AND_MAP.md](ROUTING_AND_MAP.md)**.
+
 ## First time (needs internet, ~5-10 minutes)
 
 1. Make sure Python is installed (`python --version` in a terminal).
@@ -29,7 +32,8 @@ the **best driving route along real streets** using your USB GPS. Your field fil
    - While you still have wifi at work, click **"Download road map for these
      sites"** so routing follows real streets offline. *(Skip it and routes fall
      back to straight lines with a warning.)*
-   - Click **BUILD OPTIMIZED ROUTE**.
+   - Click **BUILD OPTIMIZED ROUTE** (orders sites to cross each street line efficiently,
+     then traces home → crossings → home on the downloaded road network).
 2. **Route tab** - see the ordered stops, total miles, and the route line drawn on
    actual streets. Toggle guide route / site lines. Click any stop to open it.
 3. **Map** — standard **Protomaps light** colors (not tied to Sunny/Cloudy/Night panel
@@ -92,7 +96,7 @@ label fonts.
 
 ## One-laptop field checklist (raises readiness)
 
-1. Run `.\scripts\smoke_test.ps1` after any update.
+1. Run **`SMOKE.bat`** (or `.\scripts\smoke_test.ps1` for smoke + demo + preflight) after any update.
 2. Setup: Excel + `.EST` → **Download road map** → **BUILD OPTIMIZED ROUTE**.
 3. Route tab: set **Map on screen** to today's Day# if you only want that day visible.
 4. Install: **Grab GPS** fills street from internet or **offline road map**; use compass when stopped.
@@ -100,10 +104,24 @@ label fonts.
 
 ## Smoke test
 
-Double-click **`SMOKE.bat`** at the project root, or:
+Double-click **`SMOKE.bat`** at the project root (uses the project `.venv`).
+
+Full proof chain (smoke + demo + preflight):
+
+```powershell
+PROVE.bat
+```
 
 ```powershell
 .\scripts\smoke_test.ps1
 ```
 
-Full suite checks: imports, persistence, export, voice, web map assets, local server, basemap, routing graph, and saved preferences.
+Headless only:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\smoke_full.py
+```
+
+Do **not** use bare `python` for smoke — it may miss `xlsxwriter` / `osmnx` even when the app works via `START.bat`.
+
+Full suite checks: imports, persistence, export, web map assets, local server, basemap, routing graph load, and field readiness.

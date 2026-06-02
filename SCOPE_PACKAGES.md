@@ -22,4 +22,65 @@ Director-approved bundles. Forge lists these in `build` / `ship` menus.
 
 **Shipped (2026-06-01):** P6–P15.
 
+| ID | Name | One-line scope | Prove with |
+|----|------|----------------|------------|
+| P16 | **Route perf (matrix)** | Batched road matrix ≤100 stops; matrix 2-opt only (no graph-refine Dijkstra loop). | `scripts/benchmark_route.py` |
+| P18 | **Route perf (trace)** | Route build polylines without turn_by_turn; driving still uses `leg_plan`. | smoke + benchmark |
+
+**Shipped (2026-06-02):** P16, P18 (Director bundle 1+2+3+4).
+
+| ID | Name | One-line scope | Prove with |
+|----|------|----------------|------------|
+| P19 | **Route quality v2** | Exact matrix ≤9, Or-opt, cached crossing 2-opt + side polish; preserve optimized crossings on trace. | `benchmark_route.py` + smoke |
+
+**Shipped (2026-06-02):** P19 (route quality v2).
+
+| ID | Name | One-line scope | Prove with |
+|----|------|----------------|------------|
+| P20 | **Far anchor routing** | Stop **#1 = farthest from home** (road miles); zones far→near; open-path within zone (no home-depot 2-opt). | `START.bat` + rebuild; badge 1 on NW/E fringe |
+| P21 | **Bigger zones only** | Coarser grid (P20 logic); no flat TSP for 12+. | benchmark + field map |
+| P22 | **Miles-first (legacy)** | Revert to flat matrix TSP (min miles, may backtrack). | benchmark |
+| P23 | **Map: zone hints** | Optional zone tint or debug “Zone A” in Route list. | smoke web |
+| P24 | **Home sanity check** | Block/warn build if home is default but stops are 30+ mi away. | smoke validate |
+
+**Pick one line, combo (e.g. `P20`), or `none` + your words.**
+
+**Shipped (2026-06-02):** P20–P21 routing; P24 home check; address search (CA bias + pick list).
+
+| ID | Name | One-line scope | Prove with |
+|----|------|----------------|------------|
+| P25 | **Workflow strip** | Setup step indicator (Start → Files → Road → Build → Drive). | `START.bat` Setup tab |
+| P26 | **Setup sections** | Card sections: origin, files, build, GPS/offline. | `START.bat` |
+| P27 | **Route command center** | Stat cards + Drive / Map / Stop list groups. | `START.bat` Route tab |
+| P28 | **Visual identity** | Navy/amber theme, nav rail, placeholder polish. | `START.bat` themes |
+
+**Shipped (2026-06-02):** P25–P28 UI bundle A (Director).
+
+| ID | Name | One-line scope | Prove with |
+|----|------|----------------|------------|
+| P32 | **Setup network panel** | In-app Test home Wi‑Fi (map, graph, Overpass, geocode). | `START.bat` Setup |
+| P33 | **Home checklist** | Setup checklist + block READY FOR OFFLINE until start/files/graph/build. | smoke + Setup |
+| P23 | **Map zone hints** | Zone colors on segment lines + Z on badges. | `START.bat` map |
+| P35 | **Route trust** | Post-build summary line + `golden_routes.py` bands. | `scripts/golden_routes.py` |
+| P36 | **Field bar + map recover** | GPS/mode strip, Recover map button. | `START.bat` |
+| — | **Saved home** | Last geocoded address stored in profile. | smoke persistence |
+| — | **Offline contract** | `offline_policy` + `OFFLINE_CONTRACT.md` + tests. | `test_offline_session.py` |
+
+**Shipped (2026-06-02):** P32–P36 Phase 1 trust/offline bundle.
+
+| ID | Name | One-line scope | Prove with |
+|----|------|----------------|------------|
+| P37 | **Setup wizard** | 3-step Quick setup wizard on Setup tab. | `START.bat` Setup |
+| P38 | **Manual route order** | Move stop up/down + re-trace only (no re-optimize). | smoke + Route tab |
+| P39 | **Install photo** | Local install photo per stop in `tds_data/field_photos/`. | smoke persistence |
+| P40 | **Shift summary** | End-of-day summary on Audit tab. | `smoke_full` shift_summary |
+| P41 | **Field strip++** | Route strip shows next-stop distance. | `START.bat` Route |
+| P42 | **main.py slim (pages)** | Audit + Pickup pages in `ui/pages/`. | `PROVE.bat` |
+| P43 | **Portable build** | `traffic_deployer.spec` + `scripts/build_portable.ps1`. | build script |
+| P44 | **PROVE full** | smoke + demo + preflight + golden + benchmark. | `PROVE.bat` |
+| P45 | **OR-Tools optional** | TSP 10–15 stops when `ortools` installed. | benchmark |
+| — | **GPS heading** | Slightly smoother heading buffer (16 samples). | field GPS |
+
+**Shipped (2026-06-02):** P37–P45 Phases 2–4 operator polish + packaging + routing bounds.
+
 **Modes:** `explore` | `build` | `ship`

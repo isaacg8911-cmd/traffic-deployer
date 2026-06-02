@@ -1,0 +1,28 @@
+---
+description: Traffic Deployer — stack, smoke, scope (Forge-maintained)
+alwaysApply: true
+---
+
+# Traffic Deployer
+
+Read **SCOPE.md** and **SCOPE_PACKAGES.md**. Workflow: **HOW_TO_RUN.md**, **START.bat**.
+
+**Vague asks:** scope menu (mindlink-trio v1.3). Modes: `explore` | `build` | `ship`.
+
+## Stack
+
+- Python 3.10+, PySide6, Qt WebEngine, `local_server.py`, OSMnx routing — **ROUTING_AND_MAP.md**
+- Do not break SwiftShader/WebGL env in `main.py` without map test.
+
+## Prove before done
+
+- `SMOKE.bat` or `python scripts/smoke_full.py` for routing/core/persistence/web.
+- `START.bat` for UI/map changes.
+
+## Structure
+
+- **core/** logic · **main.py** shell · **web/** map · **scripts/** smoke
+
+## Local-first
+
+- `tds_data/` git-ignored; no client job files in repo.

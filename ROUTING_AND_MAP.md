@@ -90,14 +90,16 @@ Goal: order sites so total **road** travel between segment crossings is low, and
 
 ### Distance matrix
 
-- Index `0` = **home**; `1..n` = each stop’s segment.
+- Index `0` = **home**; `1..n` = each stop’s segment (up to **100 stops**).
 - For each segment, the graph exposes two **attachment points** (nearest road nodes to begin/end) via `road_router.segment_access`.
-- Matrix entries use **shortest drive distance** between attachment points (or **haversine** for a fast matrix when the graph is large or there are many stops — order is approximate; **trace** still uses real roads).
+- Matrix entries use **batched Dijkstra**: one shortest-path tree per attachment node, then O(1) lookups — same road-mile precision from 5 to 100 stops.
 
 ### Tour improvement
 
-1. **Nearest-neighbor** tour from home.
-2. **2-opt** swaps to shorten the tour (pass count scales with stop count).
+1. **≥12 stops — zone-first, far-to-near:** grid clusters; visit **farthest zone from home first**, finish all stops in that zone (farthest stop in the zone first, trail back), then the next-closer zone, working homeward (avoids revisiting finished areas).
+2. **≤9 stops — exact** matrix tour when small enough.
+3. Otherwise **nearest-neighbor** → **2-opt** → **Or-opt** on the road matrix (smaller jobs).
+4. **Crossing assignment** from home; extra global 2-opt/polish only on non-zoned builds.
 
 ### Crossing side
 
@@ -115,9 +117,9 @@ This is why the route is “efficient” for **traffic deployer** work: it optim
 
 **Module:** `core/routing.py` — `build_route()`
 
-1. Re-run **`_assign_crossings`** on the final order.
+1. Re-run **`_assign_crossings`** on the final order (reuses length tables when available).
 2. For each leg **home → stop₁ → … → stopₙ → home**:
-   - **`road_router.route_between`** — Dijkstra on the saved graph → polyline + miles + turn list.
+   - **`road_router.route_between`** (polyline + miles only; turn list deferred to **START DRIVING** via `leg_plan`).
    - **`_snap_leg_end`** — last point of the leg snaps to the **crossing** on the site line (road meets the segment, does not overshoot to midpoint).
 3. Leg polylines are concatenated into one **`route.polyline`** for the map and total **`route.miles`**.
 
@@ -172,7 +174,7 @@ If no road graph exists, the app falls back to **straight chords** (`graph: fals
 ## Design notes
 
 - **Segment-first routing** matches how sites are defined in the field (line across street), not “drive to Excel midpoint only.”
-- **Fast matrix + accurate trace** keeps ordering under a minute for large jobs while polylines stay on OSM drive edges.
+- **Batched matrix + matrix 2-opt + light trace** keeps ≤100-stop builds typically under ~1–2 minutes while polylines stay on OSM drive edges. Prove: `scripts/benchmark_route.py`.
 - **Tight bbox download** keeps Overpass queries small for a single week’s geography.
 - **Child process was replaced by QThreads** for download/route (`_DownloadRoadsThread`, `_RouteOptimizeThread`) to avoid flaky `QProcess` on Windows while still keeping the UI alive.
 

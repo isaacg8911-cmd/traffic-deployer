@@ -422,17 +422,41 @@ def turn_by_turn(G, route) -> list[str]:
     return steps
 
 
-def route_between(G, a, b) -> dict:
-    """a, b = (lat, lon). Returns {ok, miles, steps, polyline}."""
+def route_between(G, a, b, *, include_turns: bool = True) -> dict:
+    """a, b = (lat, lon). Returns {ok, miles, steps, polyline}.
+
+    include_turns=False skips turn_by_turn (faster route build; driving uses leg_plan).
+    """
     try:
         on = nearest_node(G, a[0], a[1])
         dn = nearest_node(G, b[0], b[1])
         route = nx.shortest_path(G, on, dn, weight="length")
         dist = nx.shortest_path_length(G, on, dn, weight="length")
         coords = [(G.nodes[n]["y"], G.nodes[n]["x"]) for n in route]
-        return {"ok": True, "miles": dist / 1609.34, "steps": turn_by_turn(G, route), "polyline": coords}
+        steps = turn_by_turn(G, route) if include_turns else []
+        return {"ok": True, "miles": dist / 1609.34, "steps": steps, "polyline": coords}
     except Exception as exc:
         return {"ok": False, "miles": 0.0, "steps": [f"No road route found ({exc})"], "polyline": [a, b]}
+
+
+def distance_from_lengths(
+    G,
+    lengths: dict,
+    a: tuple[float, float],
+    b: tuple[float, float],
+) -> float:
+    """Road meters between lat/lon points using precomputed single-source tables."""
+    try:
+        na = nearest_node(G, a[0], a[1])
+        nb = nearest_node(G, b[0], b[1])
+        if na == nb:
+            return 0.0
+        d = lengths.get(na, {}).get(nb)
+        if d is not None:
+            return float(d)
+    except Exception:
+        pass
+    return road_distance_m(G, a, b)
 
 
 def _classify_turn(angle: float) -> str:
@@ -635,7 +659,7 @@ def road_distance_m(G, a: tuple[float, float], b: tuple[float, float]) -> float:
         return _haversine_m(a[0], a[1], b[0], b[1])
 
 
-def directions_for_stops(G, home, stops) -> list[dict]:
+def directions_for_stops(G, home, stops, *, include_turns: bool = True) -> list[dict]:
     """
     home = (lat, lon); stops = list of (lat, lon, label).
     Returns one leg dict per hop (Start->stop1->stop2->...), each with from/to/miles/steps/polyline.
@@ -644,7 +668,7 @@ def directions_for_stops(G, home, stops) -> list[dict]:
     labels = ["Start"] + [str(s[2]) for s in stops]
     legs = []
     for i in range(len(pts) - 1):
-        leg = route_between(G, pts[i], pts[i + 1])
+        leg = route_between(G, pts[i], pts[i + 1], include_turns=include_turns)
         leg["from"] = labels[i]
         leg["to"] = labels[i + 1]
         legs.append(leg)

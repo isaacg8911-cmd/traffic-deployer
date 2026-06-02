@@ -19,5 +19,5 @@ DIRECTIONS = ["n", "e", "s", "w"]
 UNDO_FIELDS = (
     "installed", "skipped", "picked_up",
     "field_lat", "field_lon", "serial", "lanes", "direction", "notes",
-    "date", "exact_time", "street", "street_warning",
+    "date", "exact_time", "street", "street_warning", "install_photo_path",
 )

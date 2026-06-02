@@ -22,18 +22,42 @@ see **[ROUTING_AND_MAP.md](ROUTING_AND_MAP.md)**.
 - Double-click **`START.bat`**. It opens straight to the map (no re-download).
 - Close the window when you're done.
 
+## At home (Wi‑Fi) vs on the road (no internet)
+
+The app has two modes:
+
+| Phase | When | What works |
+|--------|------|------------|
+| **Home setup (online)** | Default when you open the app at home | Address search, download road map, BUILD ROUTE |
+| **Field mode (offline)** | After you tap **READY FOR OFFLINE** | Map, GPS, driving, installs, export — all local; no internet calls |
+
+**At home:** leave the app in online mode until setup is done, then tap **READY FOR OFFLINE**
+(Setup → *Before you leave*). Status bar shows `Home setup · online`.
+
+**On the road:** field mode stays on until you are home again and tap **RESUME ONLINE MODE**
+for the next day’s files/route. In field mode the app **does not call the internet** (no address
+lookup, no downloads) and avoids blocking error popups — map, GPS, driving, installs, and export
+use only local data.
+
+**Import road map from file** works in both modes (no internet — copy `road_graph.graphml`
+from another PC).
+
+**Before you leave:** Setup → **Setup checklist** (all green) → **Test home Wi‑Fi** →
+**READY FOR OFFLINE**. New: **Quick setup wizard** (3 steps: start → files → build).
+On Route: colored **zones**, route summary, **Move stop up/down** + **Re-trace route only**,
+field strip with **next-stop distance**, **Recover map** if the canvas goes blank.
+Install tab: **Attach install photo** (saved under `tds_data/field_photos/`).
+Audit tab: **shift summary** + export.
+
 ## The workflow
 
-1. **Setup tab**
-   - Set your **starting point**: read the USB GPS, search an address (online), or
-     type coordinates.
+1. **Setup tab** *(at home on Wi‑Fi — online mode)*
+   - Set your **starting point**: **Search address** (`street, city, CA zip`), USB GPS,
+     or coordinates. Wrong home = wrong route order.
    - **Choose** your Excel/CSV (site coordinates) and your `.EST` map file(s).
      Map names come from the upload filename (e.g. `Day5.EST` → Day5).
-   - While you still have wifi at work, click **"Download road map for these
-     sites"** so routing follows real streets offline. *(Skip it and routes fall
-     back to straight lines with a warning.)*
-   - Click **BUILD OPTIMIZED ROUTE** (orders sites to cross each street line efficiently,
-     then traces home → crossings → home on the downloaded road network).
+   - **Download road map** for these sites (or import `.graphml` from home PC if work Wi‑Fi blocks download).
+   - **BUILD OPTIMIZED ROUTE**, then **READY FOR OFFLINE** before you leave.
 2. **Route tab** - see the ordered stops, total miles, and the route line drawn on
    actual streets. Toggle guide route / site lines. Click any stop to open it.
 3. **Map** — standard **Protomaps light** colors (not tied to Sunny/Cloudy/Night panel
@@ -63,17 +87,18 @@ auto-follows you; tap **Follow Me** on the map to lock/unlock recentring. Use th
 python gps_reader.py
 ```
 
-## Offline vs online
+## Offline vs online (after READY FOR OFFLINE)
 
-| Feature | Works offline? |
+| Feature | On the road (field mode) |
 |---|---|
-| California street map + street names (zoom in) | Yes (after setup_maps.py — includes fonts) |
+| California street map + street names | Yes |
 | USB GPS + live tracing | Yes |
-| Route building on real streets | Yes (after downloading the area's road map at work) |
+| Driving the built route | Yes |
 | Install / pick-up tracking | Yes |
 | Excel / CSV export | Yes |
-| Address **search** | No - needs internet |
-| Auto street-name on Grab GPS | No - needs internet |
+| Address **search** | No (use at home before you leave) |
+| Download road map | No (do at home; import file still OK) |
+| Auto street-name on Grab GPS | Uses local road map if downloaded; else type street |
 
 ## Your private data
 
@@ -106,11 +131,19 @@ label fonts.
 
 Double-click **`SMOKE.bat`** at the project root (uses the project `.venv`).
 
-Full proof chain (smoke + demo + preflight):
+Full proof chain (smoke + demo + preflight + golden routes + benchmark):
 
 ```powershell
 PROVE.bat
 ```
+
+Portable `.exe` folder (optional, needs PyInstaller once):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_portable.ps1
+```
+
+Output: `dist\TrafficDeployer\` — copy your `tds_data\` road graph beside it for offline use.
 
 ```powershell
 .\scripts\smoke_test.ps1

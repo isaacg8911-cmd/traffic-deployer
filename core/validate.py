@@ -4,9 +4,17 @@ from __future__ import annotations
 import os
 from collections import Counter
 
+from core.home_check import check_home_vs_stops
 
-def validate_build(excel_paths: list[str], est_configs: list[dict],
-                   sites: dict, stops: list[dict]) -> dict:
+
+def validate_build(
+    excel_paths: list[str],
+    est_configs: list[dict],
+    sites: dict,
+    stops: list[dict],
+    home: tuple[float, float] | None = None,
+    default_home: tuple[float, float] | None = None,
+) -> dict:
     """Return {ok, errors[], warnings[], stats{}}."""
     errors: list[str] = []
     warnings: list[str] = []
@@ -48,6 +56,9 @@ def validate_build(excel_paths: list[str], est_configs: list[dict],
     )
     if missing_street and stops:
         warnings.append(f"{missing_street} stop(s) have no street name in Excel (will show as Site #).")
+
+    if home is not None and stops:
+        warnings.extend(check_home_vs_stops(home, stops, default_home=default_home))
 
     return {
         "ok": not errors,

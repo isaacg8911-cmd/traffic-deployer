@@ -104,6 +104,21 @@ def main() -> int:
         if need_roads:
             fails += 1
 
+    print("\nAddress search (home setup only — not used in field mode):")
+    geocode_fails = 0
+    for label, url in (
+        ("US Census geocoder", "https://geocoding.geo.census.gov/geocoder/"),
+        ("Nominatim", "https://nominatim.openstreetmap.org/"),
+        ("Photon", "https://photon.komoot.io/api/?q=test&limit=1"),
+    ):
+        ok, detail = _probe(url)
+        mark = "OK" if ok else "WARN"
+        print(f"  [{mark}] {label}: {detail}")
+        if not ok:
+            geocode_fails += 1
+    if geocode_fails:
+        print("  → On the road you do not need these — only for home address search.")
+
     print("\nIf every mirror fails on work Wi-Fi:")
     print("  1. Phone hotspot -> Download road map, OR")
     print("  2. Copy tds_data\\road_graph.graphml from home -> Setup -> Import road map from file.")

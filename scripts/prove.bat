@@ -11,25 +11,37 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 set FAIL=0
+set STEP=0
+
 echo.
-echo === [1/3] smoke_full ===
+echo === [1/5] smoke_full ===
 ".venv\Scripts\python.exe" scripts\smoke_full.py
 if errorlevel 1 set FAIL=1
 
 echo.
-echo === [2/3] demo_workflow ===
+echo === [2/5] demo_workflow ===
 ".venv\Scripts\python.exe" scripts\demo_workflow.py
 if errorlevel 1 set FAIL=1
 
 echo.
-echo === [3/3] quick_preflight ===
+echo === [3/5] quick_preflight ===
 ".venv\Scripts\python.exe" scripts\quick_preflight.py
+if errorlevel 1 set FAIL=1
+
+echo.
+echo === [4/5] golden_routes ===
+".venv\Scripts\python.exe" scripts\golden_routes.py
+if errorlevel 1 set FAIL=1
+
+echo.
+echo === [5/5] benchmark_route ===
+".venv\Scripts\python.exe" scripts\benchmark_route.py
 if errorlevel 1 set FAIL=1
 
 echo.
 if %FAIL%==0 (
     echo ========================================
-    echo   PROVE PASS — ready for field / demo
+    echo   PROVE PASS — smoke + demo + golden + benchmark
     echo ========================================
 ) else (
     echo ========================================

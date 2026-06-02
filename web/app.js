@@ -136,9 +136,22 @@
       map.addLayer({ id: 'segments-line', type: 'line', source: 'segments',
         layout: { 'line-cap': 'round' },
         paint: {
-          'line-color': ['case', ['get', 'done'], '#2e7d32', ['get', 'skipped'], '#c62828', '#7b1fa2'],
+          'line-color': [
+            'case',
+            ['get', 'done'], '#2e7d32',
+            ['get', 'skipped'], '#c62828',
+            ['==', ['get', 'zone'], 1], '#e65100',
+            ['==', ['get', 'zone'], 2], '#1565c0',
+            ['==', ['get', 'zone'], 3], '#2e7d32',
+            ['==', ['get', 'zone'], 4], '#6a1b9a',
+            ['==', ['get', 'zone'], 5], '#c62828',
+            ['==', ['get', 'zone'], 6], '#00838f',
+            ['==', ['get', 'zone'], 7], '#f9a825',
+            ['==', ['get', 'zone'], 8], '#5d4037',
+            '#7b1fa2'
+          ],
           'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4],
-          'line-opacity': 0.8
+          'line-opacity': 0.85
         } });
     }
     if (!map.getSource('site-pts')) {
@@ -255,7 +268,8 @@
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
       if (bLat == null || bLon == null || eLat == null || eLon == null) return;
       var done = !!s.installed, skipped = !!s.skipped;
-      segs.push({ type: 'Feature', properties: { done: done, skipped: skipped },
+      var z = s.route_zone != null ? Number(s.route_zone) : 0;
+      segs.push({ type: 'Feature', properties: { done: done, skipped: skipped, zone: z },
                   geometry: { type: 'LineString', coordinates: [[bLon, bLat], [eLon, eLat]] } });
       pts.push(pt(bLat, bLon, { kind: 'begin', n: i + 1 }));
       pts.push(pt(eLat, eLon, { kind: 'end', n: i + 1 }));
@@ -268,7 +282,9 @@
       if (showBadges) {
         var status = done ? 'installed' : skipped ? 'skipped' : s.picked_up ? 'picked_up' : 'pending';
         var isTarget = driving && s.uid === targetUid;
-        var el = makeBadge(String(i + 1), status, isTarget);
+        var badgeTxt = String(i + 1);
+        if (s.route_zone != null && !driving) badgeTxt += ' Z' + s.route_zone;
+        var el = makeBadge(badgeTxt, status, isTarget);
         el.addEventListener('click', function (ev) {
           ev.stopPropagation();
           window.location.href = 'tdstop://' + encodeURIComponent(s.uid);

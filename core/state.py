@@ -50,6 +50,8 @@ class RouteState:
         self.map_day_filter: str = "All maps"
         self.voice_nav: bool = True
         self.voice_style: str = "female"
+        self.saved_home_label: str = ""
+        self.saved_home_coords: tuple[float, float] | None = None
 
     # --------------------------------------------------------------------- #
     #  Persistence
@@ -78,6 +80,10 @@ class RouteState:
         d["map_day_filter"] = self.map_day_filter or "All maps"
         d["voice_nav"] = bool(self.voice_nav)
         d["voice_style"] = "female"
+        if self.saved_home_label:
+            d["saved_home_label"] = self.saved_home_label
+        if self.saved_home_coords:
+            d["saved_home_coords"] = list(self.saved_home_coords)
         return d
 
     def load(self) -> bool:
@@ -107,6 +113,9 @@ class RouteState:
         self.map_day_filter = str(data.get("map_day_filter", "All maps") or "All maps")
         self.voice_nav = bool(data.get("voice_nav", True))
         self.voice_style = "female"
+        self.saved_home_label = str(data.get("saved_home_label", "") or "")
+        shc = data.get("saved_home_coords")
+        self.saved_home_coords = tuple(shc) if shc and len(shc) >= 2 else None
         return True
 
     def apply_default_home(self):
@@ -114,9 +123,18 @@ class RouteState:
         if self.default_home:
             self.home = self.default_home
 
-    def save_default_home(self, lat: float, lon: float):
+    def save_default_home(self, lat: float, lon: float, *, label: str = ""):
         self.default_home = (float(lat), float(lon))
         self.home = self.default_home
+        if label:
+            self.saved_home_label = label.strip()
+        self.save()
+
+    def save_home_address(self, lat: float, lon: float, label: str):
+        """Remember last geocoded / chosen home for one-click restore."""
+        self.home = (float(lat), float(lon))
+        self.saved_home_coords = (float(lat), float(lon))
+        self.saved_home_label = (label or "").strip()[:200]
         self.save()
 
     def save(self) -> bool:

@@ -28,6 +28,36 @@ class SmokeTestThread(QThread):
             self.finished_result.emit(1, str(exc))
 
 
+class GeocodeThread(QThread):
+    """Forward geocode in background (network can take 5–20s)."""
+    finished_result = Signal(list, str)
+
+    def __init__(self, address: str, *, limit: int = 6):
+        super().__init__()
+        self.address = address.strip()
+        self.limit = limit
+
+    def run(self):
+        if self.isInterruptionRequested():
+            return
+        from core import geo, offline_policy
+
+        if not offline_policy.internet_features_allowed():
+            self.finished_result.emit([], "offline")
+            return
+        if not geo.geocode_available():
+            self.finished_result.emit([], "missing_requests")
+            return
+        try:
+            cands = geo.geocode_candidates(self.address, limit=self.limit)
+            if self.isInterruptionRequested():
+                return
+            self.finished_result.emit(cands, "")
+        except Exception as exc:  # noqa: BLE001
+            if not self.isInterruptionRequested():
+                self.finished_result.emit([], str(exc))
+
+
 class DownloadRoadsThread(QThread):
     """Download osmnx graph in a thread (network-bound; avoids flaky QProcess on Windows)."""
     finished_result = Signal(dict)
@@ -74,8 +104,9 @@ class RouteOptimizeThread(QThread):
                 return
             ordered = res["order"]
             n = len(ordered)
+            trace_hi = max(12, min(45, n // 3 + 8))
             self.progress_text.emit(
-                f"Drawing route on real streets ({n} stops — about {max(15, n // 2)}–{max(30, n)} sec)...")
+                f"Drawing route on real streets ({n} stops — about 8–{trace_hi} sec)...")
             route = routing.build_route(ordered, self.home, self.data_dir)
             if self.isInterruptionRequested():
                 return

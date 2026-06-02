@@ -144,6 +144,7 @@ _PROGRESS_KEYS = (
     "installed", "skipped", "picked_up",
     "field_lat", "field_lon", "serial", "lanes", "direction", "notes",
     "date", "exact_time", "street_warning", "cross_lat", "cross_lon", "cross_side",
+    "install_photo_path",
 )
 
 

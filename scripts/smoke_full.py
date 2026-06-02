@@ -46,6 +46,14 @@ def test_imports():
     ok(f"version {APP_VERSION}")
 
 
+def test_shift_summary():
+    print("[shift summary]")
+    from core.shift_summary import summarize
+
+    s = summarize([], None)
+    check("empty shift", s["installed"] == 0 and "No stops" in s["text"])
+
+
 def test_validate_merge():
     print("[validate / ingest]")
     from core import ingest, validate
@@ -157,6 +165,29 @@ def test_basemap():
     check("label fonts", os.path.isfile(fonts))
 
 
+def test_route_build_perf():
+    print("[route build perf]")
+    import road_router
+    if not road_router.has_graph(DATA_DIR):
+        print("  WARN skip — no road graph")
+        return
+    bench = os.path.join(ROOT, "scripts", "benchmark_route.py")
+    py = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
+    if not os.path.isfile(py):
+        py = sys.executable
+    import subprocess
+    try:
+        proc = subprocess.run(
+            [py, bench], capture_output=True, text=True, timeout=300, cwd=ROOT)
+        out = (proc.stdout or "") + (proc.stderr or "")
+        if proc.returncode != 0:
+            for line in out.splitlines()[-8:]:
+                print(f"    {line}")
+        check("benchmark_route.py", proc.returncode == 0, out[-200:] if proc.returncode else "")
+    except Exception as exc:
+        check("benchmark_route.py", False, str(exc))
+
+
 def test_routing():
     print("[routing]")
     import road_router
@@ -193,6 +224,47 @@ def test_field_ready():
     ok(f"readiness {r['score']}/100 ({r['warn_count']} warn, {r['fail_count']} fail)")
 
 
+def test_golden_routes():
+    print("[golden routes]")
+    from scripts import golden_routes
+
+    passed, msgs = golden_routes.verify()
+    for m in msgs:
+        mark = "OK" if "FAIL" not in m else "FAIL"
+        print(f"  {mark}  {m}")
+    check("golden route bands", passed, msgs[-1] if msgs else "")
+
+
+def test_offline_session_script():
+    print("[offline session]")
+    import subprocess
+
+    py = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
+    if not os.path.isfile(py):
+        py = sys.executable
+    proc = subprocess.run(
+        [py, os.path.join(ROOT, "scripts", "test_offline_session.py")],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=30,
+    )
+    check("test_offline_session.py", proc.returncode == 0, (proc.stdout or "") + (proc.stderr or ""))
+
+
+def test_offline_no_internet():
+    print("[offline field — no internet]")
+    from core import geo, offline_policy
+    offline_policy.set_field_mode(True)
+    try:
+        check("geocode blocked in field mode", geo.geocode_candidates("1 Main St, CA") == [])
+        check("reverse geocode blocked", geo.street_from_coords(33.77, -117.94) == "")
+        from core import connectivity
+        check("connectivity probe skipped", connectivity.geocode_hosts_reachable() is None)
+    finally:
+        offline_policy.set_field_mode(False)
+
+
 def test_voice_offline_gate():
     print("[voice / offline gate]")
     import voice_nav
@@ -208,6 +280,7 @@ def test_voice_offline_gate():
 def main() -> int:
     print(f"Traffic Deployer smoke_full — {ROOT}\n")
     test_imports()
+    test_shift_summary()
     test_validate_merge()
     test_persistence()
     test_export()
@@ -216,7 +289,11 @@ def main() -> int:
     test_local_server()
     test_basemap()
     test_routing()
+    test_route_build_perf()
     test_field_ready()
+    test_golden_routes()
+    test_offline_session_script()
+    test_offline_no_internet()
     test_voice_offline_gate()
     print()
     if FAILURES:

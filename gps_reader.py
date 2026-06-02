@@ -218,7 +218,7 @@ class GPSStream:
             self._last_pos = (lat, lon)
             return None
         d = _haversine_m(self._last_pos[0], self._last_pos[1], lat, lon)
-        if d < 2.0:
+        if d < 1.5:
             return None
         y0, x0 = self._last_pos
         y1, x1 = lat, lon
@@ -227,7 +227,7 @@ class GPSStream:
 
     def _push_heading_sample(self, deg: float):
         self._heading_buf.append(deg)
-        if len(self._heading_buf) > 12:
+        if len(self._heading_buf) > 16:
             self._heading_buf.pop(0)
 
     def _locked_heading(self) -> float | None:

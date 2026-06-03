@@ -1,6 +1,8 @@
 # Traffic Deployer
 
-Desktop field tool for traffic deployers: offline California map, **Excel + `.EST`** ingest, **efficient multi-stop routing on real streets**, USB GPS live trace, install/pickup tracking, and audit export. Data stays on the laptop.
+Desktop field tool for traffic deployers (**v1.0.5**): offline California map, **Excel + `.EST`** ingest, **efficient multi-stop routing on real streets**, USB GPS live trace, **PicoCount 2500** USB install/pickup, and audit export with counter columns. Data stays on the laptop.
+
+**Field test checklist:** [docs/TOMORROW_MORNING.md](docs/TOMORROW_MORNING.md) · **Overnight ship notes:** [docs/NIGHT_SHIP_SUMMARY_2026-06-03.md](docs/NIGHT_SHIP_SUMMARY_2026-06-03.md)
 
 ## Quick start
 
@@ -13,7 +15,8 @@ Desktop field tool for traffic deployers: offline California map, **Excel + `.ES
 | Doc | Contents |
 |-----|----------|
 | [HOW_TO_RUN.md](HOW_TO_RUN.md) | Daily workflow, GPS, offline mode, smoke tests |
-| **PROVE.bat** | One-click: smoke + demo + preflight (no GUI) |
+| **PROVE.bat** | One-click: smoke + demo + golden + benchmark + counter sandbox (no GUI) |
+| [docs/PICOCOUNT_INTEGRATION.md](docs/PICOCOUNT_INTEGRATION.md) | PicoCount 2500 USB workflow |
 | [ROUTING_AND_MAP.md](ROUTING_AND_MAP.md) | **How efficient routes are built and traced on the map** (segment lines, OSM graph, ordering, polylines) |
 | [PORTABLE_INSTALL.txt](PORTABLE_INSTALL.txt) | Work-laptop unzip checklist |
 

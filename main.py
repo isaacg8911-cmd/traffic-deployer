@@ -2840,11 +2840,14 @@ class MainWindow(QMainWindow):
         idx = self.combo_counter_port.findText(cur)
         if idx >= 0:
             self.combo_counter_port.setCurrentIndex(idx)
-        elif self.combo_counter_port.count() and self.combo_counter_port.itemText(0) != "(none)":
-            pass
-        else:
-            pr = picocount.probe_port()
-            if pr.port:
+        elif ports:
+            pref = picocount.preferred_counter_port(ports)
+            if pref:
+                i = self.combo_counter_port.findText(pref)
+                if i >= 0:
+                    self.combo_counter_port.setCurrentIndex(i)
+            pr = picocount.probe_port(pref)
+            if pr.ok and pr.port:
                 i = self.combo_counter_port.findText(pr.port)
                 if i >= 0:
                     self.combo_counter_port.setCurrentIndex(i)
@@ -3542,6 +3545,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         try:
+            self._hide_route_pick_dialog()
+            if self._picocount_thread and self._picocount_thread.isRunning():
+                self._picocount_thread.requestInterruption()
+                self._picocount_thread.wait(2000)
             if self.pages.currentIndex() == 2:
                 self._flush_install_form()
             self._persist_shift(quiet=True)

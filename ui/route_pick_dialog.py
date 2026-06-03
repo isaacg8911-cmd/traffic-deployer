@@ -61,9 +61,20 @@ class RoutePickOrderDialog(QDialog):
         self.lbl_count.setObjectName("hint")
         layout.addWidget(self.lbl_count)
 
+    def _renumber_item_labels(self) -> None:
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if not item:
+                continue
+            text = item.text()
+            if ". " in text:
+                _, rest = text.split(". ", 1)
+                item.setText(f"{i + 1}. {rest}")
+
     def _emit_order_from_list(self) -> None:
         if self._syncing:
             return
+        self._renumber_item_labels()
         uids = self._uids_from_list()
         self.order_changed.emit(uids)
         self._update_count(len(uids))

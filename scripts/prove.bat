@@ -14,22 +14,22 @@ set FAIL=0
 set STEP=0
 
 echo.
-echo === [1/5] smoke_full ===
+echo === [1/6] smoke_full ===
 ".venv\Scripts\python.exe" scripts\smoke_full.py
 if errorlevel 1 set FAIL=1
 
 echo.
-echo === [2/5] demo_workflow ===
+echo === [2/6] demo_workflow ===
 ".venv\Scripts\python.exe" scripts\demo_workflow.py
 if errorlevel 1 set FAIL=1
 
 echo.
-echo === [3/5] quick_preflight ===
+echo === [3/6] quick_preflight ===
 ".venv\Scripts\python.exe" scripts\quick_preflight.py
 if errorlevel 1 set FAIL=1
 
 echo.
-echo === [4/5] golden_routes ===
+echo === [4/6] golden_routes ===
 ".venv\Scripts\python.exe" scripts\golden_routes.py
 if errorlevel 1 set FAIL=1
 

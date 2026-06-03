@@ -50,6 +50,27 @@ def list_serial_ports() -> list[str]:
     return [p.device for p in serial.tools.list_ports.comports()]
 
 
+def preferred_counter_port(ports: list[str] | None = None) -> str | None:
+    """Public: best COM port guess for PicoCount (FTDI adapter first)."""
+    ports = ports or list_serial_ports()
+    return _preferred_counter_port(ports)
+
+
+def _preferred_counter_port(ports: list[str]) -> str | None:
+    """Prefer VehicleCounts FTDI adapter over other COM devices (e.g. GPS)."""
+    if not ports or serial is None:
+        return ports[0] if ports else None
+    keywords = ("ftdi", "picocount", "vehiclecounts", "vehicle counts", "usb serial port")
+    for p in serial.tools.list_ports.comports():
+        blob = f"{p.description or ''} {p.manufacturer or ''} {p.hwid or ''}".lower()
+        if any(k in blob for k in keywords) and p.device in ports:
+            return p.device
+    for device in ports:
+        if device.upper().startswith("COM"):
+            return device
+    return ports[0]
+
+
 def facing_n_or_e(direction: str, heading_deg: float | None = None) -> str:
     d = (direction or "n").strip().lower()[:1]
     if d in ("n", "e"):
@@ -327,6 +348,27 @@ class PicoCountClient:
                     **mem,
                 }
 
+        parts: list[bytes] = []
+        # Prefer paced 115200 read for single-block studies (fast baud can NAK on some units).
+        if block_ptr == 0 and page_ptr > 0:
+            for page in range(page_ptr + 1):
+                chunk = self.read_nand_page(page, 0)
+                if chunk and any(b != 0xFF for b in chunk):
+                    parts.append(chunk)
+                time.sleep(0.08)
+            buf = _buffer_slice()
+            if buf:
+                parts.append(buf)
+            blob_slow = b"".join(parts)
+            if blob_slow:
+                return blob_slow, {
+                    "ok": True,
+                    "bytes": len(blob_slow),
+                    "empty": False,
+                    "source": "nand_115200",
+                    **mem,
+                }
+
         if not self.set_baud_fast():
             buf_only = _buffer_slice()
             if buf_only:
@@ -339,7 +381,6 @@ class PicoCountClient:
                 }
             return b"", {"ok": False, "error": "Could not switch to 921600 baud (]b)."}
 
-        parts: list[bytes] = []
         for block in range(block_ptr + 1):
             last_page = page_ptr if block == block_ptr else (block_pages - 1)
             for page in range(last_page + 1):
@@ -368,10 +409,7 @@ def probe_port(port: str | None = None) -> ProbeResult:
         return ProbeResult(False, None, "pyserial not installed", ports)
     target = port
     if not target:
-        for p in ports:
-            if p.upper().startswith("COM"):
-                target = p
-                break
+        target = _preferred_counter_port(ports)
     if not target:
         return ProbeResult(
             False, None, "No COM port — plug in the PicoCount download cable.", ports)

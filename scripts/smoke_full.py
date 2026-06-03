@@ -46,6 +46,23 @@ def test_imports():
     ok(f"version {APP_VERSION}")
 
 
+def test_export_audit_counter():
+    print("[export audit]")
+    from core import export
+
+    stops = [{
+        "id": 12,
+        "installed": True,
+        "picked_up": True,
+        "counter_unit_id": "1234nc1b",
+        "serial": "x",
+        "street": "Main",
+    }]
+    r = export.audit(stops)
+    check("audit flags missing counter download", not r["ok"])
+    check("audit counter download msg", any("download" in m.lower() for m in r["missing"]))
+
+
 def test_shift_summary():
     print("[shift summary]")
     from core.shift_summary import summarize
@@ -141,10 +158,13 @@ def test_web_assets():
     main_src = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
     check("pick route dropdown", "combo_pick_site" in main_src and "_on_pick_combo_chosen" in main_src)
     check("pick order dialog", "RoutePickOrderDialog" in main_src and "_show_route_pick_dialog" in main_src)
-    from core.picocount import build_unit_id, facing_n_or_e, protocol_doc_present
+    from core.picocount import (
+        build_unit_id, facing_n_or_e, preferred_counter_port, protocol_doc_present,
+    )
     check("picocount unit id", build_unit_id(1234, "e") == "1234ec1b")
     check("picocount facing", facing_n_or_e("s") == "n" and facing_n_or_e("w") == "e")
     check("picocount protocol pdf", protocol_doc_present())
+    check("picocount preferred port helper", callable(preferred_counter_port))
     check("picocount UI wired", "btn_counter_clear" in main_src and "PicocountThread" in main_src)
     check("counter status chip", "counterStatus" in main_src and "apply_counter_status" in main_src)
     from core import export
@@ -306,6 +326,7 @@ def main() -> int:
     print(f"Traffic Deployer smoke_full — {ROOT}\n")
     test_imports()
     test_shift_summary()
+    test_export_audit_counter()
     test_validate_merge()
     test_persistence()
     test_export()

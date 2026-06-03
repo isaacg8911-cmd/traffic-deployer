@@ -1,4 +1,4 @@
-# Tomorrow morning — 5 AM test run (Traffic Deployer v1.0.5)
+# Tomorrow morning — 5 AM test run (Traffic Deployer v1.0.6)
 
 One session (~45 min). Forge already ran **PROVE** overnight; you confirm on the truck laptop.
 
@@ -7,7 +7,7 @@ One session (~45 min). Forge already ran **PROVE** overnight; you confirm on the
 1. Double-click **`PROVE.bat`** (or `SMOKE.bat` if short on time) — expect **PROVE PASS**.
 2. Optional with counter plugged in:  
    `.venv\Scripts\python.exe scripts\picocount_sandbox.py --port COM10`
-3. Double-click **`START.bat`** — window title should show **v1.0.5**.
+3. Double-click **`START.bat`** — window title should show **v1.0.6**.
 
 ## Setup tab (Wi‑Fi, online)
 
@@ -42,7 +42,7 @@ One session (~45 min). Forge already ran **PROVE** overnight; you confirm on the
 ## Paste to Forge after field test
 
 ```text
-FIELD-PROOF: YYYY-MM-DD app=traffic-deployer version=1.0.5
+FIELD-PROOF: YYYY-MM-DD app=traffic-deployer version=1.0.6
 pass: ...
 fail: ...
 feel: ...

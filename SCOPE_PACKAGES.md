@@ -89,4 +89,13 @@ Director-approved bundles. Forge lists these in `build` / `ship` menus.
 
 **Director freeze:** Prefer **P46** or **P3** before new feature IDs unless Director ends freeze (`DEMAND:` or `P7` off).
 
+| ID | Name | One-line scope | Prove with |
+|----|------|----------------|------------|
+| P47 | **PicoCount enterprise** | Field readiness + export columns + shift summary + download buffer fix + status chips | `smoke_full` + `picocount_sandbox.py` |
+| P48 | **Enterprise chrome** | Counter/pickup/audit panels, scrollbars, v1.0.5 identity | `START.bat` visual |
+| P49 | **Route pick order window** | Floating reorder list during map pick | smoke + Route tab |
+| P50 | **Tomorrow proof kit** | `docs/TOMORROW_MORNING.md` + PROVE step 6 sandbox | `PROVE.bat` |
+
+**Shipped (2026-06-03 overnight):** P47–P50 + `core/map_display.py` tracked; routing crossing polish (ZONE_MIN 8).
+
 **Modes:** `explore` | `build` | `ship`

@@ -17,6 +17,7 @@ from core.state import ca_now
 _EXPORT_COLS = [
     "Date", "ExactTime", "MapDay", "Site", "Street", "Serial", "Directions", "Lanes",
     "Notes", "WideStreet", "CrossLAT", "CrossLON", "LAT", "LON",
+    "CounterUnitID", "CounterSerial", "CounterCleared", "CounterDownload",
     "Installed", "Skipped", "Picked up",
 ]
 
@@ -39,6 +40,10 @@ def _row(stop: dict) -> dict:
         "CrossLON": stop.get("cross_lon"),
         "LAT": lat,
         "LON": lon,
+        "CounterUnitID": stop.get("counter_unit_id", ""),
+        "CounterSerial": stop.get("counter_serial", ""),
+        "CounterCleared": stop.get("counter_cleared_at", ""),
+        "CounterDownload": stop.get("counter_download_path", ""),
         "Installed": "x" if stop.get("installed") else "",
         "Skipped": "x" if stop.get("skipped") else "",
         "Picked up": "x" if stop.get("picked_up") else "",
@@ -57,6 +62,13 @@ def audit(stops: list[dict]) -> dict:
             street = str(s.get("street", "")).strip()
             if not street or street.lower() == "nan":
                 missing.append(f"Site {s.get('id')}: missing Street name")
+            if s.get("counter_unit_id") and not str(s.get("counter_serial", "")).strip():
+                missing.append(
+                    f"Site {s.get('id')}: PicoCount configured but counter serial empty")
+            if s.get("installed") and s.get("picked_up") and s.get("counter_unit_id"):
+                if not str(s.get("counter_download_path", "")).strip():
+                    missing.append(
+                        f"Site {s.get('id')}: picked up but counter study not downloaded")
     return {"ok": not missing, "missing": missing, "count": len(done)}
 
 

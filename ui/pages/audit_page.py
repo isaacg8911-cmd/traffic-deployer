@@ -11,7 +11,7 @@ def build_audit_page(win) -> QWidget:
     v.addWidget(win._h("END OF DAY AUDIT"))
     win.lbl_shift_summary = QLabel("")
     win.lbl_shift_summary.setWordWrap(True)
-    win.lbl_shift_summary.setStyleSheet("font-weight:700;font-size:13px;color:#0f2744;")
+    win.lbl_shift_summary.setObjectName("shiftSummary")
     v.addWidget(win.lbl_shift_summary)
     win.lbl_audit = QLabel("")
     win.lbl_audit.setWordWrap(True)

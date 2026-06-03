@@ -35,10 +35,16 @@ class WorkflowStrip(QFrame):
                 self._lay.addWidget(arr)
 
 
-def section_group(title: str, parent_layout: QVBoxLayout, stretch: int = 0) -> QVBoxLayout:
+def section_group(
+    title: str,
+    parent_layout: QVBoxLayout,
+    stretch: int = 0,
+    *,
+    object_name: str | None = None,
+) -> QVBoxLayout:
     """Card-style group; returns inner layout for section contents."""
     box = QGroupBox(title)
-    box.setObjectName("sectionCard")
+    box.setObjectName(object_name or "sectionCard")
     inner = QVBoxLayout(box)
     inner.setContentsMargins(12, 14, 12, 12)
     inner.setSpacing(8)

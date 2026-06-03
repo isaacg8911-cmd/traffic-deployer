@@ -121,6 +121,51 @@ def check_all(
         except Exception:
             pass
 
+    try:
+        from core import picocount
+
+        items.append(_item(
+            "picocount_doc",
+            "PicoCount protocol reference",
+            picocount.protocol_doc_present(),
+            level="warn",
+            detail="docs/PicoCountSerialProtocol.pdf (VehicleCounts developer PDF)",
+        ))
+        ports = picocount.list_serial_ports()
+        if ports:
+            pr = picocount.probe_port()
+            if pr.ok:
+                items.append(_item(
+                    "picocount",
+                    f"PicoCount USB ({pr.port})",
+                    True,
+                    detail="Counter responding — ready for install/pickup",
+                ))
+            else:
+                items.append(_item(
+                    "picocount",
+                    "PicoCount USB",
+                    False,
+                    level="warn",
+                    detail=pr.message,
+                ))
+        else:
+            items.append(_item(
+                "picocount",
+                "PicoCount USB (optional)",
+                False,
+                level="warn",
+                detail="Plug VehicleCounts download cable before install",
+            ))
+    except Exception as exc:
+        items.append(_item(
+            "picocount",
+            "PicoCount support",
+            False,
+            level="warn",
+            detail=str(exc),
+        ))
+
     if gps_snapshot is not None:
         items.append(_gps_item(gps_snapshot))
     elif probe_gps:

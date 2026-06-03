@@ -60,6 +60,7 @@ from ui.web_page import AppWebPage, ensure_qwebchannel_js
 from ui import workflow as setup_workflow
 from ui.pages import audit_page, pickup_page
 from ui.setup_wizard import SetupWizard
+from ui.counter_ui import apply_counter_status
 from ui.widgets import WorkflowStrip, section_group, stat_card
 from core.shift_summary import summarize as shift_summarize
 from ui_themes import normalize_theme, qt_stylesheet
@@ -859,7 +860,7 @@ class MainWindow(QMainWindow):
         b_comp_dir.clicked.connect(self._set_dir_from_compass)
         sec_compass.addWidget(b_comp_dir)
 
-        sec_counter = section_group("PicoCount 2500 (USB)", v)
+        sec_counter = section_group("PicoCount 2500 (USB)", v, object_name="counterPanel")
         row_cp = QHBoxLayout()
         row_cp.addWidget(QLabel("Port"))
         self.combo_counter_port = QComboBox()
@@ -871,7 +872,7 @@ class MainWindow(QMainWindow):
         row_cp.addWidget(b_counter_ports)
         sec_counter.addLayout(row_cp)
         self.lbl_counter_status = QLabel("Plug in download cable, then Connect.")
-        self.lbl_counter_status.setObjectName("hint")
+        self.lbl_counter_status.setObjectName("counterStatus")
         self.lbl_counter_status.setWordWrap(True)
         sec_counter.addWidget(self.lbl_counter_status)
         self.lbl_counter_unit = QLabel("")
@@ -894,6 +895,8 @@ class MainWindow(QMainWindow):
         row_cbtn.addWidget(self.btn_counter_clear)
         sec_counter.addLayout(row_cbtn)
         self._counter_refresh_ports()
+        apply_counter_status(
+            self.lbl_counter_status, "idle", "Plug in download cable, then Connect.")
 
         sec_form = section_group("Install capture", v)
         sec_form.addWidget(self._h("STREET NAME"))
@@ -2879,7 +2882,7 @@ class MainWindow(QMainWindow):
                 self.lbl_counter_download.setText(" · ".join(parts))
 
     def _counter_set_busy(self, msg: str) -> None:
-        self.lbl_counter_status.setText(msg)
+        apply_counter_status(self.lbl_counter_status, "busy", msg)
         for w in (
             self.btn_counter_connect,
             self.btn_counter_read_serial,
@@ -2905,11 +2908,18 @@ class MainWindow(QMainWindow):
         op = res.pop("_op", "")
         if op == "probe":
             if res.get("ok"):
-                self.lbl_counter_status.setText(
-                    f"Connection successful — {res.get('message', '')}")
+                apply_counter_status(
+                    self.lbl_counter_status,
+                    "ok",
+                    f"Connected — {res.get('message', '')}",
+                )
                 self.statusBar().showMessage("PicoCount connected.", 6000)
             else:
-                self.lbl_counter_status.setText(res.get("message", "Not connected"))
+                apply_counter_status(
+                    self.lbl_counter_status,
+                    "fail",
+                    res.get("message", "Not connected"),
+                )
         elif op == "serial":
             if res.get("ok"):
                 sn = str(res.get("serial_number", "")).strip()
@@ -2919,11 +2929,18 @@ class MainWindow(QMainWindow):
                     s = self.state.stops[self.current_index]
                     s["counter_serial"] = sn
                     self._persist_shift(quiet=True)
-                self.lbl_counter_status.setText(
-                    f"Serial {sn or '—'} · {res.get('model', '')} {res.get('firmware', '')}")
+                apply_counter_status(
+                    self.lbl_counter_status,
+                    "ok",
+                    f"Serial {sn or '—'} · {res.get('model', '')} {res.get('firmware', '')}",
+                )
                 self.statusBar().showMessage("Counter serial read.", 5000)
             else:
-                self.lbl_counter_status.setText(res.get("error", "Serial read failed"))
+                apply_counter_status(
+                    self.lbl_counter_status,
+                    "fail",
+                    res.get("error", "Serial read failed"),
+                )
         elif op == "clear_configure":
             if res.get("ok"):
                 if self.state.stops and self.current_index < len(self.state.stops):
@@ -2934,11 +2951,18 @@ class MainWindow(QMainWindow):
                     if res.get("serial_number") and hasattr(self, "txt_serial"):
                         self.txt_serial.setText(str(res["serial_number"]))
                     self._persist_shift(quiet=True)
-                self.lbl_counter_status.setText(
-                    f"Cleared · Unit ID set to {res.get('unit_id', '')} · serial {res.get('serial_number', '')}")
+                apply_counter_status(
+                    self.lbl_counter_status,
+                    "ok",
+                    f"Cleared · Unit ID {res.get('unit_id', '')} · serial {res.get('serial_number', '')}",
+                )
                 self.statusBar().showMessage("Counter cleared and configured for this site.", 8000)
             else:
-                self.lbl_counter_status.setText(res.get("error", "Clear/configure failed"))
+                apply_counter_status(
+                    self.lbl_counter_status,
+                    "fail",
+                    res.get("error", "Clear/configure failed"),
+                )
                 self._warn(res.get("error", "Counter operation failed"))
         elif op == "download":
             if res.get("ok"):
@@ -2948,11 +2972,18 @@ class MainWindow(QMainWindow):
                     s["counter_download_path"] = res.get("path", "")
                     self._persist_shift(quiet=True)
                     self._refresh_pickup()
-                self.lbl_counter_status.setText(
-                    f"Downloaded {res.get('bytes', 0):,} bytes → {os.path.basename(res.get('path', ''))}")
+                apply_counter_status(
+                    self.lbl_counter_status,
+                    "ok",
+                    f"Downloaded {res.get('bytes', 0):,} bytes → {os.path.basename(res.get('path', ''))}",
+                )
                 self.statusBar().showMessage("Counter data saved locally.", 8000)
             else:
-                self.lbl_counter_status.setText(res.get("error", "Download failed"))
+                apply_counter_status(
+                    self.lbl_counter_status,
+                    "fail",
+                    res.get("error", "Download failed"),
+                )
                 self._warn(res.get("error", "Could not download counter data"))
         self._counter_clear_busy()
         self._update_counter_labels()

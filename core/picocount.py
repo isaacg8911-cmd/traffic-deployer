@@ -306,7 +306,37 @@ class PicoCountClient:
         if block_ptr == 0 and page_ptr == 0 and buf_ptr == 0:
             return b"", {"ok": True, "empty": True, "bytes": 0, **mem}
 
+        def _buffer_slice() -> bytes:
+            buf = self.read_buffer_page()
+            if not buf or buf_ptr <= 0:
+                return b""
+            slice_ = buf[: min(buf_ptr, len(buf))]
+            if slice_ and any(b != 0xFF for b in slice_):
+                return slice_
+            return b""
+
+        # Short studies may live only in the RAM buffer (block 0 / page 0).
+        if block_ptr == 0 and page_ptr == 0 and buf_ptr > 0:
+            buf_only = _buffer_slice()
+            if buf_only:
+                return buf_only, {
+                    "ok": True,
+                    "bytes": len(buf_only),
+                    "empty": False,
+                    "source": "buffer",
+                    **mem,
+                }
+
         if not self.set_baud_fast():
+            buf_only = _buffer_slice()
+            if buf_only:
+                return buf_only, {
+                    "ok": True,
+                    "bytes": len(buf_only),
+                    "empty": False,
+                    "source": "buffer_slow",
+                    **mem,
+                }
             return b"", {"ok": False, "error": "Could not switch to 921600 baud (]b)."}
 
         parts: list[bytes] = []
@@ -314,14 +344,22 @@ class PicoCountClient:
             last_page = page_ptr if block == block_ptr else (block_pages - 1)
             for page in range(last_page + 1):
                 chunk = self.read_nand_page(page, block)
-                if chunk:
+                if chunk and any(b != 0xFF for b in chunk):
                     parts.append(chunk)
                 time.sleep(0.02)
-        buf = self.read_buffer_page()
-        if buf and any(b != 0xFF for b in buf[: max(1, buf_ptr)]):
+        buf = _buffer_slice()
+        if buf:
             parts.append(buf)
         blob = b"".join(parts)
-        return blob, {"ok": True, "bytes": len(blob), "empty": len(blob) == 0, **mem}
+        if len(blob) == 0:
+            return b"", {
+                "ok": True,
+                "empty": True,
+                "bytes": 0,
+                "hint": "Counter memory pointers set but no readable pages (cleared or corrupt).",
+                **mem,
+            }
+        return blob, {"ok": True, "bytes": len(blob), "empty": False, **mem}
 
 
 def probe_port(port: str | None = None) -> ProbeResult:
@@ -403,7 +441,8 @@ def download_study(
             if not info.get("ok"):
                 return info
             if info.get("empty"):
-                return {"ok": False, "error": "No count data in counter (empty study)."}
+                hint = info.get("hint") or "No count data in counter (empty or cleared study)."
+                return {"ok": False, "error": hint}
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             header = {
                 "magic": "TrafficDeployer.PicoCountRaw",

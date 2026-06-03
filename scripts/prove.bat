@@ -34,9 +34,16 @@ echo === [4/5] golden_routes ===
 if errorlevel 1 set FAIL=1
 
 echo.
-echo === [5/5] benchmark_route ===
+echo === [5/6] benchmark_route ===
 ".venv\Scripts\python.exe" scripts\benchmark_route.py
 if errorlevel 1 set FAIL=1
+
+echo.
+echo === [6/6] picocount_sandbox (optional hardware) ===
+".venv\Scripts\python.exe" scripts\picocount_sandbox.py
+if errorlevel 1 (
+    echo   WARN picocount_sandbox failed or no COM port — OK if counter unplugged
+)
 
 echo.
 if %FAIL%==0 (

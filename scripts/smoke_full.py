@@ -52,6 +52,11 @@ def test_shift_summary():
 
     s = summarize([], None)
     check("empty shift", s["installed"] == 0 and "No stops" in s["text"])
+    s2 = summarize(
+        [{"installed": True, "counter_unit_id": "1234nc1b", "counter_download_path": "x.pcbin"}],
+        {"miles": 12.0},
+    )
+    check("shift counter line", "PicoCount" in s2["text"])
 
 
 def test_validate_merge():
@@ -141,6 +146,11 @@ def test_web_assets():
     check("picocount facing", facing_n_or_e("s") == "n" and facing_n_or_e("w") == "e")
     check("picocount protocol pdf", protocol_doc_present())
     check("picocount UI wired", "btn_counter_clear" in main_src and "PicocountThread" in main_src)
+    check("counter status chip", "counterStatus" in main_src and "apply_counter_status" in main_src)
+    from core import export
+    check("export counter columns", "CounterUnitID" in export._EXPORT_COLS)
+    from core import map_display
+    check("map_display manual order", hasattr(map_display, "apply_manual_order"))
     check("segment path on map", "segment_path" in appjs)
     check("no drive leg trace", "tdSetDriveLeg = function ()" in appjs)
     check("no turn-by-turn banner", "navbar" not in idx)
@@ -235,6 +245,7 @@ def test_field_ready():
     check("field_ready score", r["score"] >= 82, f"score={r['score']}")
     check("basemap ok", any(i["id"] == "basemap" and i["ok"] for i in r["items"]))
     check("map server ok", any(i["id"] == "server" and i["ok"] for i in r["items"]))
+    check("picocount doc in readiness", any(i["id"] == "picocount_doc" for i in r["items"]))
     ok(f"readiness {r['score']}/100 ({r['warn_count']} warn, {r['fail_count']} fail)")
 
 

@@ -75,6 +75,42 @@ QPushButton#secondary {
 }
 QPushButton#secondary:hover { background: #e2e8f0; }
 #hint { color: #64748b; font-size: 12px; }
+#counterPanel {
+    border: 1px solid #7eb8e8; background: #f8fbff;
+}
+#counterPanel::title { color: #0c4a6e; }
+QLabel#counterStatus {
+    border-radius: 8px; padding: 10px 12px; font-weight: 600; font-size: 13px;
+    background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1;
+}
+QLabel#counterStatus[statusLevel="ok"] {
+    background: #ecfdf5; color: #065f46; border: 1px solid #6ee7b7;
+}
+QLabel#counterStatus[statusLevel="warn"] {
+    background: #fffbeb; color: #92400e; border: 1px solid #fcd34d;
+}
+QLabel#counterStatus[statusLevel="fail"] {
+    background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5;
+}
+QLabel#counterStatus[statusLevel="busy"] {
+    background: #eff6ff; color: #1e40af; border: 1px solid #93c5fd;
+}
+QLabel#shiftSummary {
+    font-size: 13px; font-weight: 700; color: #0f2744;
+    background: #ffffff; border: 1px solid #c5d0de; border-radius: 10px;
+    padding: 12px 14px;
+}
+#pickupCounterCard {
+    background: #f8fbff; border: 1px solid #c5d0de; border-radius: 10px;
+    padding: 4px;
+}
+QScrollBar:vertical {
+    background: #f1f5f9; width: 10px; margin: 2px; border-radius: 5px;
+}
+QScrollBar::handle:vertical {
+    background: #94a3b8; min-height: 24px; border-radius: 5px;
+}
+QScrollBar::handle:vertical:hover { background: #64748b; }
 """
 
 # Default desk look — navy + amber (traffic-deployer identity).
@@ -91,7 +127,42 @@ QPushButton#aboutBtn {
     padding: 6px 12px; font-weight: 600;
 }
 QPushButton#aboutBtn:hover { background: #1a3a5c; color: #fff; }
-#sidepanel { background: #f8fafc; border-right: 1px solid #c5d0de; }
+#modePill {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.6px;
+    padding: 6px 10px; border-radius: 6px; min-width: 64px;
+}
+#modePill[mode="online"] { background: #0d5c4b; color: #ecfdf5; }
+#modePill[mode="offline"] { background: #c45f14; color: #fff; }
+QPushButton#modeBtnOnline, QPushButton#modeBtnOffline {
+    padding: 6px 12px; font-size: 12px; font-weight: 700;
+    background: #1a3a5c; color: #cbd5e1; border: 1px solid #3d5a80;
+}
+QPushButton#modeBtnOnline:hover, QPushButton#modeBtnOffline:hover {
+    background: #243f5c; color: #fff;
+}
+QPushButton#modeBtnOnline:checked {
+    background: #0d5c4b; color: #fff; border: none;
+}
+QPushButton#modeBtnOffline:checked {
+    background: #c45f14; color: #fff; border: none;
+}
+#sidepanel {
+    background: #f8fafc; border-right: 2px solid #c5d0de;
+}
+#pagesColumn { background: #f8fafc; }
+#mapFrame { background: #e8edf3; border-left: 2px solid #94a3b8; }
+QSplitter#mainSplit::handle {
+    background: #c5d0de; width: 3px;
+}
+QSplitter#mainSplit::handle:hover { background: #c45f14; }
+#pageScroll { background: #f8fafc; }
+#installHeader {
+    background: #ffffff; border: 1px solid #c5d0de; border-radius: 12px;
+}
+#installTitle { font-size: 18px; font-weight: 800; color: #0f2744; }
+#installSub { font-size: 13px; font-weight: 600; color: #475569; }
+#installWarn { color: #b42318; font-weight: 700; font-size: 12px; }
+#installCompass { font-weight: 700; font-size: 14px; color: #0f2744; }
 QLabel[role="h"] {
     font-size: 11px; font-weight: 800; color: #64748b;
     letter-spacing: 0.8px; padding-top: 4px;

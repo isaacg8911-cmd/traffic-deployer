@@ -28,7 +28,7 @@ EXACT_MATRIX_MAX_STOPS = 9
 # Optional OR-Tools TSP when installed (pip install ortools); used for 10–15 stops.
 ORTOOLS_MATRIX_MAX_STOPS = 15
 # Zone-first ordering: finish a geographic area before driving to the next (reduces backtracking).
-ZONE_MIN_STOPS = 12
+ZONE_MIN_STOPS = 8
 
 
 def _haversine_km(a, b):
@@ -93,27 +93,34 @@ def _home_to_segment(graph, home: tuple[float, float], acc: dict) -> float:
     return min(_road_m(graph, home, p) for p in _access_pts(acc))
 
 
+def _cross_begin_or_end(
+    graph,
+    lengths: dict | None,
+    cur: tuple[float, float],
+    stop: dict,
+) -> tuple[float, float, str]:
+    """Drive-to point is segment begin or end only (whichever is closer on the road)."""
+    seg_b, seg_e = _seg_endpoints(stop)
+    d_b = _cached_dist(graph, lengths, cur, seg_b)
+    d_e = _cached_dist(graph, lengths, cur, seg_e)
+    if d_b <= d_e:
+        return seg_b[0], seg_b[1], "begin"
+    return seg_e[0], seg_e[1], "end"
+
+
 def _assign_crossings(
     graph,
     home: tuple[float, float],
     ordered: list[dict],
     lengths: dict | None = None,
 ) -> list[dict]:
-    """Pick crossing on each segment line where the route meets it (project approach onto line)."""
+    """Chain crossings using begin/end endpoints only."""
     cur = (float(home[0]), float(home[1]))
-
-    def dist(a: tuple[float, float], b: tuple[float, float]) -> float:
-        return _cached_dist(graph, lengths, a, b)
-
     for stop in ordered:
-        seg_b, seg_e = _seg_endpoints(stop)
-        cross = _project_on_segment(seg_b, seg_e, cur)
-        acc = _segment_access(graph, stop)
-        d_b = dist(cur, acc["begin"])
-        d_e = dist(cur, acc["end"])
-        stop["cross_side"] = "begin" if d_b <= d_e else "end"
-        stop["cross_lat"], stop["cross_lon"] = cross
-        cur = cross
+        lat, lon, side = _cross_begin_or_end(graph, lengths, cur, stop)
+        stop["cross_lat"], stop["cross_lon"] = lat, lon
+        stop["cross_side"] = side
+        cur = (lat, lon)
     return ordered
 
 
@@ -200,7 +207,9 @@ def _polish_crossings(
             stop["cross_side"] = "end" if stop.get("cross_side") == "begin" else "begin"
             seg_b, seg_e = _seg_endpoints(stop)
             prev = (float(home[0]), float(home[1])) if i == 0 else _stop_pt(trial[i - 1])
-            stop["cross_lat"], stop["cross_lon"] = _project_on_segment(seg_b, seg_e, prev)
+            lat, lon, side = _cross_begin_or_end(graph, lengths, prev, stop)
+            stop["cross_lat"], stop["cross_lon"] = lat, lon
+            stop["cross_side"] = side
             tail = _assign_crossings(graph, home, trial[i:], lengths=lengths)
             for k, s in enumerate(tail):
                 trial[i + k] = s
@@ -210,6 +219,10 @@ def _polish_crossings(
         if not improved:
             break
     return best
+
+
+def _same_coord(a: list | tuple, b: list | tuple, tol: float = 1e-6) -> bool:
+    return abs(float(a[0]) - float(b[0])) < tol and abs(float(a[1]) - float(b[1])) < tol
 
 
 def _snap_leg_end(polyline: list, end: tuple[float, float]) -> list:
@@ -315,6 +328,14 @@ def _nearest_neighbor(matrix, start_idx, stop_indices):
         unvisited.remove(nxt)
         cur = nxt
     return route
+
+
+def _far_first_neighbor(matrix, start_idx, stop_indices):
+    """Field workflow: hit the farthest zone/stop from home first, then chain inward."""
+    if not stop_indices:
+        return []
+    first = max(stop_indices, key=lambda j: matrix[start_idx][j])
+    return [first] + _nearest_neighbor(matrix, first, [j for j in stop_indices if j != first])
 
 
 def _path_len(matrix, start_idx, route):
@@ -606,8 +627,8 @@ def _matrix_tour(
     ort = _ortools_matrix_route(matrix, n)
     if ort is not None:
         return ort
-    route = _nearest_neighbor(matrix, 0, list(range(1, n + 1)))
-    route = _two_opt(matrix, 0, route, max_passes=_two_opt_max_passes(len(route)))
+    seed = _far_first_neighbor(matrix, 0, list(range(1, n + 1)))
+    route = _two_opt(matrix, 0, seed, max_passes=_two_opt_max_passes(len(seed)))
     if len(route) <= 50:
         route = _or_opt(matrix, 0, route, max_rounds=3 if n <= 30 else 1)
     return route
@@ -707,20 +728,26 @@ def build_route(ordered_stops: list[dict], home: tuple[float, float], data_dir: 
         ret["to"] = "Home"
         legs.append(ret)
         polyline, miles = [], 0.0
+        failed = 0
         for i, leg in enumerate(legs):
             coords = leg.get("polyline") or []
             if i < len(ordered):
                 touch = _stop_pt(ordered[i])
                 coords = _snap_leg_end(coords, touch)
                 leg["polyline"] = coords
+            if not leg.get("ok"):
+                failed += 1
             if coords:
-                if polyline and polyline[-1] == coords[0]:
+                if polyline and _same_coord(polyline[-1], coords[0]):
                     polyline.extend(coords[1:])
                 else:
                     polyline.extend(coords)
             if leg.get("ok"):
                 miles += leg.get("miles", 0.0)
-        return {"polyline": polyline, "miles": miles, "legs": legs, "graph": True}
+        out = {"polyline": polyline, "miles": miles, "legs": legs, "graph": True}
+        if failed:
+            out["failed_legs"] = failed
+        return out
 
     pts = [(float(home[0]), float(home[1]))] + [_stop_pt(s) for s in ordered] + [(float(home[0]), float(home[1]))]
     polyline = [[p[0], p[1]] for p in pts]

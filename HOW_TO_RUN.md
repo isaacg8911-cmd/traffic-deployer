@@ -47,7 +47,10 @@ from another PC).
 On Route: colored **zones**, route summary, **Move stop up/down** + **Re-trace route only**,
 field strip with **next-stop distance**, **Recover map** if the canvas goes blank.
 Install tab: **Attach install photo** (saved under `tds_data/field_photos/`).
-Audit tab: **shift summary** + export.
+Audit tab: **shift summary** + export (includes **PicoCount** columns in Excel).
+
+**Before a field day:** see **[docs/TOMORROW_MORNING.md](docs/TOMORROW_MORNING.md)** for the 5 AM checklist.  
+**Proof overnight:** `PROVE.bat` (smoke + demo + golden + benchmark + optional counter sandbox).
 
 ## The workflow
 

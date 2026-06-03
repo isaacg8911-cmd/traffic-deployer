@@ -21,11 +21,16 @@ def summarize(stops: list[dict], route: dict | None = None) -> dict:
         1 for s in stops if s.get("installed") and not s.get("picked_up"))
     miles = float((route or {}).get("miles", 0) or 0)
     photos = sum(1 for s in stops if s.get("install_photo_path"))
+    counter_cfg = sum(1 for s in stops if s.get("counter_unit_id"))
+    counter_dl = sum(1 for s in stops if s.get("counter_download_path"))
     lines = [
         f"Shift: {len(stops)} stops · {installed} installed · {skipped} skipped · {pending} open",
         f"Route plan: {miles:.1f} mi",
         f"Pickup: {picked} secured · {pending_pickup} still on street",
     ]
+    if counter_cfg or counter_dl:
+        lines.append(
+            f"PicoCount: {counter_cfg} configured at install · {counter_dl} study file(s) downloaded")
     if photos:
         lines.append(f"Install photos: {photos}")
     if pending == 0 and installed > 0:

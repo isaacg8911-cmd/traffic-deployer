@@ -72,6 +72,14 @@ No guesswork on COM10 until that file is in the repo.
 
 ---
 
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| Download says empty but counter ran a study | v1.0.6+ uses **115200 NAND read** first; retry **Download counter data** |
+| Wrong COM port selected | **Refresh** ports — FTDI / VehicleCounts adapter is auto-preferred |
+| Port busy | Close other serial tools; quit Traffic Deployer and retry sandbox |
+
 ## Out of scope (until approved)
 
 - Replacing TrafficViewer Pro reports 1:1 without sample outputs  

@@ -14,6 +14,7 @@ Director asked for unattended learn-and-fix loops **inside app scope**. Each cyc
 |-------|--------|--------|
 | 1 | Route pick dialog renumber after drag; PicoCount NAND @115200 before fast baud; PROVE step labels 1/6; closeEvent stops counter thread; export audit smoke | smoke PASS |
 | 2 | PicoCount download proven COM10 **67,305 bytes** (nand_115200 path); v1.0.6 | sandbox --download OK |
+| 3 | FTDI port preference; counter refresh auto-select; PICOCOUNT troubleshooting doc | smoke PASS |
 
 ## Not auto-fixed (needs field or sample data)
 

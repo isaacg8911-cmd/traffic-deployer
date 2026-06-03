@@ -21,7 +21,7 @@ Read **SCOPE.md** and **SCOPE_PACKAGES.md**. Workflow: **HOW_TO_RUN.md**, **STAR
 
 ## Structure
 
-- **core/** logic · **main.py** shell · **web/** map · **scripts/** smoke
+- **core/** logic · **main.py** shell (target ≤1200 lines; use **P46** before new feature packages) · **web/** map · **scripts/** smoke
 
 ## Local-first
 

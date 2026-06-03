@@ -83,4 +83,10 @@ Director-approved bundles. Forge lists these in `build` / `ship` menus.
 
 **Shipped (2026-06-02):** P37–P45 Phases 2–4 operator polish + packaging + routing bounds.
 
+| ID | Name | One-line scope | Prove with |
+|----|------|----------------|------------|
+| P46 | **main.py slim v2** | Move wiring to `ui/`; **main.py ≤1200 lines**; zero behavior change. | `PROVE.bat` exit 0 |
+
+**Director freeze:** Prefer **P46** or **P3** before new feature IDs unless Director ends freeze (`DEMAND:` or `P7` off).
+
 **Modes:** `explore` | `build` | `ship`

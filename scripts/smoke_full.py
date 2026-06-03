@@ -128,7 +128,11 @@ def test_web_assets():
     check("style buildings", "buildings-fill" in style)
     check("no address clutter", "address-labels" not in style)
     check("follow street zoom", "FOLLOW_ZOOM = 13" in appjs)
-    check("crossing markers", "show_crossings" in appjs)
+    check("stop marker source", "stop-markers" in appjs)
+    check("numbered stop layers", "stop-label" in appjs and "stop-circle" in appjs)
+    check("numbered site begin/end dots", "site-begin-label" in appjs and "site-end-label" in appjs)
+    check("segment path on map", "segment_path" in appjs)
+    check("no drive leg trace", "tdSetDriveLeg = function ()" in appjs)
     check("no turn-by-turn banner", "navbar" not in idx)
     for rel in ("vendor/maplibre-gl.js", "vendor/pmtiles.js", "style.js", "app.js"):
         check(f"file {rel}", os.path.isfile(os.path.join(WEB_DIR, rel)))

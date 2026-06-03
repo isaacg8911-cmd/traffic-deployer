@@ -133,6 +133,13 @@ def test_web_assets():
     check("numbered site begin/end dots", "site-begin-label" in appjs and "site-end-label" in appjs)
     check("pick route map banner", "pick-banner" in idx and "pick_prompt" in appjs)
     check("pick letter labels", "siteDotLabel" in appjs and "pick_letters" in appjs)
+    main_src = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    check("pick route dropdown", "combo_pick_site" in main_src and "_on_pick_combo_chosen" in main_src)
+    from core.picocount import build_unit_id, facing_n_or_e, protocol_doc_present
+    check("picocount unit id", build_unit_id(1234, "e") == "1234ec1b")
+    check("picocount facing", facing_n_or_e("s") == "n" and facing_n_or_e("w") == "e")
+    check("picocount protocol pdf", protocol_doc_present())
+    check("picocount UI wired", "btn_counter_clear" in main_src and "PicocountThread" in main_src)
     check("segment path on map", "segment_path" in appjs)
     check("no drive leg trace", "tdSetDriveLeg = function ()" in appjs)
     check("no turn-by-turn banner", "navbar" not in idx)

@@ -4,7 +4,7 @@
 
 - Desktop offline California field tool (PySide6 + embedded map).
 - Ingest Excel/CSV + `.EST`, multi-stop street routing, map trace.
-- USB GPS live trace, install/pickup workflow, audit export.
+- USB GPS live trace, install/pickup workflow, PicoCount 2500 USB (clear/configure/download), audit export.
 - Local persistence (`tds_data/`), encrypted save, `START.bat` workflow.
 - Offline road graph; see `ROUTING_AND_MAP.md`.
 - Smoke: `scripts/smoke_full.py`, `SMOKE.bat`.

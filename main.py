@@ -48,9 +48,13 @@ from core.field_ready import TOMORROW_STEPS, check_all
 from core.offline_gate import evaluate as offline_gate_eval
 from core.state import RouteState, ca_now
 from ui.paths import (
-    APP_DIR, DATA_DIR, DEMO_CSV, DEMO_DIR, DEMO_EST, DIRECTIONS, UNDO_FIELDS, VENDOR_DIR, WEB_DIR,
+    APP_DIR, COUNTER_DOWNLOAD_DIR, DATA_DIR, DEMO_CSV, DEMO_DIR, DEMO_EST, DIRECTIONS,
+    UNDO_FIELDS, VENDOR_DIR, WEB_DIR,
 )
-from ui.threads import DownloadRoadsThread, GeocodeThread, RouteOptimizeThread, SmokeTestThread
+from ui.threads import (
+    DownloadRoadsThread, GeocodeThread, PicocountThread, RouteOptimizeThread, SmokeTestThread,
+)
+from core import picocount
 from ui.web_page import AppWebPage, ensure_qwebchannel_js
 from ui import workflow as setup_workflow
 from ui.pages import audit_page, pickup_page
@@ -78,6 +82,8 @@ class MainWindow(QMainWindow):
         self.excel_paths = [p for p in self.state.excel_paths if os.path.isfile(p)]
         self._route_pick_mode = False
         self._route_pick_uids: list[str] = []
+        self._picocount_thread = None
+        self._counter_serial_grab_uid: str | None = None
         self.est_paths = [p for p in self.state.est_paths if os.path.isfile(p)]
         self.state.excel_paths = list(self.excel_paths)
         self.state.est_paths = list(self.est_paths)
@@ -722,12 +728,20 @@ class MainWindow(QMainWindow):
 
         sec_pick = section_group("Plan route (pick order)", v)
         self.lbl_pick_status = QLabel(
-            "Setup → PLAN ROUTE → Pick route on map. "
-            "You will be prompted: Select site 1, then 2, … "
-            "Blue/red dots show letters (A, B, C…) per street line.")
+            "Choose stop 1, 2, 3… from the dropdown (or tap blue/red dots on the map). "
+            "Letters A, B, C… on dots identify each street line.")
         self.lbl_pick_status.setObjectName("hint")
         self.lbl_pick_status.setWordWrap(True)
         sec_pick.addWidget(self.lbl_pick_status)
+        row_pick_site = QHBoxLayout()
+        self.lbl_pick_slot = QLabel("Stop 1:")
+        self.lbl_pick_slot.setMinimumWidth(52)
+        self.combo_pick_site = QComboBox()
+        self.combo_pick_site.setMinimumWidth(220)
+        self.combo_pick_site.activated.connect(self._on_pick_combo_chosen)
+        row_pick_site.addWidget(self.lbl_pick_slot)
+        row_pick_site.addWidget(self.combo_pick_site, 1)
+        sec_pick.addLayout(row_pick_site)
         row_pick = QHBoxLayout()
         self.btn_pick_auto = QPushButton("Auto-finish rest")
         self.btn_pick_auto.setObjectName("secondary")
@@ -839,6 +853,42 @@ class MainWindow(QMainWindow):
         b_comp_dir.clicked.connect(self._set_dir_from_compass)
         sec_compass.addWidget(b_comp_dir)
 
+        sec_counter = section_group("PicoCount 2500 (USB)", v)
+        row_cp = QHBoxLayout()
+        row_cp.addWidget(QLabel("Port"))
+        self.combo_counter_port = QComboBox()
+        self.combo_counter_port.setMinimumWidth(88)
+        row_cp.addWidget(self.combo_counter_port, 1)
+        b_counter_ports = QPushButton("Refresh")
+        b_counter_ports.setObjectName("secondary")
+        b_counter_ports.clicked.connect(self._counter_refresh_ports)
+        row_cp.addWidget(b_counter_ports)
+        sec_counter.addLayout(row_cp)
+        self.lbl_counter_status = QLabel("Plug in download cable, then Connect.")
+        self.lbl_counter_status.setObjectName("hint")
+        self.lbl_counter_status.setWordWrap(True)
+        sec_counter.addWidget(self.lbl_counter_status)
+        self.lbl_counter_unit = QLabel("")
+        self.lbl_counter_unit.setObjectName("hint")
+        self.lbl_counter_unit.setWordWrap(True)
+        sec_counter.addWidget(self.lbl_counter_unit)
+        row_cbtn = QHBoxLayout()
+        self.btn_counter_connect = QPushButton("Connect")
+        self.btn_counter_connect.setObjectName("secondary")
+        self.btn_counter_connect.clicked.connect(self._counter_connect)
+        self.btn_counter_read_serial = QPushButton("Read serial")
+        self.btn_counter_read_serial.setObjectName("secondary")
+        self.btn_counter_read_serial.clicked.connect(
+            lambda: self._counter_read_serial(auto=False))
+        self.btn_counter_clear = QPushButton("Clear & set ID")
+        self.btn_counter_clear.setObjectName("primary")
+        self.btn_counter_clear.clicked.connect(self._counter_clear_configure)
+        row_cbtn.addWidget(self.btn_counter_connect)
+        row_cbtn.addWidget(self.btn_counter_read_serial)
+        row_cbtn.addWidget(self.btn_counter_clear)
+        sec_counter.addLayout(row_cbtn)
+        self._counter_refresh_ports()
+
         sec_form = section_group("Install capture", v)
         sec_form.addWidget(self._h("STREET NAME"))
         self.txt_street = QLineEdit()
@@ -847,7 +897,7 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         self.combo_dir = QComboBox()
         self.combo_dir.addItems(DIRECTIONS)
-        self.combo_dir.currentTextChanged.connect(lambda *_: self._schedule_autosave())
+        self.combo_dir.currentTextChanged.connect(self._on_install_dir_changed)
         self.spin_lanes = QSpinBox()
         self.spin_lanes.setRange(1, 20)
         self.spin_lanes.setValue(2)
@@ -1123,7 +1173,7 @@ class MainWindow(QMainWindow):
         box.setWindowTitle("Build route")
         box.setText("How should stop order be chosen?")
         box.setInformativeText(
-            "Pick route: tap blue or red dots on the map — site 1, then 2, and so on.\n"
+            "Pick route: dropdown or map for stop 1, 2, 3…; Apply auto-fills any left.\n"
             "Auto-optimize: the app picks the best order on real streets.")
         btn_pick = box.addButton("Pick route on map", QMessageBox.AcceptRole)
         btn_opt = box.addButton("Auto-optimize", QMessageBox.ActionRole)
@@ -2159,7 +2209,7 @@ class MainWindow(QMainWindow):
         self._refresh_route_list()
         self._push_state(fit=True)
         self.statusBar().showMessage(
-            f"Pick route: {self._pick_prompt_text()} — tap a blue or red dot.", 12000)
+            f"Pick route: {self._pick_prompt_text()} — use dropdown or map dots.", 12000)
 
     def _refresh_route_pick_ui(self) -> None:
         if not hasattr(self, "lbl_pick_status"):
@@ -2167,9 +2217,10 @@ class MainWindow(QMainWindow):
         n = len(self._route_pick_uids)
         total = len(self.state.stops)
         on = self._route_pick_mode
-        self.btn_pick_apply.setEnabled(on and n == total and total > 0)
+        self.btn_pick_apply.setEnabled(on and n > 0)
         self.btn_pick_auto.setEnabled(on and n < total)
         self.btn_pick_clear.setEnabled(on and n > 0)
+        self._refresh_pick_site_combo()
         if not on:
             self.lbl_pick_status.setStyleSheet("")
             self.lbl_pick_status.setText(
@@ -2181,13 +2232,52 @@ class MainWindow(QMainWindow):
             "font-size:14px;font-weight:700;color:#0d47a1;padding:8px 0;")
         if n >= total:
             self.lbl_pick_status.setText(
-                f"All {total} sites chosen. Blue/red dots are labeled A–{letters.get(self.state.stops[-1]['uid'], '?')} "
-                "for reference. Tap Apply route.")
+                f"All {total} stops set. Tap Apply route.")
         else:
             self.lbl_pick_status.setText(
-                f"{self._pick_prompt_text()}\n"
-                "Tap any blue (begin) or red (end) dot for that site. "
-                f"Letters A–{self._site_letter(max(0, total - 1))} mark each street (not drive order yet).")
+                f"{self._pick_prompt_text()} — use the dropdown or map dots. "
+                f"Apply / Auto-finish fills the rest on real streets.")
+
+    def _refresh_pick_site_combo(self) -> None:
+        if not hasattr(self, "combo_pick_site"):
+            return
+        n = len(self._route_pick_uids)
+        total = len(self.state.stops)
+        on = self._route_pick_mode
+        self.combo_pick_site.blockSignals(True)
+        self.combo_pick_site.clear()
+        if not on:
+            self.combo_pick_site.setEnabled(False)
+            self.lbl_pick_slot.setText("Stop:")
+            self.combo_pick_site.addItem("(not picking)")
+            self.combo_pick_site.blockSignals(False)
+            return
+        letters = self._pick_site_letters()
+        picked = set(self._route_pick_uids)
+        if n >= total:
+            self.lbl_pick_slot.setText("Done:")
+            self.combo_pick_site.setEnabled(False)
+            self.combo_pick_site.addItem("All stops assigned")
+            self.combo_pick_site.blockSignals(False)
+            return
+        self.lbl_pick_slot.setText(f"Stop {n + 1}:")
+        self.combo_pick_site.setEnabled(True)
+        self.combo_pick_site.addItem("— choose site —", None)
+        for s in self.state.stops:
+            if s["uid"] in picked:
+                continue
+            letter = letters.get(s["uid"], "?")
+            label = f"[{letter}] Site {s['id']} — {self._street_label(s)}"
+            self.combo_pick_site.addItem(label, s["uid"])
+        self.combo_pick_site.setCurrentIndex(0)
+        self.combo_pick_site.blockSignals(False)
+
+    def _on_pick_combo_chosen(self, index: int) -> None:
+        if not self._route_pick_mode or index <= 0:
+            return
+        uid = self.combo_pick_site.itemData(index)
+        if uid:
+            self._route_pick_add(str(uid))
 
     def _route_pick_add(self, uid: str) -> None:
         if not self._route_pick_mode:
@@ -2236,18 +2326,17 @@ class MainWindow(QMainWindow):
 
     def _route_pick_apply(self) -> None:
         if not self._route_pick_mode or not self._route_pick_uids:
-            self._warn("Pick at least one site on the map (blue or red dot).")
+            self._warn("Choose at least stop 1 from the dropdown, map, or Auto-finish.")
             return
-        total = len(self.state.stops)
-        if len(self._route_pick_uids) < total:
-            self._warn(
-                f"Pick every site before applying ({len(self._route_pick_uids)} of {total} chosen).\n\n"
-                "Or use Auto-finish rest to fill the remainder.")
-            return
-        from core.map_display import apply_manual_order
+        from core.map_display import apply_manual_order, auto_finish_order
 
         by_uid = {s["uid"]: s for s in self.state.stops}
-        ordered = [by_uid[u] for u in self._route_pick_uids if u in by_uid]
+        picked = [by_uid[u] for u in self._route_pick_uids if u in by_uid]
+        remaining = [s for s in self.state.stops if s["uid"] not in self._route_pick_uids]
+        if remaining:
+            ordered = auto_finish_order(tuple(self.state.home), picked, remaining, DATA_DIR)
+        else:
+            ordered = picked
         res = apply_manual_order(tuple(self.state.home), ordered, DATA_DIR)
         self.state.stops = res["order"]
         self.state.route = res["route"]
@@ -2675,6 +2764,231 @@ class MainWindow(QMainWindow):
             self._set_nav_leg((lat, lon), nxt, push_map=True)
             self._push_state()
 
+    # ------------------------------------------------------- PicoCount counter
+    def _counter_selected_port(self) -> str | None:
+        if not hasattr(self, "combo_counter_port"):
+            return None
+        p = self.combo_counter_port.currentText().strip()
+        return p if p and p != "(none)" else None
+
+    def _counter_refresh_ports(self) -> None:
+        if not hasattr(self, "combo_counter_port"):
+            return
+        cur = self.combo_counter_port.currentText()
+        self.combo_counter_port.clear()
+        ports = picocount.list_serial_ports()
+        if not ports:
+            self.combo_counter_port.addItem("(none)")
+        else:
+            for p in ports:
+                self.combo_counter_port.addItem(p)
+        idx = self.combo_counter_port.findText(cur)
+        if idx >= 0:
+            self.combo_counter_port.setCurrentIndex(idx)
+        elif self.combo_counter_port.count() and self.combo_counter_port.itemText(0) != "(none)":
+            pass
+        else:
+            pr = picocount.probe_port()
+            if pr.port:
+                i = self.combo_counter_port.findText(pr.port)
+                if i >= 0:
+                    self.combo_counter_port.setCurrentIndex(i)
+
+    def _planned_counter_unit_id(self) -> str:
+        if not self.state.stops or self.current_index >= len(self.state.stops):
+            return ""
+        s = self.state.stops[self.current_index]
+        g = self.gps.latest()
+        hdg = g.get("heading_display") or g.get("heading_locked") or g.get("heading")
+        return picocount.build_unit_id(
+            s.get("id", ""),
+            self.combo_dir.currentText() if hasattr(self, "combo_dir") else "n",
+            heading_deg=hdg,
+        )
+
+    def _update_counter_labels(self) -> None:
+        if not hasattr(self, "lbl_counter_unit"):
+            return
+        uid = self._planned_counter_unit_id()
+        if uid:
+            self.lbl_counter_unit.setText(f"Next Unit ID on clear: {uid}")
+        else:
+            self.lbl_counter_unit.setText("")
+        if self.state.stops and self.current_index < len(self.state.stops):
+            s = self.state.stops[self.current_index]
+            parts = []
+            if s.get("counter_serial"):
+                parts.append(f"Saved counter serial: {s['counter_serial']}")
+            if s.get("counter_unit_id"):
+                parts.append(f"Unit ID: {s['counter_unit_id']}")
+            if s.get("counter_download_path"):
+                parts.append("Data downloaded")
+            if parts and hasattr(self, "lbl_counter_download"):
+                self.lbl_counter_download.setText(" · ".join(parts))
+
+    def _counter_set_busy(self, msg: str) -> None:
+        self.lbl_counter_status.setText(msg)
+        for w in (
+            self.btn_counter_connect,
+            self.btn_counter_read_serial,
+            self.btn_counter_clear,
+            getattr(self, "btn_counter_download", None),
+        ):
+            if w is not None:
+                w.setEnabled(False)
+
+    def _counter_clear_busy(self) -> None:
+        for w in (
+            self.btn_counter_connect,
+            self.btn_counter_read_serial,
+            self.btn_counter_clear,
+            getattr(self, "btn_counter_download", None),
+        ):
+            if w is not None:
+                w.setEnabled(True)
+        self._update_counter_labels()
+
+    def _on_picocount_done(self, res: dict) -> None:
+        self._picocount_thread = None
+        op = res.pop("_op", "")
+        if op == "probe":
+            if res.get("ok"):
+                self.lbl_counter_status.setText(
+                    f"Connection successful — {res.get('message', '')}")
+                self.statusBar().showMessage("PicoCount connected.", 6000)
+            else:
+                self.lbl_counter_status.setText(res.get("message", "Not connected"))
+        elif op == "serial":
+            if res.get("ok"):
+                sn = str(res.get("serial_number", "")).strip()
+                if sn and hasattr(self, "txt_serial"):
+                    self.txt_serial.setText(sn)
+                if self.state.stops and self.current_index < len(self.state.stops):
+                    s = self.state.stops[self.current_index]
+                    s["counter_serial"] = sn
+                    self._persist_shift(quiet=True)
+                self.lbl_counter_status.setText(
+                    f"Serial {sn or '—'} · {res.get('model', '')} {res.get('firmware', '')}")
+                self.statusBar().showMessage("Counter serial read.", 5000)
+            else:
+                self.lbl_counter_status.setText(res.get("error", "Serial read failed"))
+        elif op == "clear_configure":
+            if res.get("ok"):
+                if self.state.stops and self.current_index < len(self.state.stops):
+                    s = self.state.stops[self.current_index]
+                    s["counter_unit_id"] = res.get("unit_id", "")
+                    s["counter_serial"] = res.get("serial_number", s.get("counter_serial", ""))
+                    s["counter_cleared_at"] = ca_now()[1]
+                    if res.get("serial_number") and hasattr(self, "txt_serial"):
+                        self.txt_serial.setText(str(res["serial_number"]))
+                    self._persist_shift(quiet=True)
+                self.lbl_counter_status.setText(
+                    f"Cleared · Unit ID set to {res.get('unit_id', '')} · serial {res.get('serial_number', '')}")
+                self.statusBar().showMessage("Counter cleared and configured for this site.", 8000)
+            else:
+                self.lbl_counter_status.setText(res.get("error", "Clear/configure failed"))
+                self._warn(res.get("error", "Counter operation failed"))
+        elif op == "download":
+            if res.get("ok"):
+                if self.state.stops and self.pickup_index < len(self._installed_stops()):
+                    items = self._installed_stops()
+                    s = items[min(self.pickup_index, len(items) - 1)]
+                    s["counter_download_path"] = res.get("path", "")
+                    self._persist_shift(quiet=True)
+                    self._refresh_pickup()
+                self.lbl_counter_status.setText(
+                    f"Downloaded {res.get('bytes', 0):,} bytes → {os.path.basename(res.get('path', ''))}")
+                self.statusBar().showMessage("Counter data saved locally.", 8000)
+            else:
+                self.lbl_counter_status.setText(res.get("error", "Download failed"))
+                self._warn(res.get("error", "Could not download counter data"))
+        self._counter_clear_busy()
+        self._update_counter_labels()
+
+    def _counter_connect(self) -> None:
+        self._counter_set_busy("Connecting…")
+        res_holder = {"_op": "probe"}
+        def wrap(r):
+            r["_op"] = "probe"
+            self._on_picocount_done(r)
+        if self._picocount_thread and self._picocount_thread.isRunning():
+            return
+        thread = PicocountThread("probe", port=self._counter_selected_port())
+        self._picocount_thread = thread
+        thread.finished_result.connect(wrap)
+        thread.start()
+
+    def _counter_read_serial(self, *, auto: bool = False) -> None:
+        if auto and not hasattr(self, "txt_serial"):
+            return
+        if auto and self.txt_serial.text().strip():
+            return
+        self._counter_set_busy("Reading counter serial (slow)…")
+        def wrap(r):
+            r["_op"] = "serial"
+            self._on_picocount_done(r)
+        thread = PicocountThread("serial", port=self._counter_selected_port())
+        self._picocount_thread = thread
+        thread.finished_result.connect(wrap)
+        thread.start()
+
+    def _counter_clear_configure(self) -> None:
+        uid = self._planned_counter_unit_id()
+        if not uid:
+            self._warn("Select a stop first.")
+            return
+        if QMessageBox.question(
+            self,
+            "Clear counter",
+            f"Clear all data in the counter and set Unit ID to:\n\n  {uid}\n\n"
+            "Clock will sync to this PC. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        ) != QMessageBox.Yes:
+            return
+        self._counter_set_busy(f"Clearing counter · setting {uid}…")
+        def wrap(r):
+            r["_op"] = "clear_configure"
+            self._on_picocount_done(r)
+        thread = PicocountThread(
+            "clear_configure",
+            port=self._counter_selected_port(),
+            unit_id=uid,
+        )
+        self._picocount_thread = thread
+        thread.finished_result.connect(wrap)
+        thread.start()
+
+    def _counter_download_pickup(self) -> None:
+        items = self._installed_stops()
+        if not items or self.pickup_index >= len(items):
+            self._warn("Select an installed site on Pickup first.")
+            return
+        s = items[self.pickup_index]
+        os.makedirs(COUNTER_DOWNLOAD_DIR, exist_ok=True)
+        fname = f"site_{s.get('id', 'x')}_{s.get('counter_unit_id', 'data')}.pcbin"
+        fname = "".join(c if c.isalnum() or c in "._-" else "_" for c in fname)
+        dest = os.path.join(COUNTER_DOWNLOAD_DIR, self.state.profile, fname)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        self._counter_set_busy("Downloading counter data…")
+        meta = {
+            "site_id": s.get("id"),
+            "unit_id": s.get("counter_unit_id"),
+            "street": s.get("street"),
+        }
+        def wrap(r):
+            r["_op"] = "download"
+            self._on_picocount_done(r)
+        thread = PicocountThread(
+            "download",
+            port=self._counter_selected_port(),
+            dest_path=dest,
+            meta=meta,
+        )
+        self._picocount_thread = thread
+        thread.finished_result.connect(wrap)
+        thread.start()
+
     # ------------------------------------------------------- Install UI/flow
     def _refresh_install(self):
         done, total = self.state.progress_install()
@@ -2737,6 +3051,17 @@ class MainWindow(QMainWindow):
             else:
                 self.lbl_install_photo.setText("")
         self._update_compass_labels(self.gps.latest())
+        self._update_counter_labels()
+        if self.state.stops and self.current_index < len(self.state.stops):
+            s = self.state.stops[self.current_index]
+            uid = s.get("uid")
+            if uid != self._counter_serial_grab_uid and not str(s.get("serial", "")).strip():
+                self._counter_serial_grab_uid = uid
+                QTimer.singleShot(600, lambda: self._counter_read_serial(auto=True))
+
+    def _on_install_dir_changed(self, *_):
+        self._schedule_autosave()
+        self._update_counter_labels()
 
     def _field_photo_dir(self) -> str:
         d = os.path.join(DATA_DIR, "field_photos", self.state.profile)
@@ -2873,6 +3198,7 @@ class MainWindow(QMainWindow):
         return items
 
     def _refresh_pickup(self):
+        self._update_counter_labels()
         done, total = self.state.progress_pickup()
         pending = sum(1 for s in self.state.stops if s.get("installed") and not s.get("picked_up"))
         self.lbl_pickup_prog.setText(f"Pick-up progress: {done}/{total}  ({pending} pending)")

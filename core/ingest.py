@@ -145,6 +145,7 @@ _PROGRESS_KEYS = (
     "field_lat", "field_lon", "serial", "lanes", "direction", "notes",
     "date", "exact_time", "street_warning", "cross_lat", "cross_lon", "cross_side",
     "install_photo_path",
+    "counter_unit_id", "counter_serial", "counter_cleared_at", "counter_download_path",
 )
 
 

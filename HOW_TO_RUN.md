@@ -29,12 +29,12 @@ The app has two modes:
 | Phase | When | What works |
 |--------|------|------------|
 | **Home setup (online)** | Default when you open the app at home | Address search, download road map, BUILD ROUTE |
-| **Field mode (offline)** | After you tap **READY FOR OFFLINE** | Map, GPS, driving, installs, export — all local; no internet calls |
+| **Field mode (offline)** | After you tap **Go offline** (top bar) | Map, GPS, driving, installs, export — all local; no internet calls |
 
-**At home:** leave the app in online mode until setup is done, then tap **READY FOR OFFLINE**
+**At home:** leave the app in online mode until setup is done, then tap **Go offline** (top bar)
 (Setup → *Before you leave*). Status bar shows `Home setup · online`.
 
-**On the road:** field mode stays on until you are home again and tap **RESUME ONLINE MODE**
+**On the road:** field mode stays on until you are home again and tap **I'm online** (top bar)
 for the next day’s files/route. In field mode the app **does not call the internet** (no address
 lookup, no downloads) and avoids blocking error popups — map, GPS, driving, installs, and export
 use only local data.
@@ -58,16 +58,20 @@ Audit tab: **shift summary** + export.
      Map names come from the upload filename (e.g. `Day5.EST` → Day5).
    - **Download road map** for these sites (or import `.graphml` from home PC if work Wi‑Fi blocks download).
    - **BUILD OPTIMIZED ROUTE**, then **READY FOR OFFLINE** before you leave.
-2. **Route tab** - see the ordered stops, total miles, and the route line drawn on
-   actual streets. Toggle guide route / site lines. Click any stop to open it.
+2. **Route tab** - see the ordered stops (numbered **1, 2, 3…** on the map), total miles,
+   and the **blue drive line** traced on real streets (needs road map downloaded).
+   Optional **work-site lines** are dashed purple (Excel segment, not the drive path).
+   Click a numbered stop to open it.
 3. **Map** — standard **Protomaps light** colors (not tied to Sunny/Cloudy/Night panel
    themes). Zoom to neighborhood level for street names. If labels are still sparse,
    re-run `python setup_maps.py` once (wifi) to refresh tiles at zoom 15 + fonts.
 4. **START DRIVING** - turn-by-turn banner + offline voice (female Windows guide). Light blue line to the next stop only.
-5. **Install tab** - per stop: **Grab GPS Here** (precise field coordinate +
-   auto street name when online), compass + **Set direction from compass** when
-   stopped, set serial/lanes, then **INSTALL** or **SKIP**. Prev/Next to move along.
-6. **Pickup tab** - work the installed sites and mark each **SECURED**.
+5. **Install tab** - per stop: **PicoCount 2500 (USB)** — **Connect**, **Read serial**
+   (auto-fills Serial # when empty), **Clear & set ID** (clears counter + sets Unit ID
+   like `1234nc1b` from site + N/E direction + `c1b`). Then **Grab GPS Here**, compass,
+   lanes, **INSTALL** or **SKIP**.
+6. **Pickup tab** - mark each site **SECURED**; **Download counter data** saves the study to
+   `tds_data/counter_downloads/<profile>/` (`.pcbin` + `.json` sidecar).
 7. **Audit tab** - it flags missing data, then exports the **Excel** (or CSV) report.
 
 ## Live GPS tracing

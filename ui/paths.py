@@ -7,11 +7,13 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(APP_DIR, "web")
 VENDOR_DIR = os.path.join(WEB_DIR, "vendor")
 DATA_DIR = os.path.join(APP_DIR, "tds_data")
+COUNTER_DOWNLOAD_DIR = os.path.join(DATA_DIR, "counter_downloads")
 DEMO_DIR = os.path.join(APP_DIR, "demo_data")
 DEMO_CSV = os.path.join(DEMO_DIR, "demo_sites.csv")
 DEMO_EST = os.path.join(DEMO_DIR, "DemoDay.EST")
 
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(COUNTER_DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(VENDOR_DIR, exist_ok=True)
 
 DIRECTIONS = ["n", "e", "s", "w"]

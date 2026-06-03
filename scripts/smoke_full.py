@@ -135,6 +135,7 @@ def test_web_assets():
     check("pick letter labels", "siteDotLabel" in appjs and "pick_letters" in appjs)
     main_src = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
     check("pick route dropdown", "combo_pick_site" in main_src and "_on_pick_combo_chosen" in main_src)
+    check("pick order dialog", "RoutePickOrderDialog" in main_src and "_show_route_pick_dialog" in main_src)
     from core.picocount import build_unit_id, facing_n_or_e, protocol_doc_present
     check("picocount unit id", build_unit_id(1234, "e") == "1234ec1b")
     check("picocount facing", facing_n_or_e("s") == "n" and facing_n_or_e("w") == "e")

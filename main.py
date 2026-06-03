@@ -51,6 +51,7 @@ from ui.paths import (
     APP_DIR, COUNTER_DOWNLOAD_DIR, DATA_DIR, DEMO_CSV, DEMO_DIR, DEMO_EST, DIRECTIONS,
     UNDO_FIELDS, VENDOR_DIR, WEB_DIR,
 )
+from ui.route_pick_dialog import RoutePickOrderDialog
 from ui.threads import (
     DownloadRoadsThread, GeocodeThread, PicocountThread, RouteOptimizeThread, SmokeTestThread,
 )
@@ -82,6 +83,7 @@ class MainWindow(QMainWindow):
         self.excel_paths = [p for p in self.state.excel_paths if os.path.isfile(p)]
         self._route_pick_mode = False
         self._route_pick_uids: list[str] = []
+        self._route_pick_dialog: RoutePickOrderDialog | None = None
         self._picocount_thread = None
         self._counter_serial_grab_uid: str | None = None
         self.est_paths = [p for p in self.state.est_paths if os.path.isfile(p)]
@@ -728,8 +730,8 @@ class MainWindow(QMainWindow):
 
         sec_pick = section_group("Plan route (pick order)", v)
         self.lbl_pick_status = QLabel(
-            "Choose stop 1, 2, 3… from the dropdown (or tap blue/red dots on the map). "
-            "Letters A, B, C… on dots identify each street line.")
+            "Choose stop 1, 2, 3… from the dropdown or map. A Route order window lists "
+            "picks as you go — drag or Up/Down to fix order.")
         self.lbl_pick_status.setObjectName("hint")
         self.lbl_pick_status.setWordWrap(True)
         sec_pick.addWidget(self.lbl_pick_status)
@@ -756,6 +758,10 @@ class MainWindow(QMainWindow):
         row_pick.addWidget(self.btn_pick_clear)
         row_pick.addWidget(self.btn_pick_apply)
         sec_pick.addLayout(row_pick)
+        self.btn_pick_order_win = QPushButton("Show route order window")
+        self.btn_pick_order_win.setObjectName("secondary")
+        self.btn_pick_order_win.clicked.connect(self._show_route_pick_dialog)
+        sec_pick.addWidget(self.btn_pick_order_win)
 
         sec_map = section_group("Map", v)
         self.chk_show_segments = QCheckBox("Work-site lines (follow streets)")
@@ -2186,6 +2192,33 @@ class MainWindow(QMainWindow):
             return f"Site {s.get('id', '')}"
         return st
 
+    def _ensure_route_pick_dialog(self) -> RoutePickOrderDialog:
+        if self._route_pick_dialog is None:
+            dlg = RoutePickOrderDialog(self)
+            dlg.order_changed.connect(self._route_pick_set_order)
+            self._route_pick_dialog = dlg
+        return self._route_pick_dialog
+
+    def _show_route_pick_dialog(self) -> None:
+        dlg = self._ensure_route_pick_dialog()
+        if not dlg.isVisible():
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+
+    def _hide_route_pick_dialog(self) -> None:
+        if self._route_pick_dialog is not None:
+            self._route_pick_dialog.hide()
+
+    def _route_pick_set_order(self, uids: list[str]) -> None:
+        if not self._route_pick_mode:
+            return
+        by_uid = {s["uid"]: s for s in self.state.stops}
+        self._route_pick_uids = [u for u in uids if u in by_uid]
+        self._refresh_route_pick_ui(sync_dialog=False)
+        self._refresh_route_list()
+        self._push_state()
+
     def _begin_route_pick(self, stops: list[dict]) -> None:
         if not road_router.has_graph(DATA_DIR):
             msg = (
@@ -2206,12 +2239,13 @@ class MainWindow(QMainWindow):
         enrich_segment_paths(self.state.stops, DATA_DIR)
         self._go_page(1)
         self._refresh_route_pick_ui()
+        self._show_route_pick_dialog()
         self._refresh_route_list()
         self._push_state(fit=True)
         self.statusBar().showMessage(
-            f"Pick route: {self._pick_prompt_text()} — use dropdown or map dots.", 12000)
+            f"Pick route: {self._pick_prompt_text()} — map, dropdown, or Route order window.", 12000)
 
-    def _refresh_route_pick_ui(self) -> None:
+    def _refresh_route_pick_ui(self, *, sync_dialog: bool = True) -> None:
         if not hasattr(self, "lbl_pick_status"):
             return
         n = len(self._route_pick_uids)
@@ -2220,12 +2254,16 @@ class MainWindow(QMainWindow):
         self.btn_pick_apply.setEnabled(on and n > 0)
         self.btn_pick_auto.setEnabled(on and n < total)
         self.btn_pick_clear.setEnabled(on and n > 0)
+        if hasattr(self, "btn_pick_order_win"):
+            self.btn_pick_order_win.setEnabled(on)
         self._refresh_pick_site_combo()
         if not on:
             self.lbl_pick_status.setStyleSheet("")
             self.lbl_pick_status.setText(
                 "Route applied. Numbers on the map match drive order. "
                 "Re-plan with PLAN ROUTE on Setup.")
+            if sync_dialog:
+                self._hide_route_pick_dialog()
             return
         letters = self._pick_site_letters()
         self.lbl_pick_status.setStyleSheet(
@@ -2235,8 +2273,18 @@ class MainWindow(QMainWindow):
                 f"All {total} stops set. Tap Apply route.")
         else:
             self.lbl_pick_status.setText(
-                f"{self._pick_prompt_text()} — use the dropdown or map dots. "
+                f"{self._pick_prompt_text()} — map, dropdown, or Route order window. "
                 f"Apply / Auto-finish fills the rest on real streets.")
+        if sync_dialog and on and self._route_pick_dialog is not None:
+            by_uid = {s["uid"]: s for s in self.state.stops}
+            self._route_pick_dialog.sync_from_parent(
+                uids=list(self._route_pick_uids),
+                stops_by_uid=by_uid,
+                letters=letters,
+                street_label=self._street_label,
+                total=total,
+                prompt=self._pick_prompt_text(),
+            )
 
     def _refresh_pick_site_combo(self) -> None:
         if not hasattr(self, "combo_pick_site"):
@@ -2342,6 +2390,7 @@ class MainWindow(QMainWindow):
         self.state.route = res["route"]
         self._route_pick_mode = False
         self._route_pick_uids = []
+        self._hide_route_pick_dialog()
         self._persist_shift(quiet=True)
         self._refresh_route_list()
         self._refresh_route_pick_ui()
@@ -2369,6 +2418,7 @@ class MainWindow(QMainWindow):
     def _optimize_and_route(self, stops):
         self._route_pick_mode = False
         self._route_pick_uids = []
+        self._hide_route_pick_dialog()
         if not road_router.has_graph(DATA_DIR):
             msg = (
                 "Download the road map first (Setup tab → Download road map).\n\n"
@@ -2484,6 +2534,7 @@ class MainWindow(QMainWindow):
         else:
             self._route_pick_mode = False
             self._route_pick_uids = []
+            self._hide_route_pick_dialog()
             self._optimize_and_route(stops)
 
     def _stops_from_uploads_merged(self) -> list[dict] | None:
@@ -2549,6 +2600,7 @@ class MainWindow(QMainWindow):
         self._stop_drive()
         self._route_pick_mode = False
         self._route_pick_uids = []
+        self._hide_route_pick_dialog()
         self._undo_stack.clear()
         self._refresh_undo_ui()
         self.state.clear_shift(wipe_upload_paths=False)

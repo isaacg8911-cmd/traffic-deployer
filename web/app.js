@@ -294,11 +294,43 @@
     return [s.lat, s.lon];
   }
 
+  function siteLetterFromIndex(i) {
+    var n = i;
+    var letters = '';
+    while (true) {
+      letters = String.fromCharCode(65 + (n % 26)) + letters;
+      n = Math.floor(n / 26) - 1;
+      if (n < 0) break;
+    }
+    return letters;
+  }
+
   function stopSeqLabel(s, i, picking, pickIdx) {
     var seq = s.seq != null ? s.seq : (pickIdx[s.uid] || 0);
     if (picking && !seq) return '+';
     if (!seq) return String(i + 1);
     return String(seq);
+  }
+
+  function siteDotLabel(s, i, picking, pickLetters) {
+    if (picking) {
+      return (pickLetters && pickLetters[s.uid]) || siteLetterFromIndex(i);
+    }
+    return stopSeqLabel(s, i, false, {});
+  }
+
+  function updatePickBanner(state) {
+    var el = document.getElementById('pick-banner');
+    if (!el) return;
+    var picking = state.map_mode === 'pick';
+    var msg = state.pick_prompt || '';
+    if (picking && msg) {
+      el.textContent = msg;
+      el.style.display = 'block';
+    } else {
+      el.style.display = 'none';
+      el.textContent = '';
+    }
   }
 
   function renderState(state) {
@@ -332,6 +364,7 @@
     var pickOrder = state.pick_order || [];
     var pickIdx = {};
     pickOrder.forEach(function (uid, i) { pickIdx[uid] = i + 1; });
+    var pickLetters = state.pick_letters || {};
     var segs = [], pts = [], stops = [], installs = [];
     (state.stops || []).forEach(function (s, i) {
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
@@ -343,24 +376,28 @@
       } else {
         coords = [[bLon, bLat], [eLon, eLat]];
       }
-      var seqLabel = stopSeqLabel(s, i, picking, pickIdx);
-      segs.push({ type: 'Feature', properties: { seq: s.seq || (i + 1) },
+      var dotLabel = siteDotLabel(s, i, picking, pickLetters);
+      segs.push({ type: 'Feature', properties: { seq: picking ? dotLabel : (s.seq || (i + 1)) },
                   geometry: { type: 'LineString', coordinates: coords } });
-      pts.push(pt(bLat, bLon, { kind: 'begin', uid: s.uid, seq: seqLabel }));
-      pts.push(pt(eLat, eLon, { kind: 'end', uid: s.uid, seq: seqLabel }));
+      pts.push(pt(bLat, bLon, { kind: 'begin', uid: s.uid, seq: dotLabel }));
+      pts.push(pt(eLat, eLon, { kind: 'end', uid: s.uid, seq: dotLabel }));
       if (!driving && s.field_lat != null && s.field_lon != null) {
         installs.push(pt(s.field_lat, s.field_lon, { uid: s.uid }));
       }
-      if (showStops) {
+      if (showStops || (picking && pickIdx[s.uid])) {
         var anchor = stopAnchor(s);
         if (anchor[0] != null && anchor[1] != null) {
-          var seq = stopSeqLabel(s, i, picking, pickIdx);
-          stops.push(pt(anchor[0], anchor[1], {
-            uid: s.uid,
-            seq: seq,
-            status: stopStatus(s),
-            highlight: hiUid && s.uid === hiUid
-          }));
+          var seq = picking ? String(pickIdx[s.uid] || '') : stopSeqLabel(s, i, picking, pickIdx);
+          if (picking && !pickIdx[s.uid]) {
+            /* no anchor badge until site is picked */
+          } else {
+            stops.push(pt(anchor[0], anchor[1], {
+              uid: s.uid,
+              seq: seq,
+              status: stopStatus(s),
+              highlight: hiUid && s.uid === hiUid
+            }));
+          }
         }
       }
     });
@@ -381,6 +418,7 @@
     setLayerVis('stop-circle', showStops && stops.length > 0);
     setLayerVis('stop-label', showStops && stops.length > 0);
     setLayerVis('install-pts', installs.length > 0);
+    updatePickBanner(state);
 
     window.__dbg.applied++;
     window.__dbg.segCount = segs.length;

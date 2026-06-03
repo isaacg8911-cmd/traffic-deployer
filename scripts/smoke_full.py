@@ -131,6 +131,8 @@ def test_web_assets():
     check("stop marker source", "stop-markers" in appjs)
     check("numbered stop layers", "stop-label" in appjs and "stop-circle" in appjs)
     check("numbered site begin/end dots", "site-begin-label" in appjs and "site-end-label" in appjs)
+    check("pick route map banner", "pick-banner" in idx and "pick_prompt" in appjs)
+    check("pick letter labels", "siteDotLabel" in appjs and "pick_letters" in appjs)
     check("segment path on map", "segment_path" in appjs)
     check("no drive leg trace", "tdSetDriveLeg = function ()" in appjs)
     check("no turn-by-turn banner", "navbar" not in idx)

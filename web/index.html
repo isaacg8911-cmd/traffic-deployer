@@ -23,6 +23,7 @@
     .hudBtn.primary { background: #1976d2; color: #fff; }
     .hudBtn.primary.off { background: #555; color: #fff; }
     .hudBtn.zoom { font-size: 18px; line-height: 1; padding: 6px 0; }
+    .hudBtn.next { font-size: 11px; line-height: 1.2; padding: 8px 4px; }
     #compass {
       width: 100%; border-radius: 10px;
       background: rgba(255,255,255,.96); box-shadow: 0 2px 8px rgba(0,0,0,.3);
@@ -58,6 +59,7 @@
       font: 700 15px/1.35 system-ui, sans-serif; text-align: center;
       box-shadow: 0 4px 16px rgba(0,0,0,.35); pointer-events: none;
     }
+    body.td-manual-grab #map { cursor: crosshair; }
   </style>
 </head>
 <body>
@@ -73,14 +75,15 @@
       <div id="compass-mode">GPS compass</div>
     </div>
     <button type="button" id="zoom-in" class="hudBtn zoom" title="Zoom in">+</button>
-    <button type="button" id="zoom-out" class="hudBtn zoom" title="Zoom out">−</button>
+    <button type="button" id="zoom-out" class="hudBtn zoom" title="Zoom out (works while Following)">−</button>
+    <button type="button" id="next-site-btn" class="hudBtn next" title="Zoom to show you and the next stop">Next site</button>
     <button type="button" id="follow-btn" class="hudBtn primary">Follow Me</button>
   </div>
 
   <script src="./vendor/maplibre-gl.js"></script>
   <script src="./vendor/pmtiles.js"></script>
   <script src="./vendor/qwebchannel.js"></script>
-  <script src="./style.js?v=18"></script>
-  <script src="./app.js?v=19"></script>
+  <script src="./style.js?v=19"></script>
+  <script src="./app.js?v=22"></script>
 </body>
 </html>

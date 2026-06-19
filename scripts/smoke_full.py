@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import os
 import sys
 import tempfile
@@ -39,7 +40,6 @@ def test_imports():
     import main
     import persistence
     import road_router
-    import voice_nav
     from version import APP_NAME, APP_VERSION
     check("core modules", True)
     check("version", APP_NAME == "Traffic Deployer" and APP_VERSION)
@@ -127,6 +127,53 @@ def test_export():
     check("export dir exists", os.path.isdir(export.export_dir(DATA_DIR)))
 
 
+def test_maps_links():
+    print("[maps links]")
+    from core import maps_links
+    stops = [
+        {"id": "101", "street": "Main St", "cross_lat": 33.771, "cross_lon": -117.941},
+        {"id": "102", "street": "Oak Ave", "lat": 33.78, "lon": -117.95},
+    ]
+    links, errs = maps_links.build_route_links(stops)
+    check("route links count", len(links) == 2 and not errs)
+    check("google maps url", "google.com/maps/dir" in links[0]["url"])
+    check("uses cross coords", "33.771000" in links[0]["url"])
+    txt = maps_links.to_plain_text(links, profile="WEEK9")
+    check("plain text links", "Site 101" in txt and links[0]["url"] in txt)
+    html_out = maps_links.to_html(links, profile="WEEK9", miles=12.5)
+    check("html tap links", "<a href=" in html_out and "travelmode=driving" in html_out)
+    path = maps_links.default_links_path(DATA_DIR, "SMOKE", kind="install")
+    check("links default path", path.endswith(".html") and "exports" in path and "_Install" in path)
+    pickup_stops = [
+        {"uid": "a", "id": "1", "installed": True, "exact_time": "2026-06-10 14:00:00",
+         "lat": 33.77, "lon": -117.94},
+        {"uid": "b", "id": "2", "installed": True, "exact_time": "2026-06-10 09:00:00",
+         "lat": 33.78, "lon": -117.95},
+    ]
+    ordered = maps_links.pickup_sequence_stops(pickup_stops)
+    check("pickup install order", ordered[0]["id"] == "2" and ordered[1]["id"] == "1")
+    main_src = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    check(
+        "phone nav wired",
+        "_save_install_nav_links" in main_src and "_save_pickup_nav_links" in main_src,
+    )
+    from core import export
+    row = {
+        "Site": 15096, "Street": "DALTON SPRINGS LN", "ExactTime": "2026-06-17 07:58:09",
+        "CrossLAT": 34.152524, "CrossLON": -117.838683, "LAT": 34.152208, "LON": -117.838765,
+        "Installed": "x",
+    }
+    stop = export.stop_from_report_row(row, "Week 14 Day 2 Isaac")
+    check("report row -> stop", stop and stop["installed"] and stop["id"] == "15096")
+    ordered = maps_links.pickup_sequence_stops([
+        stop,
+        export.stop_from_report_row({
+            **row, "Site": 15092, "ExactTime": "2026-06-17 08:11:43",
+        }, "Week 14 Day 2 Isaac"),
+    ])
+    check("report pickup order", ordered and ordered[0]["id"] == "15096")
+
+
 def test_demo_data():
     print("[demo data]")
     demo_csv = os.path.join(ROOT, "demo_data", "demo_sites.csv")
@@ -147,32 +194,148 @@ def test_web_assets():
     appjs = open(os.path.join(WEB_DIR, "app.js"), encoding="utf-8").read()
     idx = open(os.path.join(WEB_DIR, "index.html"), encoding="utf-8").read()
     check("style glyphs", "glyphs:" in style)
-    check("style buildings", "buildings-fill" in style)
+    check("local street labels to max zoom", "road-label-local" in style and "maxzoom: MAX_Z + 1" in style)
+    check("lean labels optional", "text-optional': true" in style)
     check("no address clutter", "address-labels" not in style)
     check("follow street zoom", "FOLLOW_ZOOM = 13" in appjs)
+    check("gps bridge throttle", "GPS_TICK_MS" in open(
+        os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read())
+    sm_src = open(os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read()
+    check("battery saver timing", "BATTERY_GPS_TICK_MS" in sm_src and "timing_profile" in sm_src)
+    from core import power as laptop_power
+    from ui.simple_mode import timing_profile
+    snap = laptop_power.read_power()
+    check("power read", isinstance(snap.label, str))
+    saver = timing_profile(on_ac=False, gps_follow=True)
+    full = timing_profile(on_ac=True, gps_follow=True)
+    check("battery slower gps", saver["gps_tick_ms"] > full["gps_tick_ms"])
+    check("lean gps render", "jumpTo" in appjs and "_gpsAnimId" not in appjs)
+    check("lean drive path", "applyLeanDriveData" in appjs and "lean_drive" in appjs)
+    check("lean hides basemap detail", "LEAN_BASE_LAYERS" in appjs)
+    check("follow zoom not locked", "zoom: map.getZoom()" in appjs)
+    check("next site frame button", "next-site-btn" in idx and "__tdFrameNextSite" in appjs)
     check("stop marker source", "stop-markers" in appjs)
     check("numbered stop layers", "stop-label" in appjs and "stop-circle" in appjs)
     check("numbered site begin/end dots", "site-begin-label" in appjs and "site-end-label" in appjs)
     check("pick route map banner", "pick-banner" in idx and "pick_prompt" in appjs)
     check("pick letter labels", "siteDotLabel" in appjs and "pick_letters" in appjs)
-    main_src = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    check("pick target dots", "pick-target-circle" in appjs and "pick-targets" in appjs)
+    def _shell_src() -> str:
+        chunks = [open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()]
+        pages = os.path.join(ROOT, "ui", "pages")
+        if os.path.isdir(pages):
+            for name in sorted(os.listdir(pages)):
+                if name.endswith(".py"):
+                    chunks.append(open(os.path.join(pages, name), encoding="utf-8").read())
+        return "\n".join(chunks)
+
+    main_src = _shell_src()
+    check("power poll wired", "_poll_power" in main_src and "status_power" in main_src)
+    check("close stops workers", "closeEvent" in main_src and "_stop_worker(getattr" in main_src)
+    check("gps timer starts", "gps_timer.start" in main_src)
     check("pick route dropdown", "combo_pick_site" in main_src and "_on_pick_combo_chosen" in main_src)
+    check("pick map click nearest", "_nearest_unpicked_stop" in main_src and "_on_map_clicked" in main_src)
     check("pick order dialog", "RoutePickOrderDialog" in main_src and "_show_route_pick_dialog" in main_src)
+    dlg_src = open(os.path.join(ROOT, "ui", "route_pick_dialog.py"), encoding="utf-8").read()
+    check("pick dialog apply button", "apply_requested" in dlg_src and "btn_apply" in dlg_src)
+    check("apply pick thread", "RouteApplyPickThread" in open(os.path.join(ROOT, "ui", "threads.py"), encoding="utf-8").read())
+    import subprocess
+    proc = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "scripts", "test_ui_wiring.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    check("ui wiring audit", proc.returncode == 0, (proc.stdout or proc.stderr or "")[-400:])
     from core.picocount import (
-        build_unit_id, facing_n_or_e, preferred_counter_port, protocol_doc_present,
+        build_unit_id, counter_ports_labeled, facing_n_or_e, preferred_counter_port,
+        protocol_doc_present,
     )
     check("picocount unit id", build_unit_id(1234, "e") == "1234ec1b")
     check("picocount facing", facing_n_or_e("s") == "n" and facing_n_or_e("w") == "e")
+    from core import direction as direction_rules
+    seg = direction_rules.infer_from_segment(33.0, -118.0, 33.001, -118.0)
+    check("direction segment ns", seg["direction"] == "n" and seg["source"] == "segment")
+    seg_ew = direction_rules.infer_from_segment(33.0, -118.0, 33.0, -117.99)
+    check("direction segment ew", seg_ew["direction"] == "e")
+    short = direction_rules.infer_from_segment(33.0, -118.0, 33.0, -118.0)
+    check("direction short segment", short["direction"] is None and short["source"] == "needs_gps")
+    from core.picocount import summarize_memory
+    empty = summarize_memory({"page_size": 2048, "block_pages": 64, "block_ptr": 0, "page_ptr": 0, "buffer_ptr": 0})
+    check("counter memory empty", empty.get("empty") and empty.get("bytes") == 0)
+    check("picocount UI autoname", "btn_counter_autoname" in main_src and "_counter_autoname" in main_src)
+    check("counter data label", "lbl_counter_data" in main_src and "_counter_show_memory" in main_src)
+    check("counter connected pill", "counterConnectedPill" in main_src and "_set_counter_connected_ui" in main_src)
+    check("install counter excel sync", "_sync_counter_fields" in main_src)
+    from core.export import _row
+    ex = _row({
+        "installed": True, "id": "1234", "sheet": "Mon", "street": "Main St",
+        "serial": "PC250012", "direction": "n", "lanes": 2,
+        "counter_unit_id": "1234nc1b", "counter_serial": "PC250012",
+        "date": "2026-06-09", "exact_time": "12:00",
+    })
+    check("export install serial", ex["Serial"] == "PC250012" and ex["CounterSerial"] == "PC250012")
+    check("install checklist", "installChecklist" in main_src and "_refresh_install_checklist" in main_src)
+    from core import install_checklist as ic
+    items = ic.checklist_for_stop({
+        "field_lat": 33.0, "field_lon": -118.0,
+        "counter_cleared_at": "12:00", "serial": "PC99",
+    })
+    check("checklist all ready", ic.all_ready(items))
+    dup = ic.find_duplicate_serial(
+        [{"uid": "a", "serial": "PC99"}, {"uid": "b", "serial": "PC99"}],
+        "a", "PC99",
+    )
+    check("duplicate serial detect", dup is not None and dup["uid"] == "b")
+    check("no install photo ui", "Attach photo" not in main_src and "_attach_install_photo" not in main_src)
+    from core import field_alerts as fa
+    check("pickup reminder", fa.pending_download_count([
+        {"installed": True, "counter_unit_id": "1234nc1b"},
+    ]) == 1)
+    check("shift closed", fa.shift_closed([{"installed": True}, {"skipped": True}]))
+    from core import install_checklist as ic2
+    check("install block reason", ic2.install_block_reason({}) is not None)
+    uid_dup = ic2.find_duplicate_unit_id(
+        [{"uid": "a", "counter_unit_id": "1234nc1b"}, {"uid": "b", "counter_unit_id": "1234nc1b"}],
+        "a", "1234nc1b",
+    )
+    check("duplicate unit id", uid_dup is not None and uid_dup["uid"] == "b")
+    check("auto counter connect", "_counter_auto_connect" in main_src)
+    check("export nudge", "_maybe_export_nudge" in main_src)
+    check("pickup reminder ui", "lbl_pickup_reminder" in main_src)
     check("picocount protocol pdf", protocol_doc_present())
     check("picocount preferred port helper", callable(preferred_counter_port))
+    check("picocount counter port filter", callable(counter_ports_labeled))
+    check("field crash log hook", "install_crash_logging" in main_src)
+    check("map guide line off", '"show_guide": False' in main_src)
+    check("launch maximized", "showMaximized" in main_src)
+    from core.picocount import is_gps_port, is_counter_port
+    pc_src = open(os.path.join(ROOT, "core", "picocount.py"), encoding="utf-8").read()
+    check("counter skips gps in probe", "_is_gps_port" in pc_src and "not _is_gps_port" in pc_src)
+    check("counter port helpers", callable(is_gps_port) and callable(is_counter_port))
     check("picocount UI wired", "btn_counter_clear" in main_src and "PicocountThread" in main_src)
+    check("counter refresh connect", "btn_counter_refresh" in main_src and "_counter_refresh_and_connect" in main_src)
+    check("counter gps pause", "_counter_pause_gps" in main_src and "_counter_resume_gps" in main_src)
     check("counter status chip", "counterStatus" in main_src and "apply_counter_status" in main_src)
     from core import export
     check("export counter columns", "CounterUnitID" in export._EXPORT_COLS)
     from core import map_display
     check("map_display manual order", hasattr(map_display, "apply_manual_order"))
     check("segment path on map", "segment_path" in appjs)
-    check("no drive leg trace", "tdSetDriveLeg = function ()" in appjs)
+    check("drive leg trace", "next_leg" in appjs and "build_site_legs" in open(os.path.join(ROOT, "core", "routing.py")).read())
+    check("drive highlight", "__tdSetDriveHighlight" in appjs and "_next_leg_payload" in main_src)
+    check("gps follow mode", "_gps_follow" in main_src and "btn_drive_arrived" in main_src)
+    import main as main_mod
+    grab_src = inspect.getsource(main_mod.MainWindow._grab_gps_here)
+    commit_src = inspect.getsource(main_mod.MainWindow._commit_install)
+    check("grab gps no blocking scan", "get_fix" not in grab_src and "fix_from_snapshot" in grab_src)
+    check("manual grab map mode", "_manual_grab_mode" in main_src and "manual_grab" in appjs)
+    check("manual grab save helper", "_save_field_position" in main_src)
+    check("install persist on commit", "_persist_shift(quiet=True)" in commit_src and "saved locally" in commit_src)
+    check("route on map plan", "_route_for_map(preview" in main_src)
+    from ui.simple_mode import BUILD_LABEL, SIMPLE_MODE
+    check("simple mode default", SIMPLE_MODE)
+    check("simple build label", BUILD_LABEL == "BUILD ROUTE")
     check("no turn-by-turn banner", "navbar" not in idx)
     for rel in ("vendor/maplibre-gl.js", "vendor/pmtiles.js", "style.js", "app.js"):
         check(f"file {rel}", os.path.isfile(os.path.join(WEB_DIR, rel)))
@@ -261,7 +424,7 @@ def test_routing():
 def test_field_ready():
     print("[field readiness]")
     from core.field_ready import check_all
-    r = check_all(ROOT, probe_gps=False, stop_server_after=True)
+    r = check_all(ROOT, probe_gps=False, probe_counter=False, stop_server_after=True)
     check("field_ready score", r["score"] >= 82, f"score={r['score']}")
     check("basemap ok", any(i["id"] == "basemap" and i["ok"] for i in r["items"]))
     check("map server ok", any(i["id"] == "server" and i["ok"] for i in r["items"]))
@@ -310,16 +473,15 @@ def test_offline_no_internet():
         offline_policy.set_field_mode(False)
 
 
-def test_voice_offline_gate():
-    print("[voice / offline gate]")
-    import voice_nav
+def test_offline_gate():
+    print("[offline gate]")
     from core.offline_gate import evaluate as offline_gate_eval
-    check("voice module", voice_nav.tts_available() or bool(voice_nav.tts_error()))
     r = {"items": [], "field_ready": True}
     g = offline_gate_eval(r, has_stops=True, route_miles=0, graph_loaded=True)
     check("offline gate blocks no route", not g["ok"] and g["blockers"])
     g2 = offline_gate_eval(r, has_stops=True, route_miles=12.5, graph_loaded=True)
     check("offline gate ok with route", g2["ok"])
+    check("no voice module", not os.path.isfile(os.path.join(ROOT, "voice_nav.py")))
 
 
 def main() -> int:
@@ -330,6 +492,7 @@ def main() -> int:
     test_validate_merge()
     test_persistence()
     test_export()
+    test_maps_links()
     test_demo_data()
     test_web_assets()
     test_local_server()
@@ -340,7 +503,7 @@ def main() -> int:
     test_golden_routes()
     test_offline_session_script()
     test_offline_no_internet()
-    test_voice_offline_gate()
+    test_offline_gate()
     print()
     if FAILURES:
         print(f"SMOKE FAILED ({len(FAILURES)}):")

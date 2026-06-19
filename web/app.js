@@ -17,6 +17,7 @@
   var pmtilesUrl = origin + '/data/california.pmtiles';
   var MAX_ZOOM = 15;
   var FOLLOW_ZOOM = 13;
+  var FOLLOW_ZOOM_MIN = 8;
 
   var map = new maplibregl.Map({
     container: 'map',
@@ -24,9 +25,11 @@
     center: [-117.9431, 33.7715],
     zoom: 11,
     maxZoom: MAX_ZOOM,
+    renderWorldCopies: false,
     attributionControl: { compact: true },
     fadeDuration: 0,
-    refreshExpiredTiles: false
+    refreshExpiredTiles: false,
+    maxTileCacheSize: 64
   });
   window._map = map;
   window.__mapLoaded = false;
@@ -54,10 +57,14 @@
   var homeMarker = null;
   var gpsMarker = null;
   var lastState = null;
+  var _lastHomeKey = '';
+  var _leanDrive = false;
+  var LEAN_BASE_LAYERS = ['landuse', 'roads-all', 'roads-major'];
 
   var followBtn = document.getElementById('follow-btn');
   var zoomInBtn = document.getElementById('zoom-in');
   var zoomOutBtn = document.getElementById('zoom-out');
+  var nextSiteBtn = document.getElementById('next-site-btn');
   var compassNeedle = document.getElementById('compass-needle');
   var compassReadout = document.getElementById('compass-readout');
   var compassMode = document.getElementById('compass-mode');
@@ -102,8 +109,47 @@
   }
   if (zoomOutBtn) {
     zoomOutBtn.addEventListener('click', function () {
-      map.zoomTo(Math.max(map.getZoom() - 1, 3), { duration: 200 });
+      map.zoomTo(Math.max(map.getZoom() - 1, FOLLOW_ZOOM_MIN), { duration: 200 });
     });
+  }
+
+  function nextDriveStop(state) {
+    if (!state || !state.stops || !state.stops.length) return null;
+    var uid = state.drive_target_uid || state.highlight_uid;
+    if (uid) {
+      for (var i = 0; i < state.stops.length; i++) {
+        if (state.stops[i].uid === uid) return state.stops[i];
+      }
+    }
+    for (var j = 0; j < state.stops.length; j++) {
+      var s = state.stops[j];
+      if (!s.installed && !s.skipped) return s;
+    }
+    return state.stops[0];
+  }
+
+  function frameNextSite() {
+    if (!lastState) return;
+    var target = nextDriveStop(lastState);
+    var anchor = target ? stopAnchor(target) : null;
+    if (!anchor) return;
+    var b = new maplibregl.LngLatBounds();
+    b.extend([anchor[1], anchor[0]]);
+    if (_gpsDisplay && _gpsDisplay.lat != null) {
+      b.extend([_gpsDisplay.lon, _gpsDisplay.lat]);
+    } else if (lastState.home) {
+      b.extend([lastState.home[1], lastState.home[0]]);
+    }
+    map.fitBounds(b, {
+      padding: { top: 80, bottom: 140, left: 80, right: 120 },
+      duration: 650,
+      maxZoom: FOLLOW_ZOOM,
+      linear: false
+    });
+  }
+
+  if (nextSiteBtn) {
+    nextSiteBtn.addEventListener('click', frameNextSite);
   }
 
   function emptyFC() { return { type: 'FeatureCollection', features: [] }; }
@@ -129,6 +175,12 @@
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
   }
 
+  var BASE_LABEL_LAYERS = ['road-label-hwy', 'road-label-major', 'road-label-local'];
+
+  function setBasemapLabels(on) {
+    BASE_LABEL_LAYERS.forEach(function (id) { setLayerVis(id, on); });
+  }
+
   var STOP_STATUS_COLOR = [
     'case',
     ['==', ['get', 'status'], 'installed'], '#1b5e20',
@@ -137,8 +189,38 @@
     '#c45f14'
   ];
 
-  function fireStopClick(uid) {
-    if (uid) window.location.href = 'tdstop://' + encodeURIComponent(uid);
+  function fireStopClick(payload) {
+    if (!payload) return;
+    if (bridge && typeof bridge.onStopClick === 'function') {
+      try {
+        bridge.onStopClick(payload);
+        return;
+      } catch (e) { /* fall through to tdstop:// */ }
+    }
+    window.location.href = 'tdstop://' + encodeURIComponent(payload);
+  }
+
+  var PICK_CLICK_LAYERS = [
+    'pick-target-circle', 'pick-target-label',
+    'stop-circle', 'stop-label',
+    'site-begin', 'site-end', 'site-begin-label', 'site-end-label'
+  ];
+
+  function pickLayerAtPoint(point) {
+    var layers = PICK_CLICK_LAYERS.filter(function (id) { return map.getLayer(id); });
+    if (!layers.length) return null;
+    var features = map.queryRenderedFeatures(point, { layers: layers });
+    for (var i = 0; i < features.length; i++) {
+      var props = features[i].properties || {};
+      var uid = props.uid;
+      if (!uid) continue;
+      var kind = props.kind;
+      if (kind === 'begin' || kind === 'end') {
+        return String(uid) + '|' + kind;
+      }
+      return String(uid);
+    }
+    return null;
   }
 
   function bindStopClicks() {
@@ -148,7 +230,12 @@
       var f = e.features && e.features[0];
       if (f && f.properties && f.properties.uid) {
         e.preventDefault();
-        fireStopClick(f.properties.uid);
+        var kind = f.properties.kind;
+        var payload = f.properties.uid;
+        if (kind === 'begin' || kind === 'end') {
+          payload = payload + '|' + kind;
+        }
+        fireStopClick(payload);
       }
     }
     map.on('click', 'stop-circle', onPick);
@@ -156,7 +243,10 @@
     map.on('click', 'site-end', onPick);
     map.on('click', 'site-begin-label', onPick);
     map.on('click', 'site-end-label', onPick);
-    ['stop-circle', 'site-begin', 'site-end', 'site-begin-label', 'site-end-label'].forEach(function (id) {
+    map.on('click', 'pick-target-circle', onPick);
+    map.on('click', 'pick-target-label', onPick);
+    ['stop-circle', 'site-begin', 'site-end', 'site-begin-label', 'site-end-label',
+      'pick-target-circle', 'pick-target-label'].forEach(function (id) {
       map.on('mouseenter', id, function () { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', id, function () { map.getCanvas().style.cursor = ''; });
     });
@@ -191,7 +281,8 @@
         paint: {
           'line-color': '#5e35b1',
           'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 3.5, 15, 4.5],
-          'line-opacity': 0.88
+          'line-opacity': 0.88,
+          'line-dasharray': [3, 2]
         } });
     }
     if (!map.getSource('site-pts')) {
@@ -268,6 +359,31 @@
         } });
       bindStopClicks();
     }
+    if (!map.getSource('pick-targets')) {
+      map.addSource('pick-targets', { type: 'geojson', data: emptyFC() });
+      map.addLayer({ id: 'pick-target-circle', type: 'circle', source: 'pick-targets',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 16, 14, 22, 15, 26],
+          'circle-color': '#f57c00',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 3,
+          'circle-opacity': 0.96
+        } });
+      map.addLayer({ id: 'pick-target-label', type: 'symbol', source: 'pick-targets',
+        layout: {
+          'text-field': ['get', 'label'],
+          'text-font': ['Noto Sans Regular'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 15, 15, 16],
+          'text-allow-overlap': true,
+          'text-ignore-placement': true
+        },
+        paint: {
+          'text-color': '#ffffff',
+          'text-halo-color': 'rgba(15,39,68,0.45)',
+          'text-halo-width': 1.2
+        } });
+      bindStopClicks();
+    }
     if (!map.getSource('install-pts')) {
       map.addSource('install-pts', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'install-pts', type: 'circle', source: 'install-pts',
@@ -280,7 +396,33 @@
     }
   }
 
-  function applyMapMode() { /* route/trace layers removed */ }
+  function applyMapMode(mode, lean) {
+    var drive = mode === 'drive';
+    var pick = mode === 'pick';
+    lean = !!lean;
+    _leanDrive = lean;
+    setBasemapLabels(!drive && !lean);
+    LEAN_BASE_LAYERS.forEach(function (id) { setLayerVis(id, !lean); });
+    var segW = drive
+      ? ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2.5]
+      : ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4];
+    var ptR = drive
+      ? ['interpolate', ['linear'], ['zoom'], 10, 2.5, 14, 4]
+      : pick
+        ? ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 14, 15, 16]
+        : ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 8, 15, 9];
+    var casingW = drive
+      ? ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 11]
+      : ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 12];
+    var lineW = drive
+      ? ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 7]
+      : ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 7];
+    if (map.getLayer('segments-line')) map.setPaintProperty('segments-line', 'line-width', segW);
+    if (map.getLayer('site-begin')) map.setPaintProperty('site-begin', 'circle-radius', ptR);
+    if (map.getLayer('site-end')) map.setPaintProperty('site-end', 'circle-radius', ptR);
+    if (map.getLayer('route-casing')) map.setPaintProperty('route-casing', 'line-width', casingW);
+    if (map.getLayer('route-line')) map.setPaintProperty('route-line', 'line-width', lineW);
+  }
 
   function stopStatus(s) {
     if (s.installed) return 'installed';
@@ -323,11 +465,15 @@
     var el = document.getElementById('pick-banner');
     if (!el) return;
     var picking = state.map_mode === 'pick';
+    var manualGrab = state.map_mode === 'manual_grab';
     var msg = state.pick_prompt || '';
-    if (picking && msg) {
-      el.textContent = msg;
+    document.body.classList.toggle('td-manual-grab', manualGrab);
+    if ((picking || manualGrab) && msg) {
+      var waiting = state.pick_waiting || '';
+      el.textContent = waiting ? (msg + ' — ' + waiting) : msg;
       el.style.display = 'block';
     } else {
+      document.body.classList.remove('td-manual-grab');
       el.style.display = 'none';
       el.textContent = '';
     }
@@ -342,7 +488,45 @@
     applyData(state);
   }
 
+  function applyLeanDriveData(state) {
+    if (homeMarker) { homeMarker.remove(); homeMarker = null; }
+    applyMapMode('drive', true);
+    var nextLeg = state.next_leg || null;
+    var legPoly = (nextLeg && nextLeg.polyline) || [];
+    var showNextLeg = !!state.show_guide && legPoly.length >= 2;
+    if (map.getSource('route')) {
+      map.getSource('route').setData(
+        showNextLeg ? routeLineFC(legPoly, true) : emptyFC());
+      setLayerVis('route-casing', false);
+      setLayerVis('route-line', showNextLeg);
+    }
+    var empty = emptyFC();
+    if (map.getSource('segments')) map.getSource('segments').setData(empty);
+    if (map.getSource('site-pts')) map.getSource('site-pts').setData(empty);
+    if (map.getSource('stop-markers')) map.getSource('stop-markers').setData(empty);
+    if (map.getSource('pick-targets')) map.getSource('pick-targets').setData(empty);
+    if (map.getSource('install-pts')) map.getSource('install-pts').setData(empty);
+    setLayerVis('segments-line', false);
+    setLayerVis('site-begin', false);
+    setLayerVis('site-end', false);
+    setLayerVis('site-begin-label', false);
+    setLayerVis('site-end-label', false);
+    setLayerVis('pick-target-circle', false);
+    setLayerVis('pick-target-label', false);
+    setLayerVis('stop-circle', false);
+    setLayerVis('stop-label', false);
+    setLayerVis('install-pts', false);
+    updatePickBanner(state);
+    window.__dbg.applied++;
+  }
+
   function applyData(state) {
+    var lean = !!state.lean_drive;
+    var homeKey = state.home ? state.home[0] + ',' + state.home[1] : '';
+    if (lean) {
+      applyLeanDriveData(state);
+      return;
+    }
     if (homeMarker) { homeMarker.remove(); homeMarker = null; }
     if (state.home) {
       var hel = document.createElement('div');
@@ -353,9 +537,10 @@
       homeMarker = new maplibregl.Marker({ element: hel, anchor: 'bottom' })
         .setLngLat([state.home[1], state.home[0]]).addTo(map);
     }
+    _lastHomeKey = homeKey;
 
     var mode = state.map_mode || (state.driving ? 'drive' : 'plan');
-    applyMapMode(mode);
+    applyMapMode(mode, false);
 
     var driving = !!state.driving;
     var picking = state.map_mode === 'pick';
@@ -365,7 +550,7 @@
     var pickIdx = {};
     pickOrder.forEach(function (uid, i) { pickIdx[uid] = i + 1; });
     var pickLetters = state.pick_letters || {};
-    var segs = [], pts = [], stops = [], installs = [];
+    var segs = [], pts = [], stops = [], installs = [], pickTargets = [];
     (state.stops || []).forEach(function (s, i) {
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
       if (bLat == null || bLon == null || eLat == null || eLon == null) return;
@@ -377,10 +562,13 @@
         coords = [[bLon, bLat], [eLon, eLat]];
       }
       var dotLabel = siteDotLabel(s, i, picking, pickLetters);
+      var alreadyPicked = picking && pickIdx[s.uid];
       segs.push({ type: 'Feature', properties: { seq: picking ? dotLabel : (s.seq || (i + 1)) },
                   geometry: { type: 'LineString', coordinates: coords } });
-      pts.push(pt(bLat, bLon, { kind: 'begin', uid: s.uid, seq: dotLabel }));
-      pts.push(pt(eLat, eLon, { kind: 'end', uid: s.uid, seq: dotLabel }));
+      if (!alreadyPicked) {
+        pts.push(pt(bLat, bLon, { kind: 'begin', uid: s.uid, seq: dotLabel }));
+        pts.push(pt(eLat, eLon, { kind: 'end', uid: s.uid, seq: dotLabel }));
+      }
       if (!driving && s.field_lat != null && s.field_lon != null) {
         installs.push(pt(s.field_lat, s.field_lon, { uid: s.uid }));
       }
@@ -404,19 +592,32 @@
     map.getSource('segments').setData({ type: 'FeatureCollection', features: segs });
     map.getSource('site-pts').setData({ type: 'FeatureCollection', features: pts });
     map.getSource('stop-markers').setData({ type: 'FeatureCollection', features: stops });
+    if (map.getSource('pick-targets')) {
+      map.getSource('pick-targets').setData({ type: 'FeatureCollection', features: pickTargets });
+    }
     if (map.getSource('install-pts')) map.getSource('install-pts').setData({ type: 'FeatureCollection', features: installs });
-    if (map.getSource('route')) map.getSource('route').setData(emptyFC());
 
-    var showSegs = state.show_segments !== false;
-    setLayerVis('route-casing', false);
-    setLayerVis('route-line', false);
+    var showGuide = !!state.show_guide;
+    var showSegs = state.show_segments !== false && !driving;
+    var hasSites = (state.stops || []).length > 0;
+    var nextLeg = state.next_leg || null;
+    var legPoly = (nextLeg && nextLeg.polyline) || [];
+    var showNextLeg = showGuide && legPoly.length >= 2;
+    if (map.getSource('route')) {
+      map.getSource('route').setData(
+        showNextLeg ? routeLineFC(legPoly, true) : emptyFC());
+      setLayerVis('route-casing', showNextLeg);
+      setLayerVis('route-line', showNextLeg);
+    }
     setLayerVis('segments-line', showSegs);
-    setLayerVis('site-begin', showSegs || picking);
-    setLayerVis('site-end', showSegs || picking);
-    setLayerVis('site-begin-label', showSegs || picking);
-    setLayerVis('site-end-label', showSegs || picking);
-    setLayerVis('stop-circle', showStops && stops.length > 0);
-    setLayerVis('stop-label', showStops && stops.length > 0);
+    setLayerVis('site-begin', hasSites);
+    setLayerVis('site-end', hasSites);
+    setLayerVis('site-begin-label', hasSites);
+    setLayerVis('site-end-label', hasSites);
+    setLayerVis('pick-target-circle', false);
+    setLayerVis('pick-target-label', false);
+    setLayerVis('stop-circle', (showStops || picking) && stops.length > 0);
+    setLayerVis('stop-label', (showStops || picking) && stops.length > 0);
     setLayerVis('install-pts', installs.length > 0);
     updatePickBanner(state);
 
@@ -434,8 +635,13 @@
       var a = stopAnchor(s);
       if (a[0] != null) { b.extend([a[1], a[0]]); any = true; }
     });
-    var poly = (state.route && state.route.polyline) || [];
-    poly.forEach(function (p) { b.extend([p[1], p[0]]); any = true; });
+    var nextLeg = state.next_leg || null;
+    var legPoly = (nextLeg && nextLeg.polyline) || [];
+    legPoly.forEach(function (p) { b.extend([p[1], p[0]]); any = true; });
+    if (!legPoly.length) {
+      var poly = (state.route && state.route.polyline) || [];
+      poly.forEach(function (p) { b.extend([p[1], p[0]]); any = true; });
+    }
     if (state.home) { b.extend([state.home[1], state.home[0]]); any = true; }
     if (!any || b.isEmpty()) return;
     requestAnimationFrame(function () {
@@ -447,34 +653,36 @@
 
   function renderGps(g) {
     if (!g) return;
-    updateCompass(g);
+    if (!_leanDrive) updateCompass(g);
     if (g.lat == null) return;
     if (!gpsMarker) {
       var el = document.createElement('div');
-      el.innerHTML =
-        '<svg width="22" height="22" viewBox="0 0 30 30">' +
-        '<circle cx="15" cy="15" r="7" fill="#1e88e5" stroke="#fff" stroke-width="2.5"/>' +
-        '<polygon points="15,2 19,11 11,11" fill="#1e88e5" stroke="#fff" stroke-width="1"/></svg>';
-      gpsMarker = new maplibregl.Marker({ element: el }).setLngLat([g.lon, g.lat]).addTo(map);
+      el.style.width = '12px';
+      el.style.height = '12px';
+      el.style.borderRadius = '50%';
+      el.style.background = '#43a047';
+      el.style.border = '2px solid #fff';
+      el.style.boxShadow = '0 0 2px rgba(0,0,0,0.35)';
+      gpsMarker = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([g.lon, g.lat]).addTo(map);
     } else {
       gpsMarker.setLngLat([g.lon, g.lat]);
     }
-    if (g.heading != null) {
-      var svg = gpsMarker.getElement().querySelector('svg');
-      if (svg) svg.style.transform = 'rotate(' + g.heading + 'deg)';
-    }
     if (follow) {
-      map.easeTo({
-        center: [g.lon, g.lat],
-        duration: 320,
-        zoom: Math.min(MAX_ZOOM, Math.max(map.getZoom(), FOLLOW_ZOOM))
-      });
+      map.jumpTo({ center: [g.lon, g.lat], zoom: map.getZoom() });
     }
   }
 
   function renderNav() { /* turn-by-turn banner removed — map + status bar only */ }
 
-  map.on('click', function (e) { if (bridge) bridge.onMapClick(e.lngLat.lat, e.lngLat.lng); });
+  map.on('click', function (e) {
+    var payload = pickLayerAtPoint(e.point);
+    if (payload) {
+      fireStopClick(payload);
+      return;
+    }
+    if (bridge) bridge.onMapClick(e.lngLat.lat, e.lngLat.lng);
+  });
 
   function safe(fn, tag) {
     return function (j) {
@@ -516,7 +724,22 @@
     map.flyTo({ center: [lon, lat], zoom: z, duration: 600 });
   };
   window.__tdSetFollow = setFollow;
-  window.__tdSetDriveLeg = function () { /* blue drive trace removed */ };
+  window.__tdFrameNextSite = frameNextSite;
+  window.__tdSetDriveLeg = function (coords, active) {
+    ensureSources();
+    if (!lastState) return;
+    var on = active && coords && coords.length >= 2;
+    lastState.next_leg = on ? { polyline: coords } : null;
+    lastState.show_guide = on;
+    if (styleReady) applyData(lastState);
+  };
+
+  window.__tdSetDriveHighlight = function (uid) {
+    if (!lastState) return;
+    lastState.highlight_uid = uid || null;
+    lastState.drive_target_uid = uid || null;
+    if (styleReady) applyData(lastState);
+  };
 
   window.__tdRefresh = function () {
     if (window._map) window._map.resize();

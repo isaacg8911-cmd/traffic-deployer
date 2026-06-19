@@ -165,3 +165,89 @@ def default_report_path(data_dir: str, profile: str, ext: str) -> str:
     date, _ = ca_now()
     name = f"TDS_Report_{_safe_profile(profile)}_{date}.{ext.lstrip('.')}"
     return os.path.join(export_dir(data_dir), name)
+
+
+def _flag(val) -> bool:
+    return str(val or "").strip().lower() in ("x", "true", "1", "yes")
+
+
+def _float_or_none(val) -> float | None:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def stop_from_report_row(row: dict, sheet: str) -> dict | None:
+    """Reverse of _row — one TDS_Report row -> stop dict for maps_links."""
+    site = str(row.get("Site", "")).split(".")[0].strip()
+    if not site:
+        return None
+    lat = _float_or_none(row.get("LAT"))
+    lon = _float_or_none(row.get("LON"))
+    cross_lat = _float_or_none(row.get("CrossLAT"))
+    cross_lon = _float_or_none(row.get("CrossLON"))
+    street = str(row.get("Street", "") or "").strip()
+    if not street or street.lower() in ("nan", "none", "nat"):
+        street = f"Site {site}"
+    lanes = row.get("Lanes")
+    try:
+        lanes_i = int(lanes) if lanes is not None and not pd.isna(lanes) else 2
+    except (TypeError, ValueError):
+        lanes_i = 2
+    return {
+        "id": site,
+        "uid": f"{sheet}_{site}",
+        "sheet": sheet,
+        "street": street,
+        "lat": lat,
+        "lon": lon,
+        "cross_lat": cross_lat,
+        "cross_lon": cross_lon,
+        "field_lat": lat,
+        "field_lon": lon,
+        "serial": str(row.get("Serial", "") or "").strip(),
+        "lanes": lanes_i,
+        "direction": str(row.get("Directions", "") or "").strip(),
+        "notes": str(row.get("Notes", "") or "").strip(),
+        "street_warning": str(row.get("WideStreet", "") or "").strip(),
+        "counter_unit_id": str(row.get("CounterUnitID", "") or "").strip(),
+        "counter_serial": str(row.get("CounterSerial", "") or "").strip(),
+        "counter_cleared_at": str(row.get("CounterCleared", "") or "").strip(),
+        "counter_download_path": str(row.get("CounterDownload", "") or "").strip(),
+        "installed": _flag(row.get("Installed")),
+        "skipped": _flag(row.get("Skipped")),
+        "picked_up": _flag(row.get("Picked up")),
+        "date": str(row.get("Date", "") or "").strip(),
+        "exact_time": str(row.get("ExactTime", "") or "").strip(),
+    }
+
+
+def parse_report_workbook(
+    path: str,
+    *,
+    skip_master: bool = True,
+) -> dict[str, list[dict]]:
+    """Read TDS_Report .xlsx -> {sheet_name: [stop dicts]}."""
+    if not os.path.isfile(path):
+        return {}
+    try:
+        frames = pd.read_excel(path, sheet_name=None)
+    except Exception:
+        return {}
+    out: dict[str, list[dict]] = {}
+    for sheet, df in frames.items():
+        if skip_master and str(sheet).strip().lower() == "master list":
+            continue
+        if df is None or df.empty:
+            continue
+        stops: list[dict] = []
+        for row in df.to_dict(orient="records"):
+            stop = stop_from_report_row(row, str(sheet))
+            if stop:
+                stops.append(stop)
+        if stops:
+            out[str(sheet)] = stops
+    return out

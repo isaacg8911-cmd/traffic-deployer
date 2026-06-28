@@ -61,6 +61,10 @@
 
   // ----------------------------------------------------------------- map
   function initMap() {
+    if (typeof maplibregl === 'undefined') {
+      console.warn('MapLibre not loaded — map disabled; job flow still works.');
+      return;
+    }
     if (map) return;
     map = new maplibregl.Map({
       container: 'map',

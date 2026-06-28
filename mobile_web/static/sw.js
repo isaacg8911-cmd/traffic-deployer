@@ -1,7 +1,7 @@
 /* Service worker: cache the app shell only (online-first for data and tiles).
  * Job data, map-state, and tiles are always fetched fresh from the network.
  */
-var SHELL = 'td-mobile-shell-v7';
+var SHELL = 'td-mobile-shell-v8';
 var SHELL_ASSETS = [
   '/style.css', '/manifest.webmanifest', '/icon.svg',
   '/vendor/maplibre-gl.js', '/vendor/maplibre-gl.css'

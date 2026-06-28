@@ -493,13 +493,6 @@
     ['route', 'install', 'pickup', 'audit'].forEach(function (t) { $(t + 'Screen').classList.add('hidden'); });
   }
 
-  function loadDemo() {
-    $('startMsg').textContent = 'Loading demo job…'; $('startMsg').className = 'msg';
-    api('/api/jobs/demo', { method: 'POST' }).then(function (res) {
-      return openJob(res.job_id, res.token);
-    }).catch(function (e) { $('startMsg').textContent = e.message; $('startMsg').className = 'msg err'; });
-  }
-
   function importJob() {
     var home = ($('impHome').value || '').split(',').map(function (x) { return parseFloat(x.trim()); });
     if (home.length < 2 || isNaN(home[0]) || isNaN(home[1])) { $('startMsg').textContent = 'Enter start as lat, lon'; $('startMsg').className = 'msg err'; return; }
@@ -529,7 +522,6 @@
 
   // ----------------------------------------------------------------- wire up
   function wire() {
-    $('btnDemo').onclick = loadDemo;
     $('btnImport').onclick = importJob;
     $('btnOpen').onclick = function () { openJob($('openId').value.trim(), $('openToken').value.trim()).catch(function (e) { $('startMsg').textContent = e.message; $('startMsg').className = 'msg err'; }); };
     $('btnBuildRoute').onclick = buildRoute;

@@ -200,7 +200,11 @@ async def import_job(
 
 @app.post("/api/jobs/demo")
 def import_demo(request: Request) -> JSONResponse:
-    """Create a job from the bundled validation fixture (no upload needed)."""
+    """Admin/test-only seed job from the bundled fixture (not shown in the app UI).
+
+    Used by the mobile proof/smoke scripts to create a job without uploads. The
+    field-runner UI has no demo button — drivers open jobs via share link or import.
+    """
     _require_admin(request)
     from scripts.field_job_fixtures import resolve_field_job
 

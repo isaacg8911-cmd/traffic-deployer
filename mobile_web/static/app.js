@@ -494,13 +494,9 @@
   }
 
   function importJob() {
-    var home = ($('impHome').value || '').split(',').map(function (x) { return parseFloat(x.trim()); });
-    if (home.length < 2 || isNaN(home[0]) || isNaN(home[1])) { $('startMsg').textContent = 'Enter start as lat, lon'; $('startMsg').className = 'msg err'; return; }
     var ex = $('impExcel').files, es = $('impEst').files;
     if (!ex.length || !es.length) { $('startMsg').textContent = 'Pick at least one Excel/CSV and one .EST'; $('startMsg').className = 'msg err'; return; }
     var fd = new FormData();
-    fd.append('home_lat', home[0]); fd.append('home_lon', home[1]);
-    fd.append('home_label', 'Field start');
     for (var i = 0; i < ex.length; i++) fd.append('excel', ex[i]);
     for (var j = 0; j < es.length; j++) fd.append('est', es[j]);
     $('startMsg').textContent = 'Importing…'; $('startMsg').className = 'msg';

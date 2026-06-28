@@ -135,8 +135,8 @@ def _build_stops(excel_paths, est_configs, home):
 @app.post("/api/jobs/import")
 async def import_job(
     request: Request,
-    home_lat: float = Form(...),
-    home_lon: float = Form(...),
+    home_lat: float | None = Form(None),
+    home_lon: float | None = Form(None),
     home_label: str = Form("Field start"),
     label: str = Form("Mobile job"),
     expires_in_hours: float = Form(-1.0),
@@ -170,7 +170,14 @@ async def import_job(
             label_i = os.path.splitext(name)[0] or f"Day {i+1}"
             est_configs.append({"path": dest, "label": label_i})
 
-        home = (float(home_lat), float(home_lon))
+        # The route runs site 1 -> site N (the driver drives to site 1), so a
+        # start point isn't used for routing or matching. It stays optional —
+        # supplied only when an existing client still posts one.
+        home = (
+            (float(home_lat), float(home_lon))
+            if home_lat is not None and home_lon is not None
+            else None
+        )
         stops = _build_stops(excel_paths, est_configs, home)
         job = store.create(
             home=home,
@@ -322,7 +329,7 @@ def _trace_current_order(job: dict) -> bool:
         job["route"] = {"polyline": [], "miles": 0.0, "graph": False}
         return True
     try:
-        home = tuple(job["home"])
+        home = tuple(job["home"]) if job.get("home") else None
         route = routing.build_route(stops, home, DATA_DIR)
     except Exception:
         return False
@@ -341,7 +348,7 @@ def build_route(job_id: str, request: Request) -> dict:
     stops = job["stops"]
     if not stops:
         raise HTTPException(status_code=422, detail="No stops to route.")
-    home = tuple(job["home"])
+    home = tuple(job["home"]) if job.get("home") else None
     res = routing.optimize(stops, home, DATA_DIR)
     order = res["order"]
     route = routing.build_route(order, home, DATA_DIR)

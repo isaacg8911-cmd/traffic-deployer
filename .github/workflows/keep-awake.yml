@@ -1,0 +1,47 @@
+name: Keep Render awake
+
+# Render's free plan sleeps a web service after ~15 minutes with no traffic, then
+# cold-starts (~30-50s) on the next request. This workflow pings the health
+# endpoint every ~10 minutes from GitHub's servers (free + unlimited on public
+# repos), so the field app stays warm all day WITHOUT the laptop being on.
+#
+# Notes:
+#   - GitHub cron can be delayed under load; each run retries a few times and
+#     also tolerates a cold wake, which keeps the margin under the 15-min window.
+#   - Trigger manually any time from the Actions tab ("Run workflow").
+#   - GitHub auto-disables scheduled workflows after 60 days of repo inactivity;
+#     any push (or a manual run) re-arms it.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+# If a previous ping run is still going, don't pile up.
+concurrency:
+  group: keep-awake
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping health endpoint (wake + keep warm)
+        env:
+          URL: https://tds-field-app.onrender.com/api/healthz
+        run: |
+          ok=0
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 "$URL" || echo "000")
+            echo "attempt $attempt -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              ok=1
+              break
+            fi
+            # Cold start can take ~30-50s; wait and retry.
+            sleep 20
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::warning::Health check never returned 200 — service may be down or redeploying."
+          fi

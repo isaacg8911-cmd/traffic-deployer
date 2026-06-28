@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f2744" />
+  <title>Traffic Deployer Mobile</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="stylesheet" href="/vendor/maplibre-gl.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div id="brand">Traffic Deployer</div>
+    <div id="progressPill" class="pill">—</div>
+  </header>
+
+  <!-- Start / job-load screen -->
+  <section id="startScreen" class="screen">
+    <div class="card">
+      <h1>Field runner</h1>
+      <p class="muted">Open a job to drive the route, capture installs with your phone's GPS, and export.</p>
+      <button id="btnDemo" class="primary big">Load demo job</button>
+      <div class="divider">or import a job</div>
+      <label class="field">Start lat,lon
+        <input id="impHome" type="text" inputmode="decimal" placeholder="33.8123, -117.9234" value="33.8123, -117.9234" />
+      </label>
+      <label class="field">Excel / CSV sites
+        <input id="impExcel" type="file" accept=".csv,.xlsx,.xls" multiple />
+      </label>
+      <label class="field">.EST map file(s)
+        <input id="impEst" type="file" accept=".EST,.est" multiple />
+      </label>
+      <button id="btnImport" class="primary">Import job</button>
+      <div class="divider">or reopen</div>
+      <label class="field">Job id
+        <input id="openId" type="text" placeholder="job id" autocomplete="off" />
+      </label>
+      <label class="field">Token
+        <input id="openToken" type="text" placeholder="token" autocomplete="off" />
+      </label>
+      <button id="btnOpen" class="secondary">Reopen job</button>
+      <div id="startMsg" class="msg"></div>
+    </div>
+  </section>
+
+  <!-- Map (shared by Route/Install/Pickup) -->
+  <div id="mapWrap" class="hidden">
+    <div id="map"></div>
+    <div id="mapHint" class="map-hint hidden"></div>
+    <button id="btnLocate" class="map-fab" title="Center on me">◎</button>
+  </div>
+
+  <!-- Route tab -->
+  <section id="routeScreen" class="screen tab hidden">
+    <div class="panel">
+      <div class="row">
+        <button id="btnBuildRoute" class="primary">Build route</button>
+        <span id="routeMiles" class="muted"></span>
+      </div>
+      <ul id="stopList" class="list"></ul>
+    </div>
+  </section>
+
+  <!-- Install tab -->
+  <section id="installScreen" class="screen tab hidden">
+    <div class="panel">
+      <div id="installTitle" class="stop-title">No stop selected.</div>
+      <div id="installSub" class="muted"></div>
+      <div class="row">
+        <button id="btnGrab" class="primary">Grab GPS</button>
+        <button id="btnDropPin" class="secondary">Drop pin</button>
+      </div>
+      <div id="grabInfo" class="msg"></div>
+      <label class="field">Street
+        <input id="fStreet" type="text" />
+      </label>
+      <div class="row">
+        <label class="field grow">Direction
+          <select id="fDir"></select>
+        </label>
+        <label class="field narrow">Lanes
+          <input id="fLanes" type="number" min="1" max="20" value="2" />
+        </label>
+      </div>
+      <label class="field">Serial #
+        <input id="fSerial" type="text" inputmode="numeric" />
+      </label>
+      <label class="field">Notes
+        <textarea id="fNotes" rows="2"></textarea>
+      </label>
+      <div class="row">
+        <button id="btnInstall" class="field-primary">INSTALL</button>
+        <button id="btnSkip" class="field-skip">SKIP</button>
+      </div>
+      <div class="row">
+        <button id="btnPrev" class="secondary">← Prev</button>
+        <button id="btnNext" class="secondary">Next →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pickup tab -->
+  <section id="pickupScreen" class="screen tab hidden">
+    <div class="panel">
+      <div id="pickupProg" class="muted"></div>
+      <ul id="pickupList" class="list"></ul>
+    </div>
+  </section>
+
+  <!-- Audit tab -->
+  <section id="auditScreen" class="screen tab hidden">
+    <div class="panel">
+      <div id="auditSummary" class="stop-title">—</div>
+      <ul id="auditList" class="list"></ul>
+      <div class="row">
+        <a id="btnExportCsv" class="primary" href="#">Export CSV</a>
+        <a id="btnExportXlsx" class="secondary" href="#">Export Excel</a>
+      </div>
+      <button id="btnCloseJob" class="ghost">Close job</button>
+      <div id="jobMeta" class="msg"></div>
+    </div>
+  </section>
+
+  <!-- Bottom nav -->
+  <nav id="tabbar" class="hidden">
+    <button data-tab="route" class="active">Route</button>
+    <button data-tab="install">Install</button>
+    <button data-tab="pickup">Pickup</button>
+    <button data-tab="audit">Audit</button>
+  </nav>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/vendor/maplibre-gl.js"></script>
+  <script src="/app.js?v=1"></script>
+</body>
+</html>

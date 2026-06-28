@@ -1,9 +1,14 @@
-"""Headless smoke suite — run after every change: python scripts/smoke_full.py"""
+"""Headless smoke suite — run after every change: python scripts/smoke_full.py
+
+GPS-focused subset: python scripts/smoke_full.py --gps-only
+"""
 from __future__ import annotations
 
+import argparse
 import json
 import inspect
 import os
+import subprocess
 import sys
 import tempfile
 import urllib.request
@@ -44,6 +49,23 @@ def test_imports():
     check("core modules", True)
     check("version", APP_NAME == "Traffic Deployer" and APP_VERSION)
     ok(f"version {APP_VERSION}")
+    from ui.map_helpers import (
+        coords_moved,
+        display_route_for_map,
+        heading_cardinal,
+        should_push_gps_bridge,
+    )
+    check("map_helpers dist still", coords_moved((0.0, 0.0), (0.0, 0.0), min_m=4.0) is False)
+    check("map_helpers dist moved", coords_moved((0.0, 0.0), (0.0, 0.001), min_m=4.0) is True)
+    check("map_helpers cardinal", heading_cardinal(0.0) == "N")
+    check("map_helpers route", display_route_for_map({"miles": 1.2, "graph": True})["miles"] == 1.2)
+    check(
+        "map_helpers gps throttle",
+        should_push_gps_bridge(
+            33.0, -118.0, 90.0,
+            last=None, last_t=0.0, now=1.0, heartbeat_s=5.0, min_m=4.0,
+        ),
+    )
 
 
 def test_export_audit_counter():
@@ -107,6 +129,40 @@ def test_persistence():
     check("load round-trip", back.get("profile") == "SMOKE" and len(back.get("stops", [])) == 1)
 
 
+def test_handoff():
+    print("[handoff]")
+    from core import export, handoff
+    stops = [{
+        "id": "7", "sheet": "Week 14 Day 1 Isaac", "street": "Main St", "serial": "ABC",
+        "direction": "n", "lanes": 2, "installed": True, "field_lat": 33.77,
+        "field_lon": -117.94, "skipped": False,
+        "begin_lat": 33.771, "begin_lon": -117.941,
+        "end_lat": 33.772, "end_lon": -117.942,
+    }, {
+        "id": "8", "sheet": "Week 14 Day 1 Isaac", "street": "Oak", "serial": "",
+        "skipped": True, "installed": False,
+        "begin_lat": 33.78, "begin_lon": -117.95,
+        "end_lat": 33.781, "end_lon": -117.951,
+    }]
+    prefix = handoff.handoff_prefix(
+        ig_tfc_path=r"c:\fake\week 14 ig tfc.xlsx",
+        est_paths=[r"c:\fake\Week 14 Day 1 Isaac.est"],
+    )
+    check("handoff prefix", prefix == "Week 14")
+    names = handoff.handoff_filenames(prefix, 2)
+    check("handoff excel name", names["excel"] == "Week 14 IG TFC.xlsx")
+    check("handoff map1 name", names["map1"] == "Week 14 Map 1.est")
+    lat, lon = export._gps_pair(stops[0])
+    check("gps installed only", lat == 33.77 and lon == -117.94)
+    lat2, lon2 = export._gps_pair(stops[1])
+    check("gps skipped empty", lat2 is None and lon2 is None)
+    from core.est_viewer import sites_from_stops
+    sites = sites_from_stops(stops)
+    check("handoff map sites", len(sites) == 2)
+    check("installed has field", sites[0].get("field_lat") == 33.77)
+    check("skipped no field", "field_lat" not in sites[1])
+
+
 def test_export():
     print("[export]")
     from core import export
@@ -118,12 +174,12 @@ def test_export():
     }]
     aud = export.audit(stops)
     check("audit pass with serial", aud["ok"])
-    xlsx, xlsx_err = export.to_excel_result(stops)
+    xlsx, xlsx_err = export.to_excel_result(stops, data_dir=DATA_DIR)
     check("excel export bytes", xlsx is not None and len(xlsx) > 500, xlsx_err or "")
     csv = export.to_csv_text(stops)
-    check("csv export", "Main St" in csv and "ABC" in csv)
+    check("csv export", "7" in csv and "-117.94" in csv)
     path = export.default_report_path(DATA_DIR, "SMOKE", "xlsx")
-    check("export default path", path.endswith(".xlsx") and "exports" in path)
+    check("export default path", path.endswith(".xlsx") and "IG_TFC_GPS" in path)
     check("export dir exists", os.path.isdir(export.export_dir(DATA_DIR)))
 
 
@@ -152,10 +208,12 @@ def test_maps_links():
     ]
     ordered = maps_links.pickup_sequence_stops(pickup_stops)
     check("pickup install order", ordered[0]["id"] == "2" and ordered[1]["id"] == "1")
-    main_src = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    shortcuts_src = open(
+        os.path.join(ROOT, "ui", "controllers", "shortcuts.py"), encoding="utf-8"
+    ).read()
     check(
         "phone nav wired",
-        "_save_install_nav_links" in main_src and "_save_pickup_nav_links" in main_src,
+        "_save_install_nav_links" in shortcuts_src and "_save_pickup_nav_links" in shortcuts_src,
     )
     from core import export
     row = {
@@ -202,16 +260,26 @@ def test_web_assets():
         os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read())
     sm_src = open(os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read()
     check("battery saver timing", "BATTERY_GPS_TICK_MS" in sm_src and "timing_profile" in sm_src)
+    check("work laptop timing", "WORK_LAPTOP_GPS_TICK_MS" in sm_src)
     from core import power as laptop_power
+    from core import hardware_profile as hw
     from ui.simple_mode import timing_profile
     snap = laptop_power.read_power()
     check("power read", isinstance(snap.label, str))
     saver = timing_profile(on_ac=False, gps_follow=True)
     full = timing_profile(on_ac=True, gps_follow=True)
+    wl = timing_profile(on_ac=True, gps_follow=True, work_laptop=True)
     check("battery slower gps", saver["gps_tick_ms"] > full["gps_tick_ms"])
+    check("work laptop slower than full", wl["gps_tick_ms"] > full["gps_tick_ms"])
+    check("work laptop faster than battery", wl["gps_tick_ms"] < saver["gps_tick_ms"])
+    prof = hw.detect_hardware()
+    check("hardware profile detect", isinstance(prof.work_laptop, bool))
+    os.environ["TDS_WORK_LAPTOP"] = "1"
+    check("hardware env flag", hw.detect_hardware().work_laptop)
+    os.environ.pop("TDS_WORK_LAPTOP", None)
     check("lean gps render", "jumpTo" in appjs and "_gpsAnimId" not in appjs)
-    check("lean drive path", "applyLeanDriveData" in appjs and "lean_drive" in appjs)
-    check("lean hides basemap detail", "LEAN_BASE_LAYERS" in appjs)
+    check("lean drive path", "lean_drive" in appjs and "focusUid" in appjs)
+    check("soft lean keeps roads", "LEAN_BASE_LAYERS" in appjs and "landuse" in appjs)
     check("follow zoom not locked", "zoom: map.getZoom()" in appjs)
     check("next site frame button", "next-site-btn" in idx and "__tdFrameNextSite" in appjs)
     check("stop marker source", "stop-markers" in appjs)
@@ -222,15 +290,29 @@ def test_web_assets():
     check("pick target dots", "pick-target-circle" in appjs and "pick-targets" in appjs)
     def _shell_src() -> str:
         chunks = [open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()]
+        app_entry = os.path.join(ROOT, "ui", "app_entry.py")
+        if os.path.isfile(app_entry):
+            chunks.append(open(app_entry, encoding="utf-8").read())
         pages = os.path.join(ROOT, "ui", "pages")
         if os.path.isdir(pages):
             for name in sorted(os.listdir(pages)):
                 if name.endswith(".py"):
                     chunks.append(open(os.path.join(pages, name), encoding="utf-8").read())
+        controllers = os.path.join(ROOT, "ui", "controllers")
+        if os.path.isdir(controllers):
+            for name in sorted(os.listdir(controllers)):
+                if name.endswith(".py"):
+                    chunks.append(open(os.path.join(controllers, name), encoding="utf-8").read())
+        shell = os.path.join(ROOT, "ui", "shell")
+        if os.path.isdir(shell):
+            for name in sorted(os.listdir(shell)):
+                if name.endswith(".py"):
+                    chunks.append(open(os.path.join(shell, name), encoding="utf-8").read())
         return "\n".join(chunks)
 
     main_src = _shell_src()
     check("power poll wired", "_poll_power" in main_src and "status_power" in main_src)
+    check("work laptop wired", "_work_laptop" in main_src and "hardware_profile" in main_src)
     check("close stops workers", "closeEvent" in main_src and "_stop_worker(getattr" in main_src)
     check("gps timer starts", "gps_timer.start" in main_src)
     check("pick route dropdown", "combo_pick_site" in main_src and "_on_pick_combo_chosen" in main_src)
@@ -294,7 +376,7 @@ def test_web_assets():
     ]) == 1)
     check("shift closed", fa.shift_closed([{"installed": True}, {"skipped": True}]))
     from core import install_checklist as ic2
-    check("install block reason", ic2.install_block_reason({}) is not None)
+    check("install block reason", ic2.install_block_reason({}) is None)
     uid_dup = ic2.find_duplicate_unit_id(
         [{"uid": "a", "counter_unit_id": "1234nc1b"}, {"uid": "b", "counter_unit_id": "1234nc1b"}],
         "a", "1234nc1b",
@@ -307,7 +389,7 @@ def test_web_assets():
     check("picocount preferred port helper", callable(preferred_counter_port))
     check("picocount counter port filter", callable(counter_ports_labeled))
     check("field crash log hook", "install_crash_logging" in main_src)
-    check("map guide line off", '"show_guide": False' in main_src)
+    check("map guide when following", '"show_guide": bool(following)' in main_src)
     check("launch maximized", "showMaximized" in main_src)
     from core.picocount import is_gps_port, is_counter_port
     pc_src = open(os.path.join(ROOT, "core", "picocount.py"), encoding="utf-8").read()
@@ -415,7 +497,7 @@ def test_routing():
         check("nav_plan legs", len(plan.get("legs", [])) == 1)
         ok(f"road graph ({len(g.nodes)} nodes)")
     elif road_router.graph_file_exists(DATA_DIR):
-        detail = "osmnx missing — use .venv" if not road_router.HAS_ROUTING else "load failed"
+        detail = "osmnx missing — use .venv" if not road_router.HAS_OSMNX else "load failed"
         check("road graph load", False, detail)
     else:
         print("  WARN road_graph.graphml missing — download road map in Setup for full routing")
@@ -484,26 +566,183 @@ def test_offline_gate():
     check("no voice module", not os.path.isfile(os.path.join(ROOT, "voice_nav.py")))
 
 
-def main() -> int:
-    print(f"Traffic Deployer smoke_full — {ROOT}\n")
-    test_imports()
-    test_shift_summary()
-    test_export_audit_counter()
+def _shell_src() -> str:
+    chunks = [open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()]
+    app_entry = os.path.join(ROOT, "ui", "app_entry.py")
+    if os.path.isfile(app_entry):
+        chunks.append(open(app_entry, encoding="utf-8").read())
+    pages = os.path.join(ROOT, "ui", "pages")
+    if os.path.isdir(pages):
+        for name in sorted(os.listdir(pages)):
+            if name.endswith(".py"):
+                chunks.append(open(os.path.join(pages, name), encoding="utf-8").read())
+    controllers = os.path.join(ROOT, "ui", "controllers")
+    if os.path.isdir(controllers):
+        for name in sorted(os.listdir(controllers)):
+            if name.endswith(".py"):
+                chunks.append(open(os.path.join(controllers, name), encoding="utf-8").read())
+    shell = os.path.join(ROOT, "ui", "shell")
+    if os.path.isdir(shell):
+        for name in sorted(os.listdir(shell)):
+            if name.endswith(".py"):
+                chunks.append(open(os.path.join(shell, name), encoding="utf-8").read())
+    return "\n".join(chunks)
+
+
+def _run_script(name: str, *, timeout: int = 60) -> tuple[int, str]:
+    py = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
+    if not os.path.isfile(py):
+        py = sys.executable
+    proc = subprocess.run(
+        [py, os.path.join(ROOT, "scripts", name)],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=timeout,
+    )
+    out = (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode, out
+
+
+def test_gps_only():
+    """GPS reader, grab-safe wiring, field coords, offline geocode — no routing/basemap."""
+    print("[gps imports]")
+    import gps_reader
+    from gps_reader import GPSStream, fix_from_snapshot, no_fix_message
+    import main as main_mod
+    check("gps_reader import", True)
+    check("GPSStream class", hasattr(gps_reader, "GPSStream"))
+
+    print("[gps reader]")
+    check("fix_from_snapshot none", fix_from_snapshot(None) is None)
+    check("fix_from_snapshot no fix flag", fix_from_snapshot({"fix": False, "lat": 1.0, "lon": 2.0}) is None)
+    pair = fix_from_snapshot({"fix": True, "lat": 33.7, "lon": -117.8})
+    check("fix_from_snapshot ok", pair == (33.7, -117.8))
+    check("no_fix_message disconnected", "No GPS found" in no_fix_message({"connected": False}))
+    check("list_serial_ports", callable(gps_reader.list_serial_ports))
+    st = gps_reader.get_status(attempts=2)
+    check("get_status shape", isinstance(st, dict) and "connected" in st and "fix" in st)
+
+    print("[grab gps safe]")
+    rc, out = _run_script("test_grab_gps_safe.py")
+    check("test_grab_gps_safe.py", rc == 0, out[-400:])
+
+    print("[gps wiring]")
+    appjs = open(os.path.join(WEB_DIR, "app.js"), encoding="utf-8").read()
+    sm_src = open(os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read()
+    main_src = _shell_src()
+    check("gps bridge throttle", "GPS_TICK_MS" in sm_src)
+    from ui.simple_mode import timing_profile
+    saver = timing_profile(on_ac=False, gps_follow=True)
+    full = timing_profile(on_ac=True, gps_follow=True)
+    check("battery slower gps", saver["gps_tick_ms"] > full["gps_tick_ms"])
+    check("lean gps render", "jumpTo" in appjs and "_gpsAnimId" not in appjs)
+    check("gps timer starts", "gps_timer.start" in main_src)
+    from ui.map_helpers import (
+        coords_moved,
+        display_route_for_map,
+        heading_cardinal,
+        should_push_gps_bridge,
+    )
+    check("map_helpers dist still", coords_moved((0.0, 0.0), (0.0, 0.0), min_m=4.0) is False)
+    check("map_helpers dist moved", coords_moved((0.0, 0.0), (0.0, 0.001), min_m=4.0) is True)
+    check("map_helpers cardinal", heading_cardinal(0.0) == "N")
+    check("map_helpers route", display_route_for_map({"miles": 1.2, "graph": True})["miles"] == 1.2)
+    check(
+        "map_helpers gps throttle",
+        should_push_gps_bridge(
+            33.0, -118.0, 90.0,
+            last=None, last_t=0.0, now=1.0, heartbeat_s=5.0, min_m=4.0,
+        ),
+    )
+    from core import direction as direction_rules
+    short = direction_rules.infer_from_segment(33.0, -118.0, 33.0, -118.0)
+    check("direction needs gps", short["direction"] is None and short["source"] == "needs_gps")
+    from core.picocount import is_gps_port, is_counter_port
+    pc_src = open(os.path.join(ROOT, "core", "picocount.py"), encoding="utf-8").read()
+    check("counter skips gps in probe", "_is_gps_port" in pc_src and "not _is_gps_port" in pc_src)
+    check("counter port helpers", callable(is_gps_port) and callable(is_counter_port))
+    check("counter gps pause", "_counter_pause_gps" in main_src and "_counter_resume_gps" in main_src)
+    check("gps follow mode", "_gps_follow" in main_src and "btn_drive_arrived" in main_src)
+    grab_src = inspect.getsource(main_mod.MainWindow._grab_gps_here)
+    check("grab gps no blocking scan", "get_fix" not in grab_src and "fix_from_snapshot" in grab_src)
+    check("manual grab map mode", "_manual_grab_mode" in main_src and "manual_grab" in appjs)
+    check("manual grab save helper", "_save_field_position" in main_src)
+    check("gps bridge in app.js", "pushGps" in appjs and "renderGps" in appjs)
+
+    print("[field gps merge]")
     test_validate_merge()
-    test_persistence()
-    test_export()
-    test_maps_links()
-    test_demo_data()
-    test_web_assets()
-    test_local_server()
-    test_basemap()
-    test_routing()
-    test_route_build_perf()
-    test_field_ready()
-    test_golden_routes()
-    test_offline_session_script()
+
+    print("[est field gps]")
+    from core.est_field_gps import detect_est_format, field_coords_from_stops
+    inline = detect_est_format(b"\xff\xfe998\x14\x0825.12345\x15\t-118.12345")
+    check("est inline format", inline == "inline")
+    coords = field_coords_from_stops([{
+        "id": "12", "installed": True, "field_lat": 33.77, "field_lon": -117.94,
+    }])
+    check("field coords from stops", coords == {"12": (33.77, -117.94)})
+
+    print("[offline field — no internet]")
     test_offline_no_internet()
-    test_offline_gate()
+
+
+def test_volume_report():
+    print("[volume report]")
+    from core import volume_report
+
+    pcbin = os.path.join(ROOT, "tds_data", "counter_downloads", "15126ec1b_live.pcbin")
+    if not os.path.isfile(pcbin):
+        ok("volume report (skip — no sample pcbin)")
+        return
+    res = volume_report.build_volume_report(
+        pcbin,
+        unit_id="15126ec1b",
+        dir_primary="East",
+        dir_secondary="West",
+    )
+    check("volume report parse", res.get("ok"), res.get("error", ""))
+    if res.get("ok"):
+        text = res.get("csv_text", "")
+        check("volume header", text.startswith("Volume by Lane"))
+        check("volume hourly rows", "Interval,,East,West" in text)
+        check("volume grand total", "Grand Total" in text)
+        check("volume vehicles", (res.get("vehicle_count") or 0) > 0)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Traffic Deployer headless smoke suite")
+    ap.add_argument(
+        "--gps-only",
+        action="store_true",
+        help="Run GPS reader / grab / field-coord checks only (fast, no routing/basemap)",
+    )
+    args = ap.parse_args(argv)
+
+    label = "smoke_full (gps-only)" if args.gps_only else "smoke_full"
+    print(f"Traffic Deployer {label} — {ROOT}\n")
+    if args.gps_only:
+        test_gps_only()
+    else:
+        test_imports()
+        test_shift_summary()
+        test_export_audit_counter()
+        test_validate_merge()
+        test_persistence()
+        test_handoff()
+        test_export()
+        test_volume_report()
+        test_maps_links()
+        test_demo_data()
+        test_web_assets()
+        test_local_server()
+        test_basemap()
+        test_routing()
+        test_route_build_perf()
+        test_field_ready()
+        test_golden_routes()
+        test_offline_session_script()
+        test_offline_no_internet()
+        test_offline_gate()
     print()
     if FAILURES:
         print(f"SMOKE FAILED ({len(FAILURES)}):")

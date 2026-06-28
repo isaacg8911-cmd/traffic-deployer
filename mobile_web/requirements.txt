@@ -1,0 +1,6 @@
+# Mobile web lane (in addition to the desktop requirements.txt).
+# Install: pip install -r mobile_web/requirements.txt
+fastapi
+uvicorn[standard]
+python-multipart
+httpx

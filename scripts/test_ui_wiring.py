@@ -117,6 +117,10 @@ ORPHAN_HANDLER_ALLOW = frozenset({
     "_set_drive_mode",
     "_refresh_day_filter",
     "_stops_for_map",
+    "_day_filter_value",
+    "_day_filter_active",
+    "_visible_stop_indices",
+    "_stops_matching_day_filter",
     "_pick_site_letters",
     "_pick_prompt_text",
     "_ask_route_build_mode",
@@ -174,10 +178,28 @@ def _wizard_handlers(path: str) -> set[str]:
 
 
 def _main_click_handlers() -> set[str]:
-    text = open(MAIN_PY, encoding="utf-8").read()
+    text = _shell_src()
     found = set(re.findall(r"\.connect\(self\.(_[a-zA-Z0-9_]+)\)", text))
     found |= set(re.findall(r"\.connect\(lambda[^:]*:\s*self\.(_[a-zA-Z0-9_]+)", text))
     return found
+
+
+def _shell_src() -> str:
+    chunks = [open(MAIN_PY, encoding="utf-8").read()]
+    app_entry = os.path.join(ROOT, "ui", "app_entry.py")
+    if os.path.isfile(app_entry):
+        chunks.append(open(app_entry, encoding="utf-8").read())
+    controllers = os.path.join(ROOT, "ui", "controllers")
+    if os.path.isdir(controllers):
+        for name in sorted(os.listdir(controllers)):
+            if name.endswith(".py"):
+                chunks.append(open(os.path.join(controllers, name), encoding="utf-8").read())
+    shell = os.path.join(ROOT, "ui", "shell")
+    if os.path.isdir(shell):
+        for name in sorted(os.listdir(shell)):
+            if name.endswith(".py"):
+                chunks.append(open(os.path.join(shell, name), encoding="utf-8").read())
+    return "\n".join(chunks)
 
 
 def test_page_handlers_exist():
@@ -198,10 +220,10 @@ def test_page_handlers_exist():
                 fail(f"{rel} references missing handler {h}")
         ok(f"{rel} ({len(refs)} handler refs)")
 
-    main_src = open(MAIN_PY, encoding="utf-8").read()
+    shell_src = _shell_src()
     for sig in ("order_changed.connect", "apply_requested.connect"):
-        if sig not in main_src:
-            fail(f"main.py missing route dialog {sig}")
+        if sig not in shell_src:
+            fail(f"shell missing route dialog {sig}")
         else:
             ok(f"route dialog {sig.split('.')[0]}")
 
@@ -238,21 +260,21 @@ def test_user_facing_orphans():
 
 def test_bridge_and_map():
     print("\n[map bridge + JS clicks]")
-    main_src = open(MAIN_PY, encoding="utf-8").read()
+    shell_src = _shell_src()
     for sig in (
         "bridge.mapReady.connect",
         "bridge.mapClicked.connect",
         "bridge.stopClicked.connect",
         "page.stopClicked.connect",
     ):
-        ok(sig) if sig in main_src else fail(f"missing {sig}")
+        ok(sig) if sig in shell_src else fail(f"missing {sig}")
     for sig in (
         "_enter_pick_map_focus",
         "_parse_stop_click",
         "_route_pick_add",
         "pick_cross_locked",
     ):
-        ok(f"main.py {sig}") if sig in main_src else fail(f"main.py missing {sig}")
+        ok(f"shell {sig}") if sig in shell_src else fail(f"shell missing {sig}")
 
     appjs = open(APP_JS, encoding="utf-8").read()
     for needle in (
@@ -290,7 +312,7 @@ def test_route_pick_dialog_internal():
 
 def test_nav_and_shortcuts():
     print("\n[nav + shortcuts]")
-    main_src = open(MAIN_PY, encoding="utf-8").read()
+    main_src = _shell_src()
     for i, label in enumerate(("Setup", "Route", "Install", "Pickup", "Audit")):
         ok(f"nav {label}") if f"_go_page({i})" in main_src or f"_go_page(i)" in main_src else None
     ok("nav buttons") if "_nav_labels" in main_src and "_go_page" in main_src else fail("nav wiring")

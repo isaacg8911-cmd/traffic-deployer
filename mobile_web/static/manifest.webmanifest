@@ -1,0 +1,14 @@
+{
+  "name": "Traffic Deployer Mobile",
+  "short_name": "TD Field",
+  "description": "Field runner: route, install with phone GPS, pickup, export.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1722",
+  "theme_color": "#0f2744",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

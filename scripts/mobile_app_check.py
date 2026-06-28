@@ -33,10 +33,13 @@ STEPS = [
 KNOWN_IMPROVEMENTS = [
     "HTTPS over LAN now on by default (self-signed); phone must accept the cert once — "
     "use a trusted cert / reverse proxy to skip the warning in production",
-    "Public share mode uses a Cloudflare quick tunnel (laptop must stay on); "
-    "deploy the backend to a host (Render/Fly/VPS) for an always-on URL — phase 2",
-    "Share link is the only credential per job; add link expiry/revoke for lost phones",
-    "No real multi-user auth yet — job token only (phase 2)",
+    "Always-on host deploy ready (Dockerfile + render.yaml/fly.toml, proven via "
+    "scripts/mobile_host_smoke.py); laptop Cloudflare tunnel remains the default — "
+    "deploy to Render/Fly for a 24/7 URL without the laptop on",
+    "Share links now support revoke + self-expiry (TD_MOBILE_LINK_TTL_HOURS, "
+    "scripts/manage_share_link.py); full multi-user auth still phase 2",
+    "Hosted deploy means job data lives on the host — use same-Wi-Fi mode for "
+    "data that must never leave the machine",
     "Offline field mode not implemented — online-first; brief drops not yet queued in IndexedDB",
     "Server-side road graph optional — without it, routes are straight-line, not street-traced",
     "No undo on mobile install/skip (desktop has undo)",
@@ -102,7 +105,8 @@ def _audit(results: list[dict]) -> dict:
         strengths.append(
             f"Public share mode: {sp['passed']}/{sp['total']} checks pass "
             "(share links open jobs anywhere; public start page can't create/browse; "
-            "creation is admin-key gated; QR generated; wrong token/key rejected)"
+            "creation is admin-key gated; QR generated; wrong token/key rejected; "
+            "links can be revoked and self-expire)"
         )
     elif sp and sp.get("failed"):
         weaknesses.append("Share test failures: " + ", ".join(sp["failed"]))

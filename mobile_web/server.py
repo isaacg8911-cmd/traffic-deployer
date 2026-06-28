@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core import export, ingest, map_state, routing
 from mobile_web import settings
-from mobile_web.store import JobStore, public_job
+from mobile_web.store import JobStore, link_status, public_job
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -59,6 +59,24 @@ def _require_admin(request: Request) -> None:
             status_code=403,
             detail="Job creation is admin-only on this server. Open a job from its share link.",
         )
+
+
+def _resolve_ttl(request: Request, form_value: float | None = None) -> float | None:
+    """Per-job share-link TTL (hours): explicit value wins, else server default.
+
+    Accepts a form/body value or an `expires_in_hours` query param. A value <= 0
+    means "no expiry"; absence means "use TD_MOBILE_LINK_TTL_HOURS".
+    """
+    raw = form_value
+    if raw is None:
+        raw = request.query_params.get("expires_in_hours")
+    if raw is None or str(raw).strip() == "":
+        return settings.default_link_ttl_hours() or None
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return settings.default_link_ttl_hours() or None
+    return v if v > 0 else None
 
 
 def _share_url(request: Request, job: dict) -> str:
@@ -120,10 +138,12 @@ async def import_job(
     home_lon: float = Form(...),
     home_label: str = Form("Field start"),
     label: str = Form("Mobile job"),
+    expires_in_hours: float = Form(-1.0),
     excel: list[UploadFile] = None,  # type: ignore[assignment]
     est: list[UploadFile] = None,  # type: ignore[assignment]
 ) -> JSONResponse:
     _require_admin(request)
+    ttl = _resolve_ttl(request, None if expires_in_hours < 0 else expires_in_hours)
     excel = excel or []
     est = est or []
     if not excel or not est:
@@ -157,6 +177,7 @@ async def import_job(
             stops=stops,
             active_files=[c["label"] for c in est_configs],
             label=label,
+            expires_in_hours=ttl,
         )
     finally:
         # Raw uploads are not needed after ingest; exports regenerate from job state.
@@ -191,6 +212,7 @@ def import_demo(request: Request) -> JSONResponse:
         stops=stops,
         active_files=[c["label"] for c in est_configs],
         label=fx.label,
+        expires_in_hours=_resolve_ttl(request),
     )
     return JSONResponse(
         {"job_id": job["id"], "token": job["token"], "job": public_job(job),
@@ -202,7 +224,71 @@ def import_demo(request: Request) -> JSONResponse:
 def job_share(job_id: str, request: Request) -> dict:
     """Return the share link for a job (requires the job token)."""
     job = _authorize(request, job_id)
-    return {"job_id": job["id"], "share_url": _share_url(request, job)}
+    return {
+        "job_id": job["id"],
+        "share_url": _share_url(request, job),
+        "link_status": link_status(job),
+        "expires_at": job.get("expires_at"),
+    }
+
+
+# --------------------------------------------------------------------------- #
+#  Share-link management (admin) — revoke / extend / status
+# --------------------------------------------------------------------------- #
+@app.get("/api/jobs/{job_id}/status")
+def link_status_admin(job_id: str, request: Request) -> dict:
+    """Admin: report a link's state without needing the job token."""
+    _require_admin(request)
+    job = store.load(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return {
+        "job_id": job_id,
+        "link_status": link_status(job),
+        "revoked": bool(job.get("revoked")),
+        "expires_at": job.get("expires_at"),
+    }
+
+
+@app.post("/api/jobs/{job_id}/revoke")
+def revoke_link(job_id: str, request: Request) -> dict:
+    """Admin: cut off a share link (lost phone). The token stops working."""
+    _require_admin(request)
+    job = store.revoke(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return {"job_id": job_id, "link_status": link_status(job)}
+
+
+@app.post("/api/jobs/{job_id}/extend")
+async def extend_link(job_id: str, request: Request) -> dict:
+    """Admin: re-activate / (re)set a link's expiry.
+
+    Body or query `hours`: <= 0 or omitted = no expiry (never times out). Clears
+    the revoked flag, so this also un-revokes a link.
+    """
+    _require_admin(request)
+    hours = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            hours = body.get("hours")
+    except Exception:
+        hours = None
+    if hours is None:
+        hours = request.query_params.get("hours")
+    try:
+        hours_f = float(hours) if hours is not None and str(hours).strip() != "" else None
+    except (TypeError, ValueError):
+        hours_f = None
+    job = store.set_expiry(job_id, hours_f)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return {
+        "job_id": job_id,
+        "link_status": link_status(job),
+        "expires_at": job.get("expires_at"),
+    }
 
 
 # --------------------------------------------------------------------------- #

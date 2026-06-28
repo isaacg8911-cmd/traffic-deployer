@@ -17,6 +17,10 @@ PUBLIC mode checks (TD_MOBILE_PUBLIC=1, fresh app import):
   - creation WORKS with the admin key, and the share_url uses TD_MOBILE_PUBLIC_URL
   - a crew member can open the job from the share link's job_id + token
   - a wrong token on the share link is rejected
+  - REVOKE: admin can cut off a link (lost phone); the token then 404s; extend
+    re-activates it
+  - EXPIRY: a link past its expiry 404s even with a valid token; admin status
+    reports "expired"; extend gives it more time
 
 Writes logs/mobile_check/proofs/share_prove.json. Exit 0 = all checks passed.
 """
@@ -87,9 +91,18 @@ def main() -> int:
     r = client.get(f"/join/{job_id}")
     check("join_serves_pwa_shell", r.status_code == 200 and "Traffic Deployer" in r.text)
 
+    # local revoke works on the trusted LAN without an admin key
+    r = client.post("/api/jobs/demo")
+    lbody = r.json()
+    ljob, ltoken = lbody.get("job_id"), lbody.get("token")
+    r = client.post(f"/api/jobs/{ljob}/revoke")
+    check("local_revoke_ok", r.status_code == 200 and r.json().get("link_status") == "revoked")
+    r = client.get(f"/api/jobs/{ljob}", headers={"x-job-token": ltoken})
+    check("local_revoked_token_blocked", r.status_code == 404, str(r.status_code))
+
     # ----------------------------------------------------------------- PUBLIC
     public_origin = "https://demo-test.trycloudflare.com"
-    pclient, _ = _fresh_client(
+    pclient, server_pub = _fresh_client(
         {"TD_MOBILE_PUBLIC": "1", "TD_MOBILE_ADMIN_KEY": "secret-admin", "TD_MOBILE_PUBLIC_URL": public_origin}
     )
 
@@ -122,6 +135,46 @@ def main() -> int:
     # wrong token on the share link is rejected
     r = pclient.get(f"/api/jobs/{pjob}", headers={"x-job-token": "wrong"})
     check("share_wrong_token_rejected", r.status_code == 404, str(r.status_code))
+
+    # ------------------------------------------------- REVOKE (lost phone)
+    admin_h = {"x-admin-key": "secret-admin"}
+    # revoke needs the admin key
+    r = pclient.post(f"/api/jobs/{pjob}/revoke")
+    check("revoke_requires_admin", r.status_code == 403, str(r.status_code))
+    # admin revokes the link
+    r = pclient.post(f"/api/jobs/{pjob}/revoke", headers=admin_h)
+    check("revoke_with_admin_ok", r.status_code == 200 and r.json().get("link_status") == "revoked")
+    # the valid token no longer opens the job
+    r = pclient.get(f"/api/jobs/{pjob}", headers={"x-job-token": ptoken})
+    check("revoked_token_blocked", r.status_code == 404, str(r.status_code))
+    # admin status reports revoked without needing the token
+    r = pclient.get(f"/api/jobs/{pjob}/status", headers=admin_h)
+    check("admin_status_revoked", r.status_code == 200 and r.json().get("link_status") == "revoked")
+    # extend re-activates (un-revokes) the link
+    r = pclient.post(f"/api/jobs/{pjob}/extend", headers=admin_h, json={"hours": 4})
+    check("extend_reactivates", r.status_code == 200 and r.json().get("link_status") == "active")
+    r = pclient.get(f"/api/jobs/{pjob}", headers={"x-job-token": ptoken})
+    check("reactivated_token_works", r.status_code == 200, str(r.status_code))
+
+    # ------------------------------------------------- EXPIRY (self-timeout)
+    r = pclient.post("/api/jobs/demo", headers=admin_h)
+    ebody = r.json()
+    ejob, etoken = ebody.get("job_id"), ebody.get("token")
+    r = pclient.get(f"/api/jobs/{ejob}", headers={"x-job-token": etoken})
+    check("expiry_job_open_before", r.status_code == 200, str(r.status_code))
+    # force the link past its expiry (simulate the shift ending)
+    job_obj = server_pub.store.load(ejob)
+    job_obj["expires_at"] = time.time() - 5
+    server_pub.store.save(job_obj)
+    r = pclient.get(f"/api/jobs/{ejob}", headers={"x-job-token": etoken})
+    check("expired_token_blocked", r.status_code == 404, str(r.status_code))
+    r = pclient.get(f"/api/jobs/{ejob}/status", headers=admin_h)
+    check("admin_status_expired", r.status_code == 200 and r.json().get("link_status") == "expired")
+    # extend gives it more time and re-opens it
+    r = pclient.post(f"/api/jobs/{ejob}/extend", headers=admin_h, json={"hours": 2})
+    check("extend_after_expiry", r.status_code == 200 and r.json().get("link_status") == "active")
+    r = pclient.get(f"/api/jobs/{ejob}", headers={"x-job-token": etoken})
+    check("extended_token_works", r.status_code == 200, str(r.status_code))
 
     # reset env so we don't leak public mode to other in-process steps
     for key in ("TD_MOBILE_PUBLIC", "TD_MOBILE_ADMIN_KEY", "TD_MOBILE_PUBLIC_URL"):

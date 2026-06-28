@@ -1,0 +1,34 @@
+# Render Blueprint — always-on host for the Traffic Deployer mobile PWA.
+# https://render.com  ->  New  ->  Blueprint  ->  pick this repo.
+#
+# Render reads this file, builds the repo-root Dockerfile, and runs the mobile
+# server in share-only public mode. After the first deploy:
+#   1. open the service -> Environment -> copy the generated TD_MOBILE_ADMIN_KEY
+#   2. create a job:  POST https://<your-service>.onrender.com/api/jobs/demo
+#                     with header  x-admin-key: <that key>   (the response has share_url)
+#   3. text the share_url to the crew.
+services:
+  - type: web
+    name: traffic-deployer-mobile
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # 'starter' supports a persistent disk so jobs survive restarts. 'free' works
+    # too but has NO disk (jobs are lost when the instance sleeps/restarts).
+    plan: starter
+    healthCheckPath: /api/healthz
+    autoDeploy: true
+    envVars:
+      - key: TD_MOBILE_PUBLIC
+        value: "1"
+      # Render generates a strong secret and shows it in the dashboard. This is
+      # the key needed to CREATE jobs; the crew never needs it.
+      - key: TD_MOBILE_ADMIN_KEY
+        generateValue: true
+      # Share links self-expire after this many hours (a shift). 0 = never.
+      - key: TD_MOBILE_LINK_TTL_HOURS
+        value: "16"
+    # Persistent storage for job files. Remove this block on the free plan.
+    disk:
+      name: tds-data
+      mountPath: /app/tds_data
+      sizeGB: 1

@@ -23,6 +23,34 @@ def _now() -> float:
     return time.time()
 
 
+def _expiry_from_hours(hours: float | None) -> float | None:
+    """Absolute unix-time expiry from a TTL in hours, or None for no expiry."""
+    if hours is None:
+        return None
+    try:
+        h = float(hours)
+    except (TypeError, ValueError):
+        return None
+    return _now() + h * 3600.0 if h > 0 else None
+
+
+def link_status(job: dict) -> str:
+    """Share-link state: 'active' | 'revoked' | 'expired'.
+
+    Tolerant of legacy jobs written before these fields existed (treated active).
+    """
+    if job.get("revoked"):
+        return "revoked"
+    exp = job.get("expires_at")
+    if exp is not None:
+        try:
+            if _now() >= float(exp):
+                return "expired"
+        except (TypeError, ValueError):
+            pass
+    return "active"
+
+
 class JobStore:
     def __init__(self, root: str):
         self.root = root
@@ -44,6 +72,7 @@ class JobStore:
         stops: list[dict],
         active_files: list[str],
         label: str = "",
+        expires_in_hours: float | None = None,
     ) -> dict:
         job_id = uuid.uuid4().hex[:12]
         token = secrets.token_urlsafe(18)
@@ -58,6 +87,10 @@ class JobStore:
             "active_files": list(active_files),
             "stops": stops,
             "route": {"polyline": [], "miles": 0.0, "graph": False},
+            # Share-link controls (phase 2): a lost phone can be cut off by
+            # revoking, and links can self-expire after the shift.
+            "revoked": False,
+            "expires_at": _expiry_from_hours(expires_in_hours),
         }
         self._write(job)
         return job
@@ -93,10 +126,38 @@ class JobStore:
             return None
         if not token or not secrets.compare_digest(str(job.get("token", "")), str(token)):
             return None
+        # A revoked or expired link must not open the job, even with a valid token.
+        if link_status(job) != "active":
+            return None
         return job
 
     def save(self, job: dict) -> None:
         self._write(job)
+
+    def revoke(self, job_id: str) -> dict | None:
+        """Cut off a share link (e.g. a lost phone). Returns the job or None."""
+        with _LOCK:
+            job = self.load(job_id)
+            if job is None:
+                return None
+            job["revoked"] = True
+            self._write(job)
+            return job
+
+    def set_expiry(self, job_id: str, expires_in_hours: float | None) -> dict | None:
+        """Re-activate a link and (re)set its expiry.
+
+        hours None or <= 0 clears expiry (link never times out). Always clears the
+        revoked flag, so this doubles as "un-revoke / extend". Returns job or None.
+        """
+        with _LOCK:
+            job = self.load(job_id)
+            if job is None:
+                return None
+            job["expires_at"] = _expiry_from_hours(expires_in_hours)
+            job["revoked"] = False
+            self._write(job)
+            return job
 
     def update_stop(self, job: dict, uid: str, patch: dict) -> dict | None:
         """Apply a whitelisted field patch to one stop; returns the stop or None."""
@@ -172,4 +233,6 @@ def public_job(job: dict) -> dict:
         "created": job.get("created"),
         "updated": job.get("updated"),
         "stop_count": len(job.get("stops", [])),
+        "link_status": link_status(job),
+        "expires_at": job.get("expires_at"),
     }

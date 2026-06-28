@@ -1,0 +1,30 @@
+# Keep the deploy image small and free of local/field data.
+.git
+.venv
+**/__pycache__
+**/*.pyc
+logs
+tds_data
+dist
+build
+cache
+*.spec
+demo_data/golden_route_bands.json
+
+# Desktop-only code the mobile server never imports (keeps context small).
+ui
+packaging
+
+# Desktop-only / docs not needed by the mobile server image
+docs
+director
+mindlink
+project-ai-evolution
+*.md
+!HOW_TO_RUN.md
+
+# Local tooling
+.cursor
+terminals
+*.bat
+*.ps1

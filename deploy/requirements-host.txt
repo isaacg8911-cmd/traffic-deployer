@@ -1,0 +1,15 @@
+# Always-on host deploy (Render / Fly / VPS) — server-only deps for the mobile
+# PWA backend. No Qt, no osmnx/GDAL: routing degrades to straight-line when no
+# road graph is bundled, which is the expected behavior on a hosted box.
+#
+# Used by the repo-root Dockerfile. Keep in sync with the imports actually
+# reached by mobile_web.server (core.ingest/export -> pandas+openpyxl,
+# road_router -> numpy, core.routing -> networkx optional).
+fastapi
+uvicorn[standard]
+python-multipart
+segno
+pandas
+numpy
+openpyxl
+networkx

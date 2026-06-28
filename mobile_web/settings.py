@@ -59,6 +59,20 @@ def public_base_url() -> str:
     return os.environ.get("TD_MOBILE_PUBLIC_URL", "").strip().rstrip("/")
 
 
+def default_link_ttl_hours() -> float:
+    """Default share-link lifetime in hours (TD_MOBILE_LINK_TTL_HOURS).
+
+    0 / unset = links never expire unless a per-job expiry is given. A host
+    deploy typically sets this (e.g. 16) so a shift's links self-expire.
+    """
+    raw = os.environ.get("TD_MOBILE_LINK_TTL_HOURS", "").strip()
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    return v if v > 0 else 0.0
+
+
 def creation_allowed(admin_header: str | None) -> bool:
     """Whether a job-creation request is allowed given the presented admin key."""
     key = admin_key()

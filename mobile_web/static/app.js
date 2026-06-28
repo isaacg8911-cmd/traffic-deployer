@@ -577,12 +577,17 @@
         $('startMsg').textContent = e.message || 'This share link is invalid or expired.';
         $('startMsg').className = 'msg err';
       });
-    } else if (state.publicMode) {
-      // Public/share links are explicit. The bare tunnel URL should not surprise
-      // a crew phone by reopening an old job from browser storage.
+    } else if (state.publicMode && !state.canCreate) {
+      // Share-only crew phone (no open uploads): links are explicit, so the bare
+      // public URL must not surprise a shared phone by reopening an old job.
       clearSession();
       showStart();
     } else {
+      // Local mode, OR an open-uploads operator phone on a public host. This is
+      // the operator's own device: reopen the remembered job so switching apps,
+      // locking the screen, or a reload during a shift never loses the day's
+      // work. All edits already persist to the server in real time, so reopening
+      // simply re-fetches the live job state.
       var sess = loadSession();
       if (sess && sess.jobId) {
         openJob(sess.jobId, sess.token).catch(function () { clearSession(); showStart(); });

@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from core import export, ingest, map_state, routing
+from mobile_web import settings
 from mobile_web.store import JobStore, public_job
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -50,6 +51,26 @@ def _authorize(request: Request, job_id: str) -> dict:
     return job
 
 
+def _require_admin(request: Request) -> None:
+    """Gate job creation. In public/share-only mode this needs the admin key."""
+    admin = request.headers.get("x-admin-key") or request.query_params.get("admin_key", "")
+    if not settings.creation_allowed(admin):
+        raise HTTPException(
+            status_code=403,
+            detail="Job creation is admin-only on this server. Open a job from its share link.",
+        )
+
+
+def _share_url(request: Request, job: dict) -> str:
+    """Absolute share link: <public-or-origin>/join/<id>?token=<secret>."""
+    base = settings.public_base_url()
+    if not base:
+        base = str(request.base_url).rstrip("/")
+    from urllib.parse import quote
+
+    return f"{base}/join/{job['id']}?token={quote(job['token'])}"
+
+
 def _job_state(job: dict) -> dict:
     return map_state.build_map_state(job["stops"], job.get("home"), job.get("route"))
 
@@ -64,7 +85,13 @@ def healthz() -> dict:
 
 @app.get("/api/config")
 def config() -> dict:
-    return {"tile_url": TILE_URL, "tile_attribution": TILE_ATTRIB}
+    return {
+        "tile_url": TILE_URL,
+        "tile_attribution": TILE_ATTRIB,
+        # Public/share-only mode hides job creation on the phone start screen.
+        "public_mode": settings.public_mode(),
+        "can_create": not settings.public_mode(),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -96,6 +123,7 @@ async def import_job(
     excel: list[UploadFile] = None,  # type: ignore[assignment]
     est: list[UploadFile] = None,  # type: ignore[assignment]
 ) -> JSONResponse:
+    _require_admin(request)
     excel = excel or []
     est = est or []
     if not excel or not est:
@@ -144,13 +172,14 @@ async def import_job(
 
     return JSONResponse(
         {"job_id": job["id"], "token": job["token"], "job": public_job(job),
-         "state": _job_state(job)}
+         "state": _job_state(job), "share_url": _share_url(request, job)}
     )
 
 
 @app.post("/api/jobs/demo")
-def import_demo() -> JSONResponse:
+def import_demo(request: Request) -> JSONResponse:
     """Create a job from the bundled validation fixture (no upload needed)."""
+    _require_admin(request)
     from scripts.field_job_fixtures import resolve_field_job
 
     fx = resolve_field_job()
@@ -165,8 +194,15 @@ def import_demo() -> JSONResponse:
     )
     return JSONResponse(
         {"job_id": job["id"], "token": job["token"], "job": public_job(job),
-         "state": _job_state(job)}
+         "state": _job_state(job), "share_url": _share_url(request, job)}
     )
+
+
+@app.get("/api/jobs/{job_id}/share")
+def job_share(job_id: str, request: Request) -> dict:
+    """Return the share link for a job (requires the job token)."""
+    job = _authorize(request, job_id)
+    return {"job_id": job["id"], "share_url": _share_url(request, job)}
 
 
 # --------------------------------------------------------------------------- #
@@ -260,6 +296,22 @@ def job_audit(job_id: str, request: Request) -> dict:
     return export.audit(job["stops"])
 
 
+@app.get("/api/jobs/{job_id}/share.svg")
+def share_qr(job_id: str, request: Request) -> Response:
+    """QR code (SVG) for the job's share link, so crew can scan instead of type."""
+    job = _authorize(request, job_id)
+    url = _share_url(request, job)
+    try:
+        import io
+
+        import segno
+    except ImportError:
+        raise HTTPException(status_code=503, detail="QR support not installed (segno).")
+    buf = io.BytesIO()
+    segno.make(url, error="m").save(buf, kind="svg", scale=5, border=2)
+    return Response(content=buf.getvalue(), media_type="image/svg+xml")
+
+
 @app.get("/api/jobs/{job_id}/export.csv")
 def export_csv(job_id: str, request: Request) -> Response:
     job = _authorize(request, job_id)
@@ -295,6 +347,13 @@ if os.path.isdir(VENDOR_DIR):
 
 @app.get("/")
 def index() -> FileResponse:
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/join/{job_id}")
+def join(job_id: str) -> FileResponse:
+    """Share-link entry. Serves the PWA shell; the client reads job_id + token
+    from the URL (/join/<id>?token=...) and opens the job automatically."""
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 

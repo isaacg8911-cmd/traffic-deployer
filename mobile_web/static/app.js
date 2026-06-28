@@ -7,7 +7,7 @@
   var DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
   var LS_KEY = 'td_mobile_job';
 
-  var state = { jobId: null, token: null, data: null, tab: 'route', current: 0, pinMode: false, tileUrl: null };
+  var state = { jobId: null, token: null, data: null, tab: 'route', current: 0, pinMode: false, tileUrl: null, publicMode: false, shareUrl: null };
   var map = null, mapReady = false, meMarker = null, pinMarker = null;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -260,7 +260,27 @@
     $('btnExportCsv').href = '/api/jobs/' + state.jobId + '/export.csv' + q;
     $('btnExportXlsx').href = '/api/jobs/' + state.jobId + '/export.xlsx' + q;
     $('jobMeta').textContent = 'Job ' + state.jobId;
+    loadShare();
   }
+
+  function loadShare() {
+    api('/api/jobs/' + state.jobId + '/share').then(function (s) {
+      state.shareUrl = s.share_url;
+      $('shareLink').value = s.share_url;
+      $('shareQr').src = '/api/jobs/' + state.jobId + '/share.svg' + '?token=' + encodeURIComponent(state.token);
+      $('shareWrap').classList.remove('hidden');
+    }).catch(function () { $('shareWrap').classList.add('hidden'); });
+  }
+
+  function copyShare() {
+    var link = state.shareUrl || $('shareLink').value;
+    if (!link) return;
+    var done = function () { toast('Share link copied'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(link).then(done, function () { selectShare(); });
+    } else { selectShare(); }
+  }
+  function selectShare() { var el = $('shareLink'); el.removeAttribute('readonly'); el.select(); try { document.execCommand('copy'); toast('Share link copied'); } catch (e) {} el.setAttribute('readonly', 'readonly'); }
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
 
@@ -448,6 +468,7 @@
     $('btnNext').onclick = function () { var st = state.data.stops || []; if (state.current < st.length - 1) { state.current++; renderInstall(); } };
     $('btnLocate').onclick = locateMe;
     $('btnCloseJob').onclick = function () { clearSession(); state.jobId = null; state.token = null; state.data = null; showStart(); };
+    $('btnCopyShare').onclick = copyShare;
     Array.prototype.forEach.call(document.querySelectorAll('#tabbar button'), function (b) {
       b.onclick = function () { if (state.tab === 'install') flushForm(); setTab(b.dataset.tab); };
     });
@@ -458,14 +479,43 @@
     });
   }
 
+  function shareTarget() {
+    // Share link form: /join/<job_id>?token=<secret>
+    var m = location.pathname.match(/\/join\/([A-Za-z0-9_-]+)/);
+    if (!m) return null;
+    var token = new URLSearchParams(location.search).get('token') || '';
+    return { jobId: m[1], token: token };
+  }
+
+  function applyPublicMode(isPublic) {
+    state.publicMode = !!isPublic;
+    if (isPublic) document.body.classList.add('public-mode');
+  }
+
   function boot() {
     wire();
-    api('/api/config').then(function (cfg) { state.tileUrl = cfg.tile_url; initMap(); }).catch(function () { initMap(); });
-    var sess = loadSession();
-    if (sess && sess.jobId) {
-      openJob(sess.jobId, sess.token).catch(function () { clearSession(); showStart(); });
+    api('/api/config').then(function (cfg) {
+      state.tileUrl = cfg.tile_url; applyPublicMode(cfg.public_mode); initMap();
+    }).catch(function () { initMap(); });
+
+    var share = shareTarget();
+    if (share && share.jobId) {
+      $('startMsg').textContent = 'Opening shared job…';
+      openJob(share.jobId, share.token).then(function () {
+        // Clean the URL so the token is not left in the address bar / history.
+        try { history.replaceState({}, '', '/'); } catch (e) {}
+      }).catch(function (e) {
+        clearSession(); showStart();
+        $('startMsg').textContent = e.message || 'This share link is invalid or expired.';
+        $('startMsg').className = 'msg err';
+      });
     } else {
-      showStart();
+      var sess = loadSession();
+      if (sess && sess.jobId) {
+        openJob(sess.jobId, sess.token).catch(function () { clearSession(); showStart(); });
+      } else {
+        showStart();
+      }
     }
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(function () {});

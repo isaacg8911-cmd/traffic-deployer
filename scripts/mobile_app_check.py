@@ -25,6 +25,7 @@ if not os.path.isfile(PY):
 STEPS = [
     ("user_prove", "scripts/mobile_user_prove.py"),
     ("tls_prove", "scripts/mobile_tls_prove.py"),
+    ("share_prove", "scripts/mobile_share_prove.py"),
     ("stress_loop", "scripts/mobile_stress_loop.py"),
 ]
 
@@ -32,6 +33,9 @@ STEPS = [
 KNOWN_IMPROVEMENTS = [
     "HTTPS over LAN now on by default (self-signed); phone must accept the cert once — "
     "use a trusted cert / reverse proxy to skip the warning in production",
+    "Public share mode uses a Cloudflare quick tunnel (laptop must stay on); "
+    "deploy the backend to a host (Render/Fly/VPS) for an always-on URL — phase 2",
+    "Share link is the only credential per job; add link expiry/revoke for lost phones",
     "No real multi-user auth yet — job token only (phase 2)",
     "Offline field mode not implemented — online-first; brief drops not yet queued in IndexedDB",
     "Server-side road graph optional — without it, routes are straight-line, not street-traced",
@@ -92,6 +96,18 @@ def _audit(results: list[dict]) -> dict:
         weaknesses.append("TLS test failures: " + ", ".join(tp["failed"]))
     elif not by.get("tls_prove", {}).get("ok"):
         weaknesses.append("TLS test did not pass — see logs/mobile_check tail")
+
+    sp = _load(os.path.join(REPORT_DIR, "proofs", "share_prove.json"))
+    if by.get("share_prove", {}).get("ok") and sp:
+        strengths.append(
+            f"Public share mode: {sp['passed']}/{sp['total']} checks pass "
+            "(share links open jobs anywhere; public start page can't create/browse; "
+            "creation is admin-key gated; QR generated; wrong token/key rejected)"
+        )
+    elif sp and sp.get("failed"):
+        weaknesses.append("Share test failures: " + ", ".join(sp["failed"]))
+    elif not by.get("share_prove", {}).get("ok"):
+        weaknesses.append("Share test did not pass — see logs/mobile_check tail")
 
     # Latency + load signal from the freshest stress log line.
     stress = _latest_stress()

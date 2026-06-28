@@ -21,26 +21,29 @@
     <div class="card">
       <h1>Field runner</h1>
       <p class="muted">Open a job to drive the route, capture installs with your phone's GPS, and export.</p>
-      <button id="btnDemo" class="primary big">Load demo job</button>
-      <div class="divider">or import a job</div>
-      <label class="field">Start lat,lon
-        <input id="impHome" type="text" inputmode="decimal" placeholder="33.8123, -117.9234" value="33.8123, -117.9234" />
-      </label>
-      <label class="field">Excel / CSV sites
-        <input id="impExcel" type="file" accept=".csv,.xlsx,.xls" multiple />
-      </label>
-      <label class="field">.EST map file(s)
-        <input id="impEst" type="file" accept=".EST,.est" multiple />
-      </label>
-      <button id="btnImport" class="primary">Import job</button>
-      <div class="divider">or reopen</div>
-      <label class="field">Job id
-        <input id="openId" type="text" placeholder="job id" autocomplete="off" />
-      </label>
-      <label class="field">Token
-        <input id="openToken" type="text" placeholder="token" autocomplete="off" />
-      </label>
-      <button id="btnOpen" class="secondary">Reopen job</button>
+      <div id="createBlock">
+        <button id="btnDemo" class="primary big">Load demo job</button>
+        <div class="divider">or import a job</div>
+        <label class="field">Start lat,lon
+          <input id="impHome" type="text" inputmode="decimal" placeholder="33.8123, -117.9234" value="33.8123, -117.9234" />
+        </label>
+        <label class="field">Excel / CSV sites
+          <input id="impExcel" type="file" accept=".csv,.xlsx,.xls" multiple />
+        </label>
+        <label class="field">.EST map file(s)
+          <input id="impEst" type="file" accept=".EST,.est" multiple />
+        </label>
+        <button id="btnImport" class="primary">Import job</button>
+        <div class="divider">or reopen</div>
+        <label class="field">Job id
+          <input id="openId" type="text" placeholder="job id" autocomplete="off" />
+        </label>
+        <label class="field">Token
+          <input id="openToken" type="text" placeholder="token" autocomplete="off" />
+        </label>
+        <button id="btnOpen" class="secondary">Reopen job</button>
+      </div>
+      <p id="publicNote" class="muted">Open your job from the share link your dispatcher sent you.</p>
       <div id="startMsg" class="msg"></div>
     </div>
   </section>
@@ -118,6 +121,15 @@
         <a id="btnExportCsv" class="primary" href="#">Export CSV</a>
         <a id="btnExportXlsx" class="secondary" href="#">Export Excel</a>
       </div>
+      <div id="shareWrap" class="share hidden">
+        <div class="divider">share with crew</div>
+        <p class="muted">Send this link. It opens the job on any phone — no Wi-Fi pairing.</p>
+        <div class="row">
+          <input id="shareLink" class="grow" type="text" readonly />
+          <button id="btnCopyShare" class="secondary">Copy</button>
+        </div>
+        <img id="shareQr" class="qr" alt="Scan to open job" />
+      </div>
       <button id="btnCloseJob" class="ghost">Close job</button>
       <div id="jobMeta" class="msg"></div>
     </div>
@@ -134,6 +146,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/vendor/maplibre-gl.js"></script>
-  <script src="/app.js?v=1"></script>
+  <script src="/app.js?v=2"></script>
 </body>
 </html>

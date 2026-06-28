@@ -33,6 +33,49 @@ For a warning-free experience in production, put the server behind a trusted cer
 / HTTPS reverse proxy. To force plain HTTP (drop-pin only, no phone GPS), set
 `TD_MOBILE_HTTP=1`. The "Drop pin" fallback always works without geolocation.
 
+## Public SHARE mode (text a link, phone works anywhere)
+
+Same Wi-Fi is fine on site, but for a phone on cellular use **share mode**: the
+server is exposed over a Cloudflare quick tunnel and the crew opens a job from a
+private **share link** — no Wi-Fi pairing, no public job list.
+
+```
+RUN_MOBILE_SHARE.bat
+```
+
+Needs `cloudflared` (`winget install --id Cloudflare.cloudflared`). It:
+
+1. starts the server in **share-only public mode**,
+2. opens a Cloudflare tunnel and prints a public `https://<name>.trycloudflare.com` URL,
+3. with `--demo`, creates a demo job and prints a ready-to-send **share link**.
+
+### How sharing works
+
+- Each job has a random token. A share link is `<public-url>/join/<job_id>?token=<secret>`.
+- Open the link on any phone → the job loads automatically (the token is stripped
+  from the address bar after load). The **Audit tab** shows the share link + a QR
+  to copy/scan for the rest of the crew.
+- In public mode the start page **cannot create or browse jobs**. Job creation
+  (demo/import) requires the **admin key** (`x-admin-key` header). Set a fixed key
+  with `TD_MOBILE_ADMIN_KEY`, or the launcher prints a generated one.
+
+### Modes at a glance
+
+| Env | Behavior |
+|---|---|
+| (default) | Local HTTPS, same Wi-Fi/hotspot; start page can create jobs |
+| `TD_MOBILE_HTTP=1` | Plain HTTP, drop-pin only |
+| `TD_MOBILE_PUBLIC=1` | Share-only: no public creation/browse; admin-key to create |
+| `TD_MOBILE_ADMIN_KEY=...` | Pin the admin key for creating jobs in public mode |
+| `TD_MOBILE_PUBLIC_URL=...` | Origin used to build absolute share links (set by the tunnel launcher) |
+
+### Privacy note
+
+A Cloudflare quick tunnel routes job traffic through Cloudflare while in use, and
+the laptop must stay running. For data that must never leave your machine, use
+same-Wi-Fi mode. For an always-on URL without the laptop, deploy the backend to a
+host (Render / Fly.io / VPS) — phase 2.
+
 ## Phone vs laptop
 
 | Capability | Laptop | Phone (PWA) |
@@ -55,6 +98,7 @@ For a warning-free experience in production, put the server behind a trusted cer
 - `mobile_web/server.py` — FastAPI app (REST + static PWA)
 - `mobile_web/store.py` — web-safe JSON job store (token-scoped, in-memory cached)
 - `mobile_web/tls.py` — self-signed LAN cert (secure context for phone GPS)
+- `mobile_web/settings.py` — share-only public mode + admin key + public URL
 - `mobile_web/static/` — the PWA (index.html, app.js, style.css, sw.js, manifest)
 - `core/map_state.py` — Qt-free map payload shared with the renderer
 - Reuses `core.ingest`, `core.routing`, `core.export` unchanged
@@ -63,8 +107,11 @@ For a warning-free experience in production, put the server behind a trusted cer
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/jobs/demo` | Create job from bundled fixture |
-| POST | `/api/jobs/import` | Upload Excel/CSV + .EST |
+| POST | `/api/jobs/demo` | Create job from bundled fixture (admin-key in public mode) |
+| POST | `/api/jobs/import` | Upload Excel/CSV + .EST (admin-key in public mode) |
+| GET | `/join/{id}?token=` | Share-link entry — serves the PWA, auto-opens the job |
+| GET | `/api/jobs/{id}/share` | Share link for a job (token required) |
+| GET | `/api/jobs/{id}/share.svg` | QR code (SVG) for the share link |
 | GET | `/api/jobs/{id}` | Job + map state |
 | GET | `/api/jobs/{id}/map-state` | Lean map payload |
 | POST | `/api/jobs/{id}/route` | Optimize + trace |
@@ -81,6 +128,7 @@ header or `?token=` query.
 ```
 .venv\Scripts\python.exe scripts\mobile_user_prove.py     # user flow
 .venv\Scripts\python.exe scripts\mobile_tls_prove.py      # real HTTPS secure context
+.venv\Scripts\python.exe scripts\mobile_share_prove.py    # public share-only mode + links
 .venv\Scripts\python.exe scripts\mobile_stress_loop.py    # load + latency
 .venv\Scripts\python.exe scripts\mobile_app_check.py      # all + audit
 ```

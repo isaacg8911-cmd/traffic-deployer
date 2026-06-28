@@ -13,8 +13,8 @@ if not exist ".venv\Scripts\python.exe" (
 
 call ".venv\Scripts\activate.bat"
 
-REM Ensure mobile deps are present (FastAPI stack + TLS for phone GPS).
-python -c "import fastapi, uvicorn, multipart, cryptography" 1>nul 2>nul
+REM Ensure mobile deps are present (FastAPI stack + TLS for phone GPS + QR).
+python -c "import fastapi, uvicorn, multipart, cryptography, segno" 1>nul 2>nul
 if errorlevel 1 (
     echo Installing mobile web dependencies...
     pip install -r mobile_web\requirements.txt

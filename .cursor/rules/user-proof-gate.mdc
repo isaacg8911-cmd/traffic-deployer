@@ -1,0 +1,17 @@
+---
+description: "Require coder proof and user-path stress proof before any ready handoff"
+alwaysApply: true
+---
+
+# User Proof Gate
+
+Before telling the Director a build, fix, ship, or app behavior is "ready", Forge must prove it from both sides:
+
+1. **Coder proof** - run the relevant smoke/test command for the changed layer and capture exit evidence.
+2. **User proof** - exercise the real user path like the Director will: browser/app UI, cached/session state when relevant, and the exact entry point being handed off.
+3. **Stress proof** - repeat or vary the path enough to catch skips, stale cache, race timing, offline/session restore, and reload behavior when those risks touch the change.
+4. **Error path** - verify at least one realistic failure mode instead of only the happy path.
+
+If user proof cannot be run locally, do not say it is ready. Say what was proven, what was not proven, and what blocks real user proof.
+
+For mobile/web changes, the user proof must include a fresh-load or cache-bust check plus a saved-session/cached-state check when service workers, localStorage, URLs, uploads, navigation, or auto-open behavior are involved.

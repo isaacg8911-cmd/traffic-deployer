@@ -1,6 +1,7 @@
 /*
  * Offline California basemap — Protomaps v4 light palette.
  * Street names on roads layer; no house-number clutter (addresses removed).
+ * Lean: optional labels, no buildings at field zoom, paths unlabeled.
  */
 function buildStyle(pmtilesUrl, baseUrl) {
   var root = baseUrl || '';
@@ -20,6 +21,7 @@ function buildStyle(pmtilesUrl, baseUrl) {
 
   var namedRoad = ['all', ['has', 'name'], ['!=', ['get', 'name'], '']];
   var MAX_Z = 15;
+  var localKinds = ['minor_road', 'other'];
 
   var labelLayout = {
     'symbol-placement': 'line',
@@ -30,7 +32,7 @@ function buildStyle(pmtilesUrl, baseUrl) {
     'text-rotation-alignment': 'map',
     'text-pitch-alignment': 'viewport',
     'symbol-spacing': 160,
-    'text-optional': false
+    'text-optional': true
   };
 
   return {
@@ -52,14 +54,6 @@ function buildStyle(pmtilesUrl, baseUrl) {
         paint: { 'fill-color': c.land, 'fill-opacity': 0.6 } },
       { id: 'water', type: 'fill', source: 'ca', 'source-layer': 'water',
         paint: { 'fill-color': c.water } },
-
-      { id: 'buildings-fill', type: 'fill', source: 'ca', 'source-layer': 'buildings',
-        minzoom: 15, maxzoom: MAX_Z + 1,
-        filter: ['in', ['get', 'kind'], ['literal', ['building', 'building_part']]],
-        paint: {
-          'fill-color': c.building,
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 15, 0.35, 16, 0.65]
-        } },
 
       { id: 'roads-all', type: 'line', source: 'ca', 'source-layer': 'roads',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -115,17 +109,17 @@ function buildStyle(pmtilesUrl, baseUrl) {
           'text-halo-width': 2
         } },
       { id: 'road-label-local', type: 'symbol', source: 'ca', 'source-layer': 'roads',
-        minzoom: 11, maxzoom: 14,
+        minzoom: 12, maxzoom: MAX_Z + 1,
         filter: ['all', namedRoad,
-          ['!', ['in', ['get', 'kind'], ['literal', ['highway', 'major_road', 'medium_road']]]]],
+          ['in', ['get', 'kind'], ['literal', localKinds]]],
         layout: Object.assign({}, labelLayout, {
-          'text-size': ['interpolate', ['linear'], ['zoom'], 11, 10, 12, 11, 13, 12, 14, 13],
-          'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 11, 180, 13, 110, 14, 90]
+          'text-size': ['interpolate', ['linear'], ['zoom'], 12, 10, 13, 11, 14, 12, 15, 13],
+          'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 12, 200, 13, 140, 14, 110, 15, 95]
         }),
         paint: {
           'text-color': c.label,
           'text-halo-color': c.halo,
-          'text-halo-width': 2
+          'text-halo-width': 1.6
         } }
     ]
   };

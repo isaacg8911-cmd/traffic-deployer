@@ -31,6 +31,8 @@ _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
 class _Handler(BaseHTTPRequestHandler):
     # roots is injected per-server: {url_prefix: directory}
     roots: dict[str, str] = {}
+    web_dir: str = ""
+    data_dir: str = ""
 
     def log_message(self, *args):  # silence console spam
         pass
@@ -39,6 +41,21 @@ class _Handler(BaseHTTPRequestHandler):
         path = unquote(path.split("?", 1)[0].split("#", 1)[0])
         if path in ("", "/"):
             path = "/index.html"
+        # Writable vendor overlay (portable map setup) then bundled vendor.
+        if path.startswith("/vendor/"):
+            rel = path[len("/vendor/"):].lstrip("/")
+            for root in (
+                os.path.join(self.data_dir, "vendor"),
+                os.path.join(self.web_dir, "vendor"),
+            ):
+                if not root or not os.path.isdir(root):
+                    continue
+                full = os.path.normpath(os.path.join(root, rel))
+                if os.path.commonpath([os.path.abspath(full), os.path.abspath(root)]) != os.path.abspath(root):
+                    continue
+                if os.path.isfile(full):
+                    return full
+            return None
         for prefix, root in self.roots.items():
             if path.startswith(prefix):
                 rel = path[len(prefix):].lstrip("/")
@@ -107,9 +124,11 @@ _port = None
 def start(web_dir: str, data_dir: str) -> int:
     """Start (once) the server. Returns the chosen localhost port."""
     global _server, _port
+    _Handler.web_dir = web_dir
+    _Handler.data_dir = data_dir
+    _Handler.roots = {"/": web_dir, "/data/": data_dir}
     if _server is not None:
         return _port
-    _Handler.roots = {"/": web_dir, "/data/": data_dir}
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     _port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

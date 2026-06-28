@@ -69,6 +69,23 @@ class MapBridge(QObject):
     def set_follow(self, on: bool):
         self._run(f"window.__tdSetFollow && window.__tdSetFollow({'true' if on else 'false'})")
 
+    def set_manual_grab(self, on: bool, prompt: str = ""):
+        """Sync drop-pin mode to JS immediately (do not wait for pushState)."""
+        p = _dumps(prompt) if prompt else "null"
+        self._run(
+            f"window.__tdSetManualGrab && window.__tdSetManualGrab({'true' if on else 'false'}, {p})"
+        )
+
+    def send_field_pin(
+        self, uid: str, lat: float, lon: float, site_id: str, *, pending: bool = True,
+    ):
+        """Patch one install pin on the map without a full redraw."""
+        self._run(
+            "window.__tdPatchFieldPin && window.__tdPatchFieldPin("
+            f"{_dumps(uid)}, {float(lat)}, {float(lon)}, {_dumps(site_id)}, "
+            f"{'true' if pending else 'false'})"
+        )
+
     def refresh_view(self):
         self._run("window.__tdRefresh && window.__tdRefresh()")
 
@@ -77,3 +94,8 @@ class MapBridge(QObject):
         self._run(
             f"window.__tdSetDriveLeg && window.__tdSetDriveLeg({_dumps(polyline)}, {str(active).lower()})"
         )
+
+    def send_drive_highlight(self, uid: str | None):
+        """Update next-stop highlight without full map redraw."""
+        u = _dumps(uid) if uid else "null"
+        self._run(f"window.__tdSetDriveHighlight && window.__tdSetDriveHighlight({u})")

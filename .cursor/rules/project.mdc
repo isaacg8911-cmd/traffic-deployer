@@ -1,28 +1,82 @@
 ---
-description: Traffic Deployer — stack, smoke, scope (Forge-maintained)
+description: "Traffic Deployer - App Forge bundle (session, Done, BASC, delivery, grounding)"
 alwaysApply: true
 ---
 
-# Traffic Deployer
+# Traffic Deployer (App v1.9)
 
-Read **SCOPE.md** and **SCOPE_PACKAGES.md**. Workflow: **HOW_TO_RUN.md**, **START.bat**.
+Self-contained App rules - OS `.cursor/rules/` are not loaded in this workspace. This file is the full Forge contract for `traffic-deployer`.
 
-**Vague asks:** scope menu (mindlink-trio v1.3). Modes: `explore` | `build` | `ship`.
+## Session
 
-## Stack
+- Workspace root = `projects/traffic-deployer/`
+- Open via `open_forge_workspace.ps1 -Lane App -Slug traffic-deployer` - not multi-root with OS (`FP-SCOPE-BLEED`)
+- **Do not** edit MindLink OS (`mindlink/`, OS `.cursor/rules/`, other apps)
 
-- Python 3.10+, PySide6, Qt WebEngine, `local_server.py`, OSMnx routing — **ROUTING_AND_MAP.md**
-- Do not break SwiftShader/WebGL env in `main.py` without map test.
+## Blueprint and scope
+
+- Read **BLUEPRINT.md** first. Status `draft` or `in_review` -> blueprint only; no implementation code
+- After Director locks blueprint: **SCOPE.md** + **SCOPE_PACKAGES.md** are authority
+- **Modes:** `explore` | `sandbox:` | `build` | `ship` | **`DEMAND:`** (execute, no scope menu)
+- Vague `build`/`ship` -> scope menu (`communication.mdc` on OS - class: internal | client | product)
+
+## Definition of Done (build/ship)
+
+1. **Coder proven** - app smoke below; capture exit evidence
+2. **User proven** - personally exercise the real user path before handoff; do not hand off from code inspection alone
+3. **Stress/error path** - repeat or vary the path enough to catch cache, session restore, timing, offline, reload, and one realistic failure mode when relevant
+4. **Logged** - `[Cursor Log]` -> `logs/cursor/forge/YYYY-MM-DD.md`
+5. **No regressions** - existing smoke green
+6. **Delivery** - class **client** or **product** in BLUEPRINT -> handoff package (SCOPE, HOW_TO_RUN, entry script, privacy); Forge must not claim operator/invoice-ready without Director `HANDOFF-PROOF:` (`delivery.mdc` on OS)
+
+## Bounded self-correction (BASC)
+
+- **Subsystem key:** `traffic-deployer` (see `mindlink/subsystem_autonomy.json` on OS - read-only reference)
+- Operational failure: diagnose -> minimal fix -> re-run smoke -> proof block in **Cursor Log** (`failed` / `changed` / `rationale` / `result`)
+- Max **3** attempts; stop on regression, architecture boundary, or exhausted retries - escalate to Director
+- Full protocol: MindLink OS `docs/BOUNDED_SELF_CORRECTION.md`
+
+## Grounding
+
+**On App open:** `.cursor/hooks.json` writes `logs/system/forge_ground_latest.md` on the OS repo (120s cooldown). Read that packet first in new Agent chats.
+
+Before new modules or APIs: `python scripts/forge_ground.py --project traffic-deployer --goal "<task>"` from OS repo, or use ground packet from Director.
+Edit only **KEY FILES** from the packet. Proof command = HOW_TO_RUN.md - do not invent smoke commands.
 
 ## Prove before done
 
-- `SMOKE.bat` or `python scripts/smoke_full.py` for routing/core/persistence/web.
-- `START.bat` for UI/map changes.
+| Change type | Command |
+|-------------|---------|
+| Routing / core / persistence | `SMOKE.bat` or `python scripts/smoke_full.py` |
+| UI / map / Install tab | `USER_PROVE.bat` or `python scripts/app_check.py --tier user` |
+| Ship / full audit | `APP_CHECK.bat` or `python scripts/app_check.py --tier full` |
+
+Audit report: `logs/app_check/latest.md` (strengths, weaknesses, coverage gaps).
+
 
 ## Structure
 
-- **core/** logic · **main.py** shell (target ≤1200 lines; use **P46** before new feature packages) · **web/** map · **scripts/** smoke
+- **core/** logic - entry file = shell - **scripts/** smoke
 
 ## Local-first
 
-- `tds_data/` git-ignored; no client job files in repo.
+- Field/client data git-ignored; no secrets in repo
+
+## Git (Forge)
+
+After proven Done on build/ship: **auto-commit + auto-push** to current branch per MindLink OS `forge-autonomy.mdc` v1.6. Hold push on `main`/`master`, HANDOFF-PROOF, secrets, sandbox halt. Review/Q&A: git only if Director asks to save.
+
+## OS rule index (reference only)
+
+| Topic | OS owner file |
+|-------|----------------|
+| Delivery / handoff | `.cursor/rules/delivery.mdc` |
+| Sandbox halt | `.cursor/rules/sandbox.mdc` |
+| Mind vs Forge | `.cursor/rules/autonomy-flow.mdc` |
+
+## Stack
+
+
+
+- Python 3.10+, PySide6, Qt WebEngine, `local_server.py`, OSMnx routing - **ROUTING_AND_MAP.md**
+- Do not break SwiftShader/WebGL env in `main.py` without map test

@@ -167,13 +167,18 @@ def build_install_page(win) -> QWidget:
     b_grab.setToolTip("Use USB GPS receiver at your current location")
     b_grab.clicked.connect(win._grab_gps_here)
     row_grab.addWidget(b_grab)
-    win.btn_manual_grab = QPushButton("Manual Grab")
+    win.btn_manual_grab = QPushButton("Drop pin")
     win.btn_manual_grab.setObjectName("secondary")
     win.btn_manual_grab.setCheckable(True)
     win.btn_manual_grab.setToolTip(
-        "Zoom to this site, then click the street on the map for install position")
+        "Click the map to drop a pin for this site — GPS saves immediately (drag pin to adjust).")
     win.btn_manual_grab.clicked.connect(win._toggle_manual_grab)
     row_grab.addWidget(win.btn_manual_grab)
+    win.btn_confirm_pin = QPushButton("Re-save pin")
+    win.btn_confirm_pin.setObjectName("secondary")
+    win.btn_confirm_pin.setToolTip("Re-save orange pin position after dragging")
+    win.btn_confirm_pin.clicked.connect(win._confirm_manual_grab_pin)
+    row_grab.addWidget(win.btn_confirm_pin)
     if COMPACT_UI:
         b_comp_dir = QPushButton("Dir ○")
         b_comp_dir.setObjectName("secondary")
@@ -185,7 +190,7 @@ def build_install_page(win) -> QWidget:
     row_grab.addWidget(win.lbl_grab, 1)
     sec_form.addLayout(row_grab)
 
-    win.lbl_install_checklist = QLabel("○ GPS   ○ Cleared   ○ Serial")
+    win.lbl_install_checklist = QLabel("○ GPS/pin   ○ Cleared   ○ Serial  (advisory)")
     win.lbl_install_checklist.setObjectName("installChecklist")
     win.lbl_install_checklist.setWordWrap(True)
     v.addWidget(win.lbl_install_checklist)
@@ -217,7 +222,7 @@ def build_install_page(win) -> QWidget:
     row3.addWidget(b_next, 1)
     v.addLayout(row3)
     if not COMPACT_UI:
-        lbl_keys = QLabel("I install · S skip · G grab GPS · M manual map grab · N/P prev/next")
+        lbl_keys = QLabel("I install · S skip · G grab GPS · M drop pin · N/P prev/next")
         lbl_keys.setObjectName("hint")
         lbl_keys.setWordWrap(True)
         v.addWidget(lbl_keys)

@@ -17,11 +17,20 @@ import os
 import numpy as np
 
 try:
-    import osmnx as ox
     import networkx as nx
-    HAS_ROUTING = True
+    HAS_NETWORKX = True
 except Exception:
-    HAS_ROUTING = False
+    nx = None  # type: ignore[assignment,misc]
+    HAS_NETWORKX = False
+
+try:
+    import osmnx as ox
+    HAS_OSMNX = True
+except Exception:
+    ox = None  # type: ignore[assignment,misc]
+    HAS_OSMNX = False
+
+HAS_ROUTING = HAS_NETWORKX  # saved-graph routing works offline without osmnx
 
 GRAPH_FILENAME = "road_graph.graphml"
 # osmnx appends "/interpreter" to overpass_url — bases must NOT include that suffix.
@@ -53,7 +62,7 @@ def overpass_interpreter_url(base: str) -> str:
 
 def _configure_osmnx_for_download() -> None:
     """Tune osmnx HTTP for one-shot road downloads (work Wi‑Fi, proxies, long queries)."""
-    if not HAS_ROUTING:
+    if not HAS_OSMNX:
         return
     for attr, val in (("requests_timeout", 300), ("timeout", 300)):
         try:
@@ -84,11 +93,12 @@ def graph_file_exists(data_dir: str) -> bool:
 
 
 def has_graph(data_dir: str) -> bool:
-    """True only when the graph file loads into memory (osmnx required)."""
+    """True only when the graph file loads into memory."""
     return load_graph(data_dir) is not None
 
 
 def _haversine_m(lat1, lon1, lat2, lon2):
+    lat1, lon1, lat2, lon2 = float(lat1), float(lon1), float(lat2), float(lon2)
     R = 6371000.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
@@ -218,7 +228,7 @@ def probe_all_mirrors(timeout_s: float = 14.0) -> list[dict]:
 
 def probe_roads_internet(timeout_s: float = 14.0) -> str | None:
     """Quick check that at least one Overpass mirror works. None = OK."""
-    if not HAS_ROUTING:
+    if not HAS_OSMNX:
         return "Routing libraries (osmnx) are not installed."
     results = probe_all_mirrors(timeout_s=timeout_s)
     for r in results:
@@ -248,7 +258,7 @@ def import_graph(src_path: str, data_dir: str) -> dict:
     if os.path.normcase(os.path.abspath(src)) != os.path.normcase(os.path.abspath(dest)):
         shutil.copy2(src, dest)
     _GRAPH_CACHE.pop(data_dir, None)
-    if HAS_ROUTING:
+    if HAS_OSMNX:
         g = ox.load_graphml(dest)
         _GRAPH_CACHE[data_dir] = g
         _NODE_ARRAYS.pop(id(g), None)
@@ -268,7 +278,7 @@ def download_area(points, data_dir: str, buffer_m: float = 1500, network_type: s
     circle around the centroid. For spread-out routes this downloads far less data
     and finishes much faster.
     """
-    if not HAS_ROUTING:
+    if not HAS_OSMNX:
         raise RuntimeError("Routing libraries (osmnx) are not installed.")
     pts = [(float(p[0]), float(p[1])) for p in points if p and p[0] and p[1]]
     if not pts:
@@ -313,31 +323,58 @@ def download_area(points, data_dir: str, buffer_m: float = 1500, network_type: s
 
 def load_graph(data_dir: str):
     """Load the cached graph (offline). Returns None if missing or unloadable."""
-    if not HAS_ROUTING:
+    if not HAS_NETWORKX:
         return None
     if data_dir in _GRAPH_CACHE:
         return _GRAPH_CACHE[data_dir]
     if not graph_file_exists(data_dir):
         return None
+    path = graph_path(data_dir)
     try:
-        G = ox.load_graphml(graph_path(data_dir))
+        if HAS_OSMNX:
+            G = ox.load_graphml(path)
+        else:
+            G = nx.read_graphml(path)
     except Exception:
         return None
+    _normalize_graph_coords(G)
     _GRAPH_CACHE[data_dir] = G
     return G
+
+
+def _normalize_graph_coords(G) -> None:
+    """GraphML via networkx often stores node x/y and edge length as strings — coerce once at load."""
+    for n in G.nodes:
+        nd = G.nodes[n]
+        if "y" in nd:
+            nd["y"] = float(nd["y"])
+        if "x" in nd:
+            nd["x"] = float(nd["x"])
+    for _u, _v, _k, d in G.edges(keys=True, data=True):
+        length = d.get("length")
+        if length is not None and not isinstance(length, (int, float)):
+            try:
+                d["length"] = float(length)
+            except (TypeError, ValueError):
+                pass
+
+
+def _node_latlon(G, n) -> tuple[float, float]:
+    return float(G.nodes[n]["y"]), float(G.nodes[n]["x"])
 
 
 def _node_arrays(G):
     key = id(G)
     if key not in _NODE_ARRAYS:
         ids = list(G.nodes)
-        ys = np.array([G.nodes[n]["y"] for n in ids])
-        xs = np.array([G.nodes[n]["x"] for n in ids])
+        ys = np.array([float(G.nodes[n]["y"]) for n in ids], dtype=np.float64)
+        xs = np.array([float(G.nodes[n]["x"]) for n in ids], dtype=np.float64)
         _NODE_ARRAYS[key] = (ids, ys, xs)
     return _NODE_ARRAYS[key]
 
 
 def nearest_node(G, lat, lon):
+    lat, lon = float(lat), float(lon)
     ids, ys, xs = _node_arrays(G)
     dlat = np.radians(ys - lat)
     dlon = np.radians(xs - lon)
@@ -378,14 +415,20 @@ def street_name_at(data_dir: str, lat: float, lon: float) -> str:
 
 
 def _bearing(a, b):
-    return ox.bearing.calculate_bearing(a[0], a[1], b[0], b[1])
+    if HAS_OSMNX:
+        return ox.bearing.calculate_bearing(a[0], a[1], b[0], b[1])
+    lat1, lon1, lat2, lon2 = map(math.radians, [a[0], a[1], b[0], b[1]])
+    dlon = lon2 - lon1
+    x = math.sin(dlon) * math.cos(lat2)
+    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
 
 
 def turn_by_turn(G, route) -> list[str]:
     """Build a turn-by-turn list from a node route."""
     if len(route) < 2:
         return ["Arrive at destination"]
-    coords = [(G.nodes[n]["y"], G.nodes[n]["x"]) for n in route]
+    coords = [_node_latlon(G, n) for n in route]
     steps: list[str] = []
     cur_street = None
     seg_dist = 0.0
@@ -427,12 +470,14 @@ def route_between(G, a, b, *, include_turns: bool = True) -> dict:
 
     include_turns=False skips turn_by_turn (faster route build; driving uses leg_plan).
     """
+    a = (float(a[0]), float(a[1]))
+    b = (float(b[0]), float(b[1]))
     try:
         on = nearest_node(G, a[0], a[1])
         dn = nearest_node(G, b[0], b[1])
         route = nx.shortest_path(G, on, dn, weight="length")
         dist = nx.shortest_path_length(G, on, dn, weight="length")
-        coords = [(G.nodes[n]["y"], G.nodes[n]["x"]) for n in route]
+        coords = [_node_latlon(G, n) for n in route]
         steps = turn_by_turn(G, route) if include_turns else []
         return {"ok": True, "miles": dist / 1609.34, "steps": steps, "polyline": coords}
     except Exception as exc:
@@ -472,11 +517,11 @@ def _maneuvers_on_route(G, route, *, stop_index: int | None = None) -> list[dict
     if len(route) < 2:
         if stop_index is not None:
             n = route[0]
-            return [{"type": "arrive", "street": "", "lat": G.nodes[n]["y"], "lon": G.nodes[n]["x"],
+            return [{"type": "arrive", "street": "", "lat": float(G.nodes[n]["y"]), "lon": float(G.nodes[n]["x"]),
                      "dist_m": 0.0, "stop_index": stop_index}]
         return []
 
-    coords = [(G.nodes[n]["y"], G.nodes[n]["x"]) for n in route]
+    coords = [_node_latlon(G, n) for n in route]
     maneuvers: list[dict] = []
     cur_street = None
     for i in range(len(route) - 1):
@@ -513,7 +558,7 @@ def leg_plan(G, a, b, stop_index: int = 0) -> dict:
         on = nearest_node(G, a[0], a[1])
         dn = nearest_node(G, b[0], b[1])
         route = nx.shortest_path(G, on, dn, weight="length")
-        coords = [(G.nodes[n]["y"], G.nodes[n]["x"]) for n in route]
+        coords = [_node_latlon(G, n) for n in route]
         polyline = [[float(c[0]), float(c[1])] for c in coords]
         if len(route) < 2:
             name = ""
@@ -644,13 +689,15 @@ def segment_access(G, begin: tuple[float, float], end: tuple[float, float]) -> d
     nb = nearest_node(G, begin[0], begin[1])
     ne = nearest_node(G, end[0], end[1])
     return {
-        "begin": (G.nodes[nb]["y"], G.nodes[nb]["x"]),
-        "end": (G.nodes[ne]["y"], G.nodes[ne]["x"]),
+        "begin": _node_latlon(G, nb),
+        "end": _node_latlon(G, ne),
     }
 
 
 def road_distance_m(G, a: tuple[float, float], b: tuple[float, float]) -> float:
     """Shortest drive distance in meters between two lat/lon points on the graph."""
+    a = (float(a[0]), float(a[1]))
+    b = (float(b[0]), float(b[1]))
     try:
         na = nearest_node(G, a[0], a[1])
         nb = nearest_node(G, b[0], b[1])

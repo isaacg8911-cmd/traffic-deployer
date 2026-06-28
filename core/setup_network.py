@@ -79,9 +79,17 @@ def run_checks(*, data_dir: str, app_dir: str) -> list[dict]:
         rows.append({"label": "Address search", "ok": False, "detail": "requests library missing"})
 
     web_index = os.path.join(app_dir, "web", "index.html")
+    try:
+        from ui.paths import WEB_DIR
+
+        web_index = os.path.join(WEB_DIR, "index.html")
+    except Exception:
+        internal = os.path.join(app_dir, "_internal", "web", "index.html")
+        if os.path.isfile(internal):
+            web_index = internal
     rows.append({
         "label": "Map UI files",
         "ok": os.path.isfile(web_index),
-        "detail": "web/index.html" if os.path.isfile(web_index) else "missing",
+        "detail": web_index if os.path.isfile(web_index) else "missing — re-extract full zip (_internal/web)",
     })
     return rows

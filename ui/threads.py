@@ -58,6 +58,49 @@ class GeocodeThread(QThread):
                 self.finished_result.emit([], str(exc))
 
 
+class FieldStreetThread(QThread):
+    """Reverse-geocode + road intel off the UI thread (pin/GPS save path)."""
+    finished_result = Signal(int, float, float, str, str, str)
+
+    def __init__(
+        self,
+        stop_idx: int,
+        lat: float,
+        lon: float,
+        data_dir: str,
+        *,
+        prefer_online: bool = True,
+    ):
+        super().__init__()
+        self.stop_idx = stop_idx
+        self.lat = float(lat)
+        self.lon = float(lon)
+        self.data_dir = data_dir
+        self.prefer_online = prefer_online
+
+    def run(self):
+        if self.isInterruptionRequested():
+            return
+        from core import geo
+
+        street, src_tag = geo.street_for_field(
+            self.lat, self.lon, self.data_dir, prefer_online=self.prefer_online)
+        warning = ""
+        if road_router.has_graph(self.data_dir):
+            try:
+                from core import street_intel
+
+                g = road_router.load_graph(self.data_dir)
+                if g is not None:
+                    r = street_intel.analyze_point(g, self.lat, self.lon)
+                    warning = str(r.get("message") or "").strip()
+            except Exception:
+                pass
+        if not self.isInterruptionRequested():
+            self.finished_result.emit(
+                self.stop_idx, self.lat, self.lon, street or "", src_tag or "", warning)
+
+
 class DownloadRoadsThread(QThread):
     """Download osmnx graph in a thread (network-bound; avoids flaky QProcess on Windows)."""
     finished_result = Signal(dict)
@@ -80,6 +123,25 @@ class DownloadRoadsThread(QThread):
                 self.finished_result.emit({"ok": False, "error": str(exc)})
 
 
+class MapSetupThread(QThread):
+    """Download California basemap + map assets (portable exe on Wi-Fi)."""
+    finished_result = Signal(dict)
+
+    def run(self):
+        if self.isInterruptionRequested():
+            return
+        try:
+            from core.map_setup import run_map_setup
+            from ui.paths import APP_DIR, DATA_DIR, VENDOR_DIR, WEB_DIR
+
+            run_map_setup(APP_DIR, WEB_DIR, DATA_DIR, VENDOR_DIR)
+            if not self.isInterruptionRequested():
+                self.finished_result.emit({"ok": True})
+        except Exception as exc:  # noqa: BLE001
+            if not self.isInterruptionRequested():
+                self.finished_result.emit({"ok": False, "error": str(exc)})
+
+
 class PicocountThread(QThread):
     """PicoCount 2500 serial ops off the UI thread (paced protocol)."""
     finished_result = Signal(dict)
@@ -97,19 +159,19 @@ class PicocountThread(QThread):
         port = self.kwargs.get("port")
         try:
             if op == "probe":
-                pr = picocount.probe_port(port)
-                self.finished_result.emit({
-                    "ok": pr.ok,
-                    "message": pr.message,
-                    "port": pr.port,
-                    "ports": pr.ports,
-                })
+                self.finished_result.emit(picocount.read_counter_status(port))
             elif op == "serial":
                 self.finished_result.emit(picocount.read_serial_number(port))
             elif op == "clear_configure":
                 self.finished_result.emit(
                     picocount.clear_and_configure(
                         self.kwargs["unit_id"], port=port))
+            elif op == "rename":
+                self.finished_result.emit(
+                    picocount.rename_unit_id(
+                        self.kwargs["unit_id"], port=port))
+            elif op == "memory":
+                self.finished_result.emit(picocount.read_counter_status(port))
             elif op == "download":
                 self.finished_result.emit(
                     picocount.download_study(
@@ -123,6 +185,77 @@ class PicocountThread(QThread):
         except Exception as exc:  # noqa: BLE001
             if not self.isInterruptionRequested():
                 self.finished_result.emit({"ok": False, "error": str(exc)})
+
+
+class RouteApplyPickThread(QThread):
+    """Apply manual pick order + trace route off the UI thread."""
+    finished_result = Signal(dict)
+    progress_text = Signal(str)
+
+    def __init__(
+        self,
+        home: tuple,
+        picked_uids: list[str],
+        stops: list[dict],
+        data_dir: str,
+        pick_sides: dict[str, str] | None = None,
+    ):
+        super().__init__()
+        self.home = home
+        self.picked_uids = picked_uids
+        self.stops = stops
+        self.data_dir = data_dir
+        self.pick_sides = dict(pick_sides or {})
+
+    def run(self):
+        import copy
+        import traceback
+        from core.map_display import apply_manual_order
+
+        if self.isInterruptionRequested():
+            return
+        try:
+            by_uid = {s["uid"]: s for s in self.stops}
+            picked: list[dict] = []
+            for uid in self.picked_uids:
+                if uid not in by_uid:
+                    continue
+                stop = copy.deepcopy(by_uid[uid])
+                side = self.pick_sides.get(uid)
+                if side in ("begin", "end"):
+                    stop["pick_cross_locked"] = True
+                    stop["cross_side"] = side
+                    if side == "begin":
+                        stop["cross_lat"] = stop["begin_lat"]
+                        stop["cross_lon"] = stop["begin_lon"]
+                    else:
+                        stop["cross_lat"] = stop["end_lat"]
+                        stop["cross_lon"] = stop["end_lon"]
+                picked.append(stop)
+            if len(picked) != len(self.stops):
+                self.finished_result.emit({
+                    "ok": False,
+                    "error": (
+                        f"Pick all {len(self.stops)} stops on the map before Apply "
+                        f"({len(picked)} chosen)."
+                    ),
+                })
+                return
+            self.progress_text.emit("Tracing route on real streets...")
+            n = len(picked)
+            self.progress_text.emit(
+                f"Tracing route on map ({n} stops — about 5–20 sec)...")
+            res = apply_manual_order(tuple(self.home), picked, self.data_dir)
+            if self.isInterruptionRequested():
+                return
+            self.finished_result.emit({"ok": True, **res})
+        except Exception as exc:  # noqa: BLE001
+            if not self.isInterruptionRequested():
+                self.finished_result.emit({
+                    "ok": False,
+                    "error": str(exc),
+                    "trace": traceback.format_exc(),
+                })
 
 
 class RouteOptimizeThread(QThread):

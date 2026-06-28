@@ -56,7 +56,7 @@ def main() -> int:
 
     import road_router
 
-    if not road_router.HAS_ROUTING:
+    if not road_router.HAS_OSMNX:
         print("FAIL: osmnx not installed. Run START.bat once.")
         return 1
 

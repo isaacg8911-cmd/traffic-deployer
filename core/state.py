@@ -47,11 +47,10 @@ class RouteState:
         self.est_paths: list[str] = []
         self.current_index: int = 0
         self.pickup_index: int = 0
-        self.map_day_filter: str = "All maps"
-        self.voice_nav: bool = True
-        self.voice_style: str = "female"
+        self.map_day_filter: str = "All days"
         self.saved_home_label: str = ""
         self.saved_home_coords: tuple[float, float] | None = None
+        self.ig_tfc_path: str = ""
 
     # --------------------------------------------------------------------- #
     #  Persistence
@@ -77,13 +76,13 @@ class RouteState:
         d["est_paths"] = list(self.est_paths)
         d["current_index"] = int(self.current_index)
         d["pickup_index"] = int(self.pickup_index)
-        d["map_day_filter"] = self.map_day_filter or "All maps"
-        d["voice_nav"] = bool(self.voice_nav)
-        d["voice_style"] = "female"
+        d["map_day_filter"] = self.map_day_filter or "All days"
         if self.saved_home_label:
             d["saved_home_label"] = self.saved_home_label
         if self.saved_home_coords:
             d["saved_home_coords"] = list(self.saved_home_coords)
+        if getattr(self, "ig_tfc_path", None):
+            d["ig_tfc_path"] = self.ig_tfc_path
         return d
 
     def load(self) -> bool:
@@ -92,9 +91,9 @@ class RouteState:
             data = persistence.load_state(self.backup_file, self.data_dir)
         if not data:
             return False
-        self.home = tuple(data.get("home", DEFAULT_HOME))
+        self.home = tuple(float(v) for v in data.get("home", DEFAULT_HOME))
         if data.get("default_home"):
-            self.default_home = tuple(data["default_home"])
+            self.default_home = tuple(float(v) for v in data["default_home"])
         self.stops = data.get("stops", [])
         for s in self.stops:
             st = str(s.get("street", "")).strip()
@@ -110,12 +109,14 @@ class RouteState:
         self.est_paths = [str(p) for p in data.get("est_paths", []) if p]
         self.current_index = int(data.get("current_index", 0))
         self.pickup_index = int(data.get("pickup_index", 0))
-        self.map_day_filter = str(data.get("map_day_filter", "All maps") or "All maps")
-        self.voice_nav = bool(data.get("voice_nav", True))
-        self.voice_style = "female"
+        raw_filter = str(data.get("map_day_filter", "All days") or "All days")
+        self.map_day_filter = "All days" if raw_filter == "All maps" else raw_filter
         self.saved_home_label = str(data.get("saved_home_label", "") or "")
         shc = data.get("saved_home_coords")
-        self.saved_home_coords = tuple(shc) if shc and len(shc) >= 2 else None
+        self.saved_home_coords = (
+            tuple(float(v) for v in shc) if shc and len(shc) >= 2 else None
+        )
+        self.ig_tfc_path = str(data.get("ig_tfc_path", "") or "")
         return True
 
     def apply_default_home(self):
@@ -123,19 +124,29 @@ class RouteState:
         if self.default_home:
             self.home = self.default_home
 
-    def save_default_home(self, lat: float, lon: float, *, label: str = ""):
-        self.default_home = (float(lat), float(lon))
-        self.home = self.default_home
+    @staticmethod
+    def is_factory_home(lat: float, lon: float) -> bool:
+        return (
+            abs(float(lat) - DEFAULT_HOME[0]) < 1e-4
+            and abs(float(lon) - DEFAULT_HOME[1]) < 1e-4
+        )
+
+    def set_start_point(self, lat: float, lon: float, label: str = "") -> bool:
+        """Single path: home + default + saved address — survives restart."""
+        lat, lon = float(lat), float(lon)
+        self.home = (lat, lon)
+        self.default_home = (lat, lon)
+        self.saved_home_coords = (lat, lon)
         if label:
-            self.saved_home_label = label.strip()
-        self.save()
+            self.saved_home_label = label.strip()[:200]
+        return self.save()
+
+    def save_default_home(self, lat: float, lon: float, *, label: str = ""):
+        self.set_start_point(lat, lon, label)
 
     def save_home_address(self, lat: float, lon: float, label: str):
         """Remember last geocoded / chosen home for one-click restore."""
-        self.home = (float(lat), float(lon))
-        self.saved_home_coords = (float(lat), float(lon))
-        self.saved_home_label = (label or "").strip()[:200]
-        self.save()
+        self.set_start_point(lat, lon, label)
 
     def save(self) -> bool:
         if persistence is None:

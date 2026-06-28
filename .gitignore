@@ -20,6 +20,7 @@ tds_data/
 !.streamlit/*.json
 
 # Build output
+build/
 dist/
 _diag_py.txt
 

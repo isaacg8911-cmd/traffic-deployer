@@ -1,0 +1,33 @@
+FRESH WORK LAPTOP (you deleted the old copy)
+=============================================
+
+Nothing from the old install is required. One zip from home is enough.
+
+ON HOME PC (Wi-Fi) — do this once tonight
+  1. BUILD_WORK_LAPTOP.bat
+  2. VERIFY_WORK_LAPTOP.bat  -> must say PASS
+  3. Copy dist\TrafficDeployer-WorkLaptop.zip to USB or email/cloud
+
+ON WORK LAPTOP — clean install
+  1. Delete any old TrafficDeployer folder if it is still there
+  2. Copy TrafficDeployer-WorkLaptop.zip to the laptop
+  3. Right-click zip -> Properties -> Unblock (if you see it) -> OK
+  4. Extract All -> e.g. C:\TrafficDeployer
+  5. Open the TrafficDeployer folder inside
+  6. Double-click OPEN_APP.bat   (not START.bat — that is dev-only)
+  7. Setup tab: Excel + .EST -> BUILD ROUTE -> READY FOR OFFLINE
+
+WHAT YOU LOST BY DELETING THE OLD COPY
+  - Old shift / install / pickup saves on that laptop (tds_backup_*.json)
+  - That is OK if you had already exported Audit Excel or did not need those files
+  - New field data will save fresh in tds_data\ on this laptop
+
+WHAT IS IN THE ZIP (you do NOT copy separately)
+  - TrafficDeployer.exe + app
+  - california.pmtiles (offline map)
+  - road_graph.graphml (if route was built at home before zip)
+
+IF OPEN_APP.bat ERRORS
+  - "map missing" -> rebuild zip on home PC (START.bat first)
+  - App blocked by Windows -> Unblock zip, extract again, run OPEN_APP.bat
+  - Map blank in app -> Route tab -> Recover map

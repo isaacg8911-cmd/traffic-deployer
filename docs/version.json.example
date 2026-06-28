@@ -1,0 +1,7 @@
+{
+  "version": "1.0.7",
+  "published": "2026-06-07",
+  "download_url": "https://example.com/releases/TrafficDeployer-1.0.7.zip",
+  "notes": "Route map fix, counter Refresh flow, GPS smooth follow.",
+  "min_version": "1.0.0"
+}

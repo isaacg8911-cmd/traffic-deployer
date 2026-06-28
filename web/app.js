@@ -53,13 +53,14 @@
   });
 
   var bridge = null;
-  var follow = true;
+  var follow = false;
   var homeMarker = null;
   var gpsMarker = null;
   var lastState = null;
   var _lastHomeKey = '';
   var _leanDrive = false;
-  var LEAN_BASE_LAYERS = ['landuse', 'roads-all', 'roads-major'];
+  /* Soft lean: drop landuse tint only — keep roads + street names for field context. */
+  var LEAN_BASE_LAYERS = ['landuse'];
 
   var followBtn = document.getElementById('follow-btn');
   var zoomInBtn = document.getElementById('zoom-in');
@@ -189,6 +190,169 @@
     '#c45f14'
   ];
 
+  var _manualGrabForced = false;
+  var dropPinMarker = null;
+  var dropPinCoords = null;
+  var confirmPinBtn = document.getElementById('confirm-pin-btn');
+
+  function isManualGrab() {
+    return _manualGrabForced || !!(lastState && lastState.map_mode === 'manual_grab');
+  }
+
+  function tdmapUrl(lat, lon) {
+    return 'tdmap://pin?lat=' + encodeURIComponent(String(lat)) + '&lon=' + encodeURIComponent(String(lon));
+  }
+
+  function fireMapClick(lat, lon) {
+    if (lat == null || lon == null || isNaN(lat) || isNaN(lon)) return false;
+    if (bridge && typeof bridge.onMapClick === 'function') {
+      try {
+        bridge.onMapClick(lat, lon);
+        return true;
+      } catch (e) { /* fall through to tdmap:// */ }
+    }
+    /* tdmap:// via window.location.href is NOT intercepted in Qt WebEngine — bridge only reliable path */
+    window.location.href = tdmapUrl(lat, lon);
+    return true;
+  }
+
+  function clearDropPin() {
+    dropPinCoords = null;
+    if (dropPinMarker) {
+      dropPinMarker.remove();
+      dropPinMarker = null;
+    }
+    if (confirmPinBtn) confirmPinBtn.style.display = 'none';
+  }
+
+  var _pinDragTimer = null;
+
+  function fieldCoordsOk(lat, lon) {
+    return lat != null && lon != null && !isNaN(lat) && !isNaN(lon)
+      && lat > 32 && lat < 42.5 && lon < -114 && lon > -125;
+  }
+
+  function updateDropPinHud() {
+    if (!confirmPinBtn) return;
+    confirmPinBtn.style.display = (isManualGrab() && dropPinCoords) ? 'block' : 'none';
+  }
+
+  function schedulePinSaveFromDrag(lat, lon) {
+    if (_pinDragTimer) clearTimeout(_pinDragTimer);
+    _pinDragTimer = setTimeout(function () {
+      fireMapClick(lat, lon);
+      _pinDragTimer = null;
+    }, 350);
+  }
+
+  function showDropPin(lat, lon) {
+    if (!fieldCoordsOk(lat, lon)) return false;
+    dropPinCoords = { lat: lat, lon: lon };
+    window.__tdLastPinDrop = { lat: lat, lon: lon };
+    if (!dropPinMarker) {
+      var el = document.createElement('div');
+      el.innerHTML =
+        '<svg width="32" height="42" viewBox="0 0 32 42">' +
+        '<path d="M16 0C9 0 4 6 4 13c0 10 12 29 12 29s12-19 12-29C28 6 23 0 16 0z" fill="#e65100" stroke="#fff" stroke-width="2"/>' +
+        '<circle cx="16" cy="13" r="5" fill="#fff"/></svg>';
+      dropPinMarker = new maplibregl.Marker({ element: el, anchor: 'bottom', draggable: true });
+      dropPinMarker.setLngLat([lon, lat]);
+      dropPinMarker.addTo(map);
+      dropPinMarker.on('dragend', function () {
+        var ll = dropPinMarker.getLngLat();
+        if (!fieldCoordsOk(ll.lat, ll.lng)) return;
+        dropPinCoords = { lat: ll.lat, lon: ll.lng };
+        window.__tdLastPinDrop = dropPinCoords;
+        updateDropPinHud();
+        if (isManualGrab()) {
+          schedulePinSaveFromDrag(dropPinCoords.lat, dropPinCoords.lon);
+        }
+      });
+    } else {
+      dropPinMarker.setLngLat([lon, lat]);
+    }
+    updateDropPinHud();
+    return true;
+  }
+
+  function confirmDropPin() {
+    if (!dropPinCoords) return false;
+    fireMapClick(dropPinCoords.lat, dropPinCoords.lon);
+    return true;
+  }
+
+  function manualGrabPinAt(lat, lon) {
+    if (!fieldCoordsOk(lat, lon)) return false;
+    showDropPin(lat, lon);
+    fireMapClick(lat, lon);
+    return true;
+  }
+
+  window.__tdSetManualGrab = function (on, prompt) {
+    _manualGrabForced = !!on;
+    if (on) {
+      clearDropPin();
+      setFollow(false);
+      if (lastState) {
+        lastState.map_mode = 'manual_grab';
+        if (prompt) lastState.pick_prompt = prompt;
+        updatePickBanner(lastState);
+      }
+      document.body.classList.add('td-manual-grab');
+    } else {
+      clearDropPin();
+      if (lastState && lastState.map_mode === 'manual_grab') {
+        lastState.map_mode = 'plan';
+      }
+      document.body.classList.remove('td-manual-grab');
+      if (lastState) updatePickBanner(lastState);
+    }
+    updateDropPinHud();
+  };
+
+  window.__tdPatchFieldPin = function (uid, lat, lon, siteId, pending) {
+    if (!fieldCoordsOk(lat, lon) || !uid) return false;
+    ensureSources();
+    if (!map.getSource('install-pts')) return false;
+    var src = map.getSource('install-pts');
+    var data = src._data || { type: 'FeatureCollection', features: [] };
+    var feats = (data.features || []).filter(function (f) {
+      return !(f.properties && f.properties.uid === uid);
+    });
+    feats.push({
+      type: 'Feature',
+      properties: {
+        uid: uid, kind: 'install', id: siteId, lat: lat, lon: lon, pending: !!pending
+      },
+      geometry: { type: 'Point', coordinates: [lon, lat] }
+    });
+    src.setData({ type: 'FeatureCollection', features: feats });
+    setLayerVis('install-pts', feats.length > 0);
+    return true;
+  };
+
+  window.__tdConfirmDropPin = confirmDropPin;
+
+  window.__tdShowDropPinOnly = function (lat, lon) {
+    showDropPin(lat, lon);
+    var pin = dropPinCoords ? { lat: dropPinCoords.lat, lon: dropPinCoords.lon } : null;
+    return JSON.stringify({ ok: true, pin: pin });
+  };
+
+  window.__tdSimManualGrabClick = function (lat, lon) {
+    if (!isManualGrab()) {
+      return JSON.stringify({ ok: false, err: 'not_manual_grab' });
+    }
+    showDropPin(lat, lon);
+    var pin = dropPinCoords ? { lat: dropPinCoords.lat, lon: dropPinCoords.lon } : null;
+    fireMapClick(lat, lon);
+    return JSON.stringify({ ok: true, pin: pin });
+  };
+
+  if (confirmPinBtn) {
+    confirmPinBtn.addEventListener('click', confirmDropPin);
+  }
+
   function fireStopClick(payload) {
     if (!payload) return;
     if (bridge && typeof bridge.onStopClick === 'function') {
@@ -200,10 +364,44 @@
     window.location.href = 'tdstop://' + encodeURIComponent(payload);
   }
 
+  var siteRefPopup = null;
+
+  function escHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function isInstallTab() {
+    return !!(lastState && lastState.on_install);
+  }
+
+  function showSiteRefPopup(lngLat, props) {
+    var kind = props.kind;
+    var pointLabel = kind === 'begin' ? 'Begin (blue)' : 'End (red)';
+    var siteId = escHtml(props.id || '—');
+    var street = escHtml(props.street || '').trim();
+    var html =
+      '<div class="site-ref-popup">' +
+      '<div class="site-ref-id">Site ' + siteId + '</div>' +
+      (street ? '<div class="site-ref-street">' + street + '</div>' : '') +
+      '<div class="site-ref-side">' + pointLabel + '</div></div>';
+    if (siteRefPopup) siteRefPopup.remove();
+    siteRefPopup = new maplibregl.Popup({
+      closeButton: true,
+      closeOnClick: true,
+      maxWidth: '260px',
+      offset: 14,
+      className: 'site-ref-popup-wrap'
+    })
+      .setLngLat(lngLat)
+      .setHTML(html)
+      .addTo(map);
+  }
+
   var PICK_CLICK_LAYERS = [
     'pick-target-circle', 'pick-target-label',
     'stop-circle', 'stop-label',
-    'site-begin', 'site-end', 'site-begin-label', 'site-end-label'
+    'site-begin', 'site-end', 'site-begin-label', 'site-end-label',
+    'install-pts'
   ];
 
   function pickLayerAtPoint(point) {
@@ -215,6 +413,9 @@
       var uid = props.uid;
       if (!uid) continue;
       var kind = props.kind;
+      if (kind === 'install') {
+        return 'install|' + String(uid);
+      }
       if (kind === 'begin' || kind === 'end') {
         return String(uid) + '|' + kind;
       }
@@ -227,15 +428,26 @@
     if (map._stopClickBound) return;
     map._stopClickBound = true;
     function onPick(e) {
+      if (isManualGrab()) {
+        e.preventDefault();
+        manualGrabPinAt(e.lngLat.lat, e.lngLat.lng);
+        return;
+      }
       var f = e.features && e.features[0];
       if (f && f.properties && f.properties.uid) {
         e.preventDefault();
         var kind = f.properties.kind;
         var payload = f.properties.uid;
-        if (kind === 'begin' || kind === 'end') {
-          payload = payload + '|' + kind;
+        if (kind === 'install') {
+          fireStopClick('install|' + payload);
+        } else if (kind === 'begin' || kind === 'end') {
+          if (isInstallTab() && !isManualGrab() && !(lastState && lastState.map_mode === 'pick')) {
+            showSiteRefPopup(e.lngLat, f.properties);
+          }
+          fireStopClick(payload + '|' + kind);
+        } else {
+          fireStopClick(payload);
         }
-        fireStopClick(payload);
       }
     }
     map.on('click', 'stop-circle', onPick);
@@ -245,8 +457,9 @@
     map.on('click', 'site-end-label', onPick);
     map.on('click', 'pick-target-circle', onPick);
     map.on('click', 'pick-target-label', onPick);
+    map.on('click', 'install-pts', onPick);
     ['stop-circle', 'site-begin', 'site-end', 'site-begin-label', 'site-end-label',
-      'pick-target-circle', 'pick-target-label'].forEach(function (id) {
+      'pick-target-circle', 'pick-target-label', 'install-pts'].forEach(function (id) {
       map.on('mouseenter', id, function () { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', id, function () { map.getCanvas().style.cursor = ''; });
     });
@@ -389,7 +602,9 @@
       map.addLayer({ id: 'install-pts', type: 'circle', source: 'install-pts',
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 6],
-          'circle-color': '#43a047',
+          'circle-color': [
+            'case', ['boolean', ['get', 'pending'], false], '#e65100', '#43a047'
+          ],
           'circle-stroke-color': '#fff',
           'circle-stroke-width': 2
         } });
@@ -401,7 +616,7 @@
     var pick = mode === 'pick';
     lean = !!lean;
     _leanDrive = lean;
-    setBasemapLabels(!drive && !lean);
+    setBasemapLabels(true);
     LEAN_BASE_LAYERS.forEach(function (id) { setLayerVis(id, !lean); });
     var segW = drive
       ? ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2.5]
@@ -465,18 +680,22 @@
     var el = document.getElementById('pick-banner');
     if (!el) return;
     var picking = state.map_mode === 'pick';
-    var manualGrab = state.map_mode === 'manual_grab';
+    var manualGrab = isManualGrab();
     var msg = state.pick_prompt || '';
     document.body.classList.toggle('td-manual-grab', manualGrab);
     if ((picking || manualGrab) && msg) {
       var waiting = state.pick_waiting || '';
       el.textContent = waiting ? (msg + ' — ' + waiting) : msg;
+      if (manualGrab && !waiting) {
+        el.textContent = msg + ' — click the map (orange pin saves GPS; drag to adjust)';
+      }
       el.style.display = 'block';
     } else {
       document.body.classList.remove('td-manual-grab');
       el.style.display = 'none';
       el.textContent = '';
     }
+    updateDropPinHud();
   }
 
   function renderState(state) {
@@ -488,45 +707,9 @@
     applyData(state);
   }
 
-  function applyLeanDriveData(state) {
-    if (homeMarker) { homeMarker.remove(); homeMarker = null; }
-    applyMapMode('drive', true);
-    var nextLeg = state.next_leg || null;
-    var legPoly = (nextLeg && nextLeg.polyline) || [];
-    var showNextLeg = !!state.show_guide && legPoly.length >= 2;
-    if (map.getSource('route')) {
-      map.getSource('route').setData(
-        showNextLeg ? routeLineFC(legPoly, true) : emptyFC());
-      setLayerVis('route-casing', false);
-      setLayerVis('route-line', showNextLeg);
-    }
-    var empty = emptyFC();
-    if (map.getSource('segments')) map.getSource('segments').setData(empty);
-    if (map.getSource('site-pts')) map.getSource('site-pts').setData(empty);
-    if (map.getSource('stop-markers')) map.getSource('stop-markers').setData(empty);
-    if (map.getSource('pick-targets')) map.getSource('pick-targets').setData(empty);
-    if (map.getSource('install-pts')) map.getSource('install-pts').setData(empty);
-    setLayerVis('segments-line', false);
-    setLayerVis('site-begin', false);
-    setLayerVis('site-end', false);
-    setLayerVis('site-begin-label', false);
-    setLayerVis('site-end-label', false);
-    setLayerVis('pick-target-circle', false);
-    setLayerVis('pick-target-label', false);
-    setLayerVis('stop-circle', false);
-    setLayerVis('stop-label', false);
-    setLayerVis('install-pts', false);
-    updatePickBanner(state);
-    window.__dbg.applied++;
-  }
-
   function applyData(state) {
     var lean = !!state.lean_drive;
     var homeKey = state.home ? state.home[0] + ',' + state.home[1] : '';
-    if (lean) {
-      applyLeanDriveData(state);
-      return;
-    }
     if (homeMarker) { homeMarker.remove(); homeMarker = null; }
     if (state.home) {
       var hel = document.createElement('div');
@@ -539,19 +722,22 @@
     }
     _lastHomeKey = homeKey;
 
-    var mode = state.map_mode || (state.driving ? 'drive' : 'plan');
-    applyMapMode(mode, false);
-
     var driving = !!state.driving;
+    var mode = state.map_mode || (driving ? 'drive' : 'plan');
+    applyMapMode(lean ? 'drive' : mode, lean);
+
     var picking = state.map_mode === 'pick';
     var showStops = state.show_badges !== false;
     var hiUid = state.highlight_uid || state.drive_target_uid;
+    var focusUid = (lean && driving && hiUid) ? hiUid : null;
     var pickOrder = state.pick_order || [];
     var pickIdx = {};
     pickOrder.forEach(function (uid, i) { pickIdx[uid] = i + 1; });
     var pickLetters = state.pick_letters || {};
     var segs = [], pts = [], stops = [], installs = [], pickTargets = [];
+    var currentUid = state.current_uid || null;
     (state.stops || []).forEach(function (s, i) {
+      if (focusUid && s.uid !== focusUid) return;
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
       if (bLat == null || bLon == null || eLat == null || eLon == null) return;
       var path = s.segment_path;
@@ -566,11 +752,19 @@
       segs.push({ type: 'Feature', properties: { seq: picking ? dotLabel : (s.seq || (i + 1)) },
                   geometry: { type: 'LineString', coordinates: coords } });
       if (!alreadyPicked) {
-        pts.push(pt(bLat, bLon, { kind: 'begin', uid: s.uid, seq: dotLabel }));
-        pts.push(pt(eLat, eLon, { kind: 'end', uid: s.uid, seq: dotLabel }));
+        pts.push(pt(bLat, bLon, {
+          kind: 'begin', uid: s.uid, seq: dotLabel, id: s.id, street: s.street || ''
+        }));
+        pts.push(pt(eLat, eLon, {
+          kind: 'end', uid: s.uid, seq: dotLabel, id: s.id, street: s.street || ''
+        }));
       }
-      if (!driving && s.field_lat != null && s.field_lon != null) {
-        installs.push(pt(s.field_lat, s.field_lon, { uid: s.uid }));
+      if (!driving && fieldCoordsOk(s.field_lat, s.field_lon)
+          && (s.installed || (currentUid && s.uid === currentUid))) {
+        installs.push(pt(s.field_lat, s.field_lon, {
+          uid: s.uid, kind: 'install', id: s.id, lat: s.field_lat, lon: s.field_lon,
+          pending: currentUid && s.uid === currentUid && !s.installed
+        }));
       }
       if (showStops || (picking && pickIdx[s.uid])) {
         var anchor = stopAnchor(s);
@@ -612,8 +806,8 @@
     setLayerVis('segments-line', showSegs);
     setLayerVis('site-begin', hasSites);
     setLayerVis('site-end', hasSites);
-    setLayerVis('site-begin-label', hasSites);
-    setLayerVis('site-end-label', hasSites);
+    setLayerVis('site-begin-label', hasSites && picking);
+    setLayerVis('site-end-label', hasSites && picking);
     setLayerVis('pick-target-circle', false);
     setLayerVis('pick-target-label', false);
     setLayerVis('stop-circle', (showStops || picking) && stops.length > 0);
@@ -668,7 +862,7 @@
     } else {
       gpsMarker.setLngLat([g.lon, g.lat]);
     }
-    if (follow) {
+    if (follow && !isManualGrab()) {
       map.jumpTo({ center: [g.lon, g.lat], zoom: map.getZoom() });
     }
   }
@@ -676,12 +870,16 @@
   function renderNav() { /* turn-by-turn banner removed — map + status bar only */ }
 
   map.on('click', function (e) {
+    if (isManualGrab()) {
+      manualGrabPinAt(e.lngLat.lat, e.lngLat.lng);
+      return;
+    }
     var payload = pickLayerAtPoint(e.point);
     if (payload) {
       fireStopClick(payload);
       return;
     }
-    if (bridge) bridge.onMapClick(e.lngLat.lat, e.lngLat.lng);
+    fireMapClick(e.lngLat.lat, e.lngLat.lng);
   });
 
   function safe(fn, tag) {

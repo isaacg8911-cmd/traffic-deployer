@@ -12,7 +12,7 @@ if (-not (Test-Path $Py)) {
     exit 1
 }
 
-& $Py -m pip install -q pyinstaller 2>$null
+& $Py -m pip install -q pyinstaller
 if ($LASTEXITCODE -ne 0) {
     Write-Host "pip install pyinstaller failed"
     exit 1

@@ -86,7 +86,7 @@ Validation (`validate.validate_build`) blocks builds with missing coords or empt
 
 **Module:** `core/routing.py` — `optimize()`
 
-Goal: order sites so total **road** travel between segment crossings is low, and each leg approaches the **best end** of the street line.
+Goal: start at the far edge of the job, stay with nearby sites, and finish closest to home. Each leg approaches the **best blue/red end** of the street line, not the Excel midpoint.
 
 ### Distance matrix
 
@@ -96,14 +96,15 @@ Goal: order sites so total **road** travel between segment crossings is low, and
 
 ### Tour improvement
 
-1. **≥12 stops — zone-first, far-to-near:** grid clusters; visit **farthest zone from home first**, finish all stops in that zone (farthest stop in the zone first, trail back), then the next-closer zone, working homeward (avoids revisiting finished areas).
-2. **≤9 stops — exact** matrix tour when small enough.
-3. Otherwise **nearest-neighbor** → **2-opt** → **Or-opt** on the road matrix (smaller jobs).
-4. **Crossing assignment** from home; extra global 2-opt/polish only on non-zoned builds.
+1. **Start from the chosen origin** (USB GPS, address search, or saved coordinates).
+2. **Stop 1 = farthest site from that origin**, measured to the closer blue/red endpoint on the road graph.
+3. **First dot = closer begin/end point** on that farthest site.
+4. **Middle stops = nearest next blue/red dot** from the current dot, so the route finishes nearby work before jumping away.
+5. **Last stop = site endpoint closest to home**, so the route does not send the driver back across the job area at the end.
 
 ### Crossing side
 
-**`_assign_crossings`** walks the ordered list:
+The route engine walks the ordered list:
 
 - From current road position, compare drive distance to **begin** vs **end** attachment.
 - Set `cross_side`, `cross_lat`, `cross_lon` (point on the segment line where the route should touch).
@@ -117,8 +118,8 @@ This is why the route is “efficient” for **traffic deployer** work: it optim
 
 **Module:** `core/routing.py` — `build_route()`
 
-1. Re-run **`_assign_crossings`** on the final order (reuses length tables when available).
-2. For each leg **home → stop₁ → … → stopₙ → home**:
+1. Preserve the final ordered blue/red crossing points from `optimize()`.
+2. For each leg **stop₁ → … → stopₙ**:
    - **`road_router.route_between`** (polyline + miles only; turn list deferred to **START DRIVING** via `leg_plan`).
    - **`_snap_leg_end`** — last point of the leg snaps to the **crossing** on the site line (road meets the segment, does not overshoot to midpoint).
 3. Leg polylines are concatenated into one **`route.polyline`** for the map and total **`route.miles`**.

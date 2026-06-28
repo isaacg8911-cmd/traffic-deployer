@@ -24,6 +24,11 @@
     .hudBtn.primary.off { background: #555; color: #fff; }
     .hudBtn.zoom { font-size: 18px; line-height: 1; padding: 6px 0; }
     .hudBtn.next { font-size: 11px; line-height: 1.2; padding: 8px 4px; }
+    #confirm-pin-btn {
+      display: none; font-size: 11px; line-height: 1.2; padding: 10px 6px;
+      background: #e65100; color: #fff; border: none;
+    }
+    #confirm-pin-btn:hover { background: #bf360c; }
     #compass {
       width: 100%; border-radius: 10px;
       background: rgba(255,255,255,.96); box-shadow: 0 2px 8px rgba(0,0,0,.3);
@@ -60,6 +65,17 @@
       box-shadow: 0 4px 16px rgba(0,0,0,.35); pointer-events: none;
     }
     body.td-manual-grab #map { cursor: crosshair; }
+    .site-ref-popup-wrap .maplibregl-popup-content {
+      padding: 10px 12px; border-radius: 10px;
+      font: 600 13px/1.35 system-ui, sans-serif; color: #0f2744;
+      box-shadow: 0 4px 14px rgba(0,0,0,.22);
+    }
+    .site-ref-popup .site-ref-id { font-size: 15px; font-weight: 800; }
+    .site-ref-popup .site-ref-street { margin-top: 4px; font-weight: 600; }
+    .site-ref-popup .site-ref-side {
+      margin-top: 6px; font-size: 11px; font-weight: 700;
+      color: #546e7a; text-transform: uppercase; letter-spacing: .03em;
+    }
   </style>
 </head>
 <body>
@@ -74,6 +90,7 @@
       <div id="compass-readout">—°</div>
       <div id="compass-mode">GPS compass</div>
     </div>
+    <button type="button" id="confirm-pin-btn" class="hudBtn" title="Re-save orange pin after dragging">Re-save pin</button>
     <button type="button" id="zoom-in" class="hudBtn zoom" title="Zoom in">+</button>
     <button type="button" id="zoom-out" class="hudBtn zoom" title="Zoom out (works while Following)">−</button>
     <button type="button" id="next-site-btn" class="hudBtn next" title="Zoom to show you and the next stop">Next site</button>
@@ -84,6 +101,6 @@
   <script src="./vendor/pmtiles.js"></script>
   <script src="./vendor/qwebchannel.js"></script>
   <script src="./style.js?v=19"></script>
-  <script src="./app.js?v=22"></script>
+  <script src="./app.js?v=27"></script>
 </body>
 </html>

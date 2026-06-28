@@ -18,7 +18,7 @@ Desktop field tool for traffic deployers (**v1.0.5**): offline California map, *
 | **PROVE.bat** | One-click: smoke + demo + golden + benchmark + counter sandbox (no GUI) |
 | [docs/PICOCOUNT_INTEGRATION.md](docs/PICOCOUNT_INTEGRATION.md) | PicoCount 2500 USB workflow |
 | [ROUTING_AND_MAP.md](ROUTING_AND_MAP.md) | **How efficient routes are built and traced on the map** (segment lines, OSM graph, ordering, polylines) |
-| [PORTABLE_INSTALL.txt](PORTABLE_INSTALL.txt) | Work-laptop unzip checklist |
+| [packaging/PORTABLE_INSTALL.txt](packaging/PORTABLE_INSTALL.txt) | Work-laptop unzip checklist |
 
 ## Routing in one sentence
 

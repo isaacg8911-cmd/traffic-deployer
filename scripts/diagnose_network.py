@@ -96,9 +96,9 @@ def main() -> int:
             err = road_router.probe_roads_internet() or "no mirror reachable"
             if need_roads:
                 fails += 1
-            print(f"\n  → {err}")
+            print(f"\n  -> {err}")
         elif need_roads:
-            print("  → At least one mirror works — try Download road map in Setup.")
+            print("  -> At least one mirror works — try Download road map in Setup.")
     except Exception as exc:  # noqa: BLE001
         print(f"  [FAIL] Could not test Overpass: {exc}")
         if need_roads:
@@ -117,7 +117,7 @@ def main() -> int:
         if not ok:
             geocode_fails += 1
     if geocode_fails:
-        print("  → On the road you do not need these — only for home address search.")
+        print("  -> On the road you do not need these — only for home address search.")
 
     print("\nIf every mirror fails on work Wi-Fi:")
     print("  1. Phone hotspot -> Download road map, OR")

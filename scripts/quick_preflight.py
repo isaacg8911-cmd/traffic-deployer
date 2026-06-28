@@ -12,7 +12,7 @@ from core.field_ready import check_all
 
 
 def main() -> int:
-    r = check_all(ROOT, probe_gps=False)
+    r = check_all(ROOT, probe_gps=False, probe_counter=False)
     print(f"Field readiness: {r['score']}/100")
     for it in r["items"]:
         mark = "OK" if it["level"] == "ok" else it["level"].upper()

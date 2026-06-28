@@ -1,0 +1,152 @@
+﻿[21:44:54] Traffic Deployer USB fix kit
+[21:44:54] Log: C:\MindLink AI\projects\traffic-deployer\packaging\usb_fix_log_20260622_214453.txt
+[21:44:54] Computer: MSI
+[21:44:54] === COM ports (plug GPS or PicoCount USB now) ===
+[21:44:54]   (none) - if a device is plugged in, Windows did not create a COM port.
+[21:44:54] === USB problems (Unknown / error) ===
+[21:44:55]   USBDevice | Apple Mobile Device USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   USB | Generic USB Hub | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   USB | Generic USB Hub | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   Mouse | HID-compliant mouse | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   Mouse | HID-compliant mouse | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   AudioEndpoint | Digital Audio Interface (3- USB Digital Audio) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   USB | SAMSUNG Mobile USB Composite Device  | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   Mouse | HID-compliant mouse | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   USB | USB Serial Converter | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   AudioEndpoint | Digital Audio Interface (2- USB Digital Audio) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   DiskDrive | General UDisk USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant system controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   USBDevice | Apple Mobile Device USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   USBDevice | Apple Mobile Device USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   USBDevice | Apple Mobile Device USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   USBDevice | Apple Mobile Device USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:55]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Ports | USB Serial Port (COM10) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USBDevice | Apple Mobile Device USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   MEDIA | USB Digital Audio | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   DiskDrive | WD My Passport 25E1 USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Camera | USB Video | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant vendor-defined device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Mass Storage Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant system controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Camera | USB Video | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USBDevice | Apple Recovery (iBoot) USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Mouse | HID-compliant mouse | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant system controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Mass Storage Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant game controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Mass Storage Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USBDevice | Apple Mobile Device USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   DiskDrive | General UDisk USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant system controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | Unknown USB Device (Device Descriptor Request Failed) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Mass Storage Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Bluetooth | Bluetooth Device (RFCOMM Protocol TDI) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | Generic USB Hub | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   DiskDrive | USB Flash Disk USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USBDevice | Apple Mobile Device USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant vendor-defined device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant system controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | Unknown USB Device (Device Descriptor Request Failed) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | Unknown USB Device (Device Descriptor Request Failed) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | Generic USB Hub | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant system controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant game controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Mouse | HID-compliant mouse | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USBDevice | Apple Mobile Device USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   WPD | WII USB | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | Unknown USB Device (Set Address Failed) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Mouse | HID-compliant mouse | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Mouse | HID-compliant mouse | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Ports | Standard Serial over Bluetooth link (COM6) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Ports | Standard Serial over Bluetooth link (COM7) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   MEDIA | USB Digital Audio | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant system controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USBDevice | Apple Mobile Device USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Mouse | HID-compliant mouse | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USBDevice | Apple Recovery (iBoot) USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Mass Storage Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   Mouse | HID-compliant mouse | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | XINPUT compatible HID device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:56]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   HIDClass | HID-compliant system controller | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]    | WD SES Device USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   HIDClass | HID-compliant consumer control device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   USB | USB Composite Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   USB | Generic USB Hub | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   HIDClass | USB Input Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   Modem | SAMSUNG Mobile USB Modem | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   DiskDrive | General UDisk USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   Ports | Standard Serial over Bluetooth link (COM5) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   Ports | Standard Serial over Bluetooth link (COM8) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   USBDevice | Apple Mobile Device USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   Ports | Prolific PL2303GC USB Serial COM Port (COM9) | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   HIDClass | HID-compliant device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57]   USBDevice | Apple Mobile Device USB Device | status=Unknown problem=CM_PROB_PHANTOM
+[21:44:57] 
+[21:44:57] Diagnose-only - no changes made.
+[21:44:57] Run FIX_USB.bat (full fix) as Administrator to apply repairs.

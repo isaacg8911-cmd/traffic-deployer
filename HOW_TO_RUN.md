@@ -5,6 +5,19 @@ offline **California street map**. Upload your `.EST` + Excel files, and it buil
 the **best driving route along real streets** using your USB GPS. Your field files
 **never leave this laptop**.
 
+## Work laptop (no Python) — start here
+
+Full handover: **[WORK_LAPTOP.md](WORK_LAPTOP.md)**
+
+| Home PC tonight | Work laptop tomorrow |
+|-----------------|----------------------|
+| `BUILD_WORK_LAPTOP.bat` then `VERIFY_WORK_LAPTOP.bat` | Unzip → `OPEN_APP.bat` |
+| Copy `dist\TrafficDeployer-WorkLaptop.zip` to USB | Setup → BUILD ROUTE → **READY FOR OFFLINE** |
+
+**App update later (map already on laptop):** home PC → **`BUILD_APP_UPDATE.bat`** → copy `dist\TrafficDeployer-AppUpdate\TrafficDeployer\` to USB (~800 MB folder, no zip). On laptop, replace exe + `_internal\` + `web\`; **keep** `tds_data\`. See **WORK_LAPTOP.md**.
+
+Do **not** use `START.bat` on the work laptop zip — use **`OPEN_APP.bat`**.
+
 **How routing and map tracing work (segment lines, road graph, efficient order):**
 see **[ROUTING_AND_MAP.md](ROUTING_AND_MAP.md)**.
 
@@ -68,7 +81,7 @@ Audit tab: **shift summary** + export (includes **PicoCount** columns in Excel).
 3. **Map** — standard **Protomaps light** colors (not tied to Sunny/Cloudy/Night panel
    themes). Zoom to neighborhood level for street names. If labels are still sparse,
    re-run `python setup_maps.py` once (wifi) to refresh tiles at zoom 15 + fonts.
-4. **START DRIVING** - turn-by-turn banner + offline voice (female Windows guide). Light blue line to the next stop only.
+4. **START DRIVING** - turn-by-turn banner on the Route tab. Light blue line to the next stop only.
 5. **Install tab** - per stop: **PicoCount 2500 (USB)** — **Connect**, **Read serial**
    (auto-fills Serial # when empty), **Clear & set ID** (clears counter + sets Unit ID
    like `1234nc1b` from site + N/E direction + `c1b`). Then **Grab GPS Here**, compass,
@@ -79,9 +92,15 @@ Audit tab: **shift summary** + export (includes **PicoCount** columns in Excel).
 
 ## Live GPS tracing
 
-Your position shows as a moving dot with a breadcrumb trail as you drive. The map
-auto-follows you; tap **Follow Me** on the map to lock/unlock recentring. Use the
-**Sunny / Cloudy / Night** (top right) changes only the **side panels** — the map always uses the default Protomaps basemap.
+Your position shows as a green dot on the map as you drive. Tap **Follow Me** on the map
+to lock/unlock recentering. **FOLLOW GPS** on the Route tab hides the side panel for a
+full-screen map and lower battery use.
+
+**Battery (field laptop):** plug in while driving for full GPS/map rate. When unplugged,
+the status bar shows **Battery saver** — GPS and map updates throttle automatically.
+When plugged in, **Plugged in** restores full rate. On **4 GB work laptops**, status shows **Work laptop** even on AC — map/GPS stay throttled for stability. SwiftShader map rendering is
+CPU-heavy; **FOLLOW GPS** also collapses the side panel to reduce drain. After
+**READY FOR OFFLINE**, the Setup tab is hidden; use Route / Install / Pickup / Audit only on the road.
 
 ## USB GPS (GlobalSat BU-353N)
 
@@ -142,6 +161,18 @@ Full proof chain (smoke + demo + preflight + golden routes + benchmark):
 
 ```powershell
 PROVE.bat
+```
+
+**User-input proofs** (real Qt + map — run after UI/map/install changes):
+
+```powershell
+USER_PROVE.bat
+```
+
+**Full app check** (headless + user paths + audit report at `logs/app_check/latest.md`):
+
+```powershell
+APP_CHECK.bat
 ```
 
 Portable `.exe` folder (optional, needs PyInstaller once):

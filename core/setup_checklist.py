@@ -1,16 +1,12 @@
 """Home setup checklist before READY FOR OFFLINE (P33)."""
 from __future__ import annotations
 
-from core.state import DEFAULT_HOME
+from core.state import DEFAULT_HOME, RouteState
 
 
 def _home_ok(home: tuple[float, float], default_home: tuple | None) -> bool:
-    if default_home:
-        return True
-    return (
-        abs(float(home[0]) - DEFAULT_HOME[0]) > 1e-4
-        or abs(float(home[1]) - DEFAULT_HOME[1]) > 1e-4
-    )
+    ref = default_home if default_home is not None else home
+    return not RouteState.is_factory_home(ref[0], ref[1])
 
 
 def evaluate(
@@ -62,10 +58,17 @@ def evaluate(
         "id": "build",
         "label": "Route built",
         "ok": ok_route,
-        "detail": f"{route_miles:.1f} mi" if ok_route else "Press BUILD OPTIMIZED ROUTE",
+        "detail": (
+            f"{route_miles:.1f} mi"
+            if ok_route
+            else "Tap Apply route on Route tab (or BUILD ROUTE → Auto-optimize)"
+        ),
     })
     if not ok_route:
-        blockers.append("Build your optimized route before leaving.")
+        blockers.append(
+            "Finish the route — tap Apply route on Route tab after picking order, "
+            "or use BUILD ROUTE → Auto-optimize."
+        )
 
     if field_report:
         for it in field_report.get("items", []):

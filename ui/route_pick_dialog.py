@@ -18,10 +18,11 @@ class RoutePickOrderDialog(QDialog):
     """Non-modal window listing picks as you build the route."""
 
     order_changed = Signal(list)  # list of uids in order
+    apply_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Route order — your picks")
+        self.setWindowTitle("Route order — click map to add")
         self.setWindowModality(Qt.WindowModality.NonModal)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setMinimumWidth(360)
@@ -30,7 +31,8 @@ class RoutePickOrderDialog(QDialog):
 
         layout = QVBoxLayout(self)
         self.lbl_hint = QLabel(
-            "Stops appear here as you pick. Drag to reorder, or use Up/Down/Remove.")
+            "Your picks appear here as you click the map. "
+            "Blue = begin, red = end. Drag to reorder.")
         self.lbl_hint.setWordWrap(True)
         self.lbl_hint.setObjectName("hint")
         layout.addWidget(self.lbl_hint)
@@ -60,6 +62,14 @@ class RoutePickOrderDialog(QDialog):
         self.lbl_count = QLabel("0 stops chosen")
         self.lbl_count.setObjectName("hint")
         layout.addWidget(self.lbl_count)
+
+        self.btn_apply = QPushButton("Apply route")
+        self.btn_apply.setObjectName("primary")
+        self.btn_apply.setToolTip(
+            "Lock in this order and trace the route on real streets.")
+        self.btn_apply.clicked.connect(self.apply_requested.emit)
+        self.btn_apply.setEnabled(False)
+        layout.addWidget(self.btn_apply)
 
     def _renumber_item_labels(self) -> None:
         for i in range(self.list.count()):
@@ -95,6 +105,13 @@ class RoutePickOrderDialog(QDialog):
             self.lbl_count.setText(f"{n} of {total} stops in your order")
         else:
             self.lbl_count.setText(f"{n} stop(s) chosen")
+        self.btn_apply.setEnabled(n > 0 and n >= total)
+        if total and n >= total:
+            self.btn_apply.setText("Apply route — all stops set")
+        elif total:
+            self.btn_apply.setText(f"Apply route ({n}/{total})")
+        else:
+            self.btn_apply.setText("Apply route")
 
     def sync_from_parent(
         self,
@@ -105,8 +122,10 @@ class RoutePickOrderDialog(QDialog):
         street_label,
         total: int,
         prompt: str,
+        pick_sides: dict[str, str] | None = None,
     ) -> None:
         self._total_stops = total
+        sides = pick_sides or {}
         self._syncing = True
         self.list.clear()
         for i, uid in enumerate(uids):
@@ -114,15 +133,17 @@ class RoutePickOrderDialog(QDialog):
             if not s:
                 continue
             letter = letters.get(uid, "?")
+            side = sides.get(uid)
+            side_tag = f" · {side}" if side in ("begin", "end") else ""
             text = (
-                f"{i + 1}. [{letter}] Site {s.get('id', '')} — "
+                f"{i + 1}. [{letter}] Site {s.get('id', '')}{side_tag} — "
                 f"{street_label(s)}"
             )
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, uid)
             self.list.addItem(item)
         self._syncing = False
-        self.lbl_hint.setText(prompt or "Pick the next site on the map or dropdown.")
+        self.lbl_hint.setText(prompt or "Click the next site on the map (blue or red dot).")
         self._update_count(len(uids))
         self.btn_up.setEnabled(len(uids) > 0)
         self.btn_down.setEnabled(len(uids) > 0)

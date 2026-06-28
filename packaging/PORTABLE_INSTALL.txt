@@ -1,0 +1,37 @@
+Traffic Deployer — work laptop handover
+========================================
+
+READ FIRST: WORK_LAPTOP.md (full checklist)
+
+HOME PC (tonight, Wi-Fi)
+  1. START.bat once if map not downloaded yet
+  2. Setup: Excel + .EST -> Download road map -> BUILD ROUTE
+  3. BUILD_WORK_LAPTOP.bat
+  4. VERIFY_WORK_LAPTOP.bat  -> must say WORK LAPTOP VERIFY PASS
+  5. Copy dist\TrafficDeployer-WorkLaptop.zip to USB
+
+WORK LAPTOP (one time)
+  1. Unzip -> open TrafficDeployer folder
+  2. Double-click OPEN_APP.bat  (NOT START.bat, NOT raw exe)
+  3. Setup -> BUILD ROUTE -> READY FOR OFFLINE
+
+Fresh / wiped laptop? See WORK_LAPTOP_FRESH_INSTALL.txt in the zip.
+
+Data rules
+  - Shift data saves in tds_data\ beside the exe on the WORK laptop
+  - Zip includes map + road graph from home; do not overwrite work tds_data on app update
+  - To update app only: new zip -> replace exe + _internal, KEEP tds_data\
+
+Source / dev install (Python on laptop)
+  1. Unzip repo anywhere
+  2. START.bat (venv + map download first time)
+  3. See HOW_TO_RUN.md
+
+Work Wi-Fi blocks download?
+  Road graph is in the zip if you built route at home.
+  Else: Setup -> Import road_graph.graphml from home PC
+
+Proof before field: SMOKE.bat on home PC. Version in app About / version.py.
+
+Field battery: plug in while driving; FOLLOW GPS saves redraw. After READY FOR OFFLINE:
+Setup tab hidden — Route / Install / Pickup / Audit only.

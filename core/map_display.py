@@ -5,7 +5,13 @@ import copy
 
 import road_router
 
-from core.routing import _assign_crossings, _cached_dist, _seg_endpoints, build_route
+from core.routing import (
+    _assign_crossings_open,
+    _cached_dist,
+    _seg_endpoints,
+    _stops_only_matrix,
+    build_route,
+)
 
 
 def segment_path_on_roads(
@@ -45,7 +51,8 @@ def auto_finish_order(
     pool: list[dict],
     data_dir: str,
 ) -> list[dict]:
-    """Append remaining sites: nearest road miles from last pick (begin/end crossings)."""
+    """Append remaining sites: nearest road miles from last pick (no home leg)."""
+    del home
     if not pool:
         return list(picked)
     graph = road_router.load_graph(data_dir) if road_router.has_graph(data_dir) else None
@@ -53,26 +60,21 @@ def auto_finish_order(
     if graph is not None:
         try:
             import networkx as nx  # noqa: F401
-            from core.routing import _batched_road_lengths
+            from core.routing import _stops_only_matrix
 
             all_stops = picked + pool
-            _, lengths = _batched_road_lengths(graph, home, all_stops)
+            _, lengths = _stops_only_matrix(graph, all_stops)
         except Exception:
             lengths = None
     order = copy.deepcopy(picked)
     rem = [s for s in pool if s["uid"] not in {p["uid"] for p in order}]
     if not order and rem:
-        def home_dist(s: dict) -> float:
-            seg_b, seg_e = _seg_endpoints(s)
-            return max(
-                _cached_dist(graph, lengths, (float(home[0]), float(home[1])), seg_b),
-                _cached_dist(graph, lengths, (float(home[0]), float(home[1])), seg_e),
-            )
+        from core.routing import _optimize_open_path
 
-        first = max(rem, key=home_dist)
-        rem.remove(first)
-        order.append(first)
-    cur = _cross_point(order[-1]) if order else (float(home[0]), float(home[1]))
+        if graph is not None:
+            return _optimize_open_path(rem, graph)
+        return list(rem)
+    cur = _cross_point(order[-1]) if order else (float(rem[0]["lat"]), float(rem[0]["lon"]))
     while rem:
         def leg_cost(s: dict) -> float:
             seg_b, seg_e = _seg_endpoints(s)
@@ -84,7 +86,9 @@ def auto_finish_order(
         rem.remove(nxt)
         order.append(nxt)
         cur = _cross_point(nxt)
-    return _assign_crossings(graph, home, order, lengths=lengths)
+    from core.routing import _assign_crossings_open
+
+    return _assign_crossings_open(graph, order, lengths=lengths)
 
 
 def apply_manual_order(
@@ -92,17 +96,15 @@ def apply_manual_order(
     ordered: list[dict],
     data_dir: str,
 ) -> dict:
-    """Assign begin/end crossings and compute miles (no map drive polyline needed)."""
+    """Assign begin/end crossings and compute miles (site 1 -> site N)."""
+    del home
     graph = road_router.load_graph(data_dir) if road_router.has_graph(data_dir) else None
     lengths = None
     if graph is not None:
         try:
-            from core.routing import _batched_road_lengths
-
-            _, lengths = _batched_road_lengths(graph, home, ordered)
+            _, lengths = _stops_only_matrix(graph, ordered)
         except Exception:
             lengths = None
-    ordered = _assign_crossings(graph, home, copy.deepcopy(ordered), lengths=lengths)
-    enrich_segment_paths(ordered, data_dir)
-    route = build_route(ordered, home, data_dir)
+    ordered = _assign_crossings_open(graph, copy.deepcopy(ordered), lengths=lengths)
+    route = build_route(ordered, (0.0, 0.0), data_dir)
     return {"order": ordered, "route": route, "graph": route.get("graph", False)}

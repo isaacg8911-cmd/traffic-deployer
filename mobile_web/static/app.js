@@ -189,7 +189,10 @@
     renderRoute();
     renderInstall();
     renderPickup();
-    renderAudit();
+    // Audit pulls /audit + /share (+ QR image) over the network. Only refresh it
+    // while the tab is open so install/grab/move/pickup don't spam the server or
+    // flicker the share/QR block. setTab('audit') refreshes it on entry.
+    if (state.tab === 'audit') renderAudit();
   }
 
   function renderRoute() {
@@ -287,7 +290,10 @@
       $('grabInfo').textContent = 'No location captured yet.';
       $('grabInfo').className = 'msg';
     }
-    flyToStop(s);
+    // Only recenter when the user is actually on the Install tab — otherwise a
+    // background state refresh (reorder, pickup, autosave) would yank the map
+    // away from the route overview the user is looking at.
+    if (state.tab === 'install') flyToStop(s);
   }
 
   function fillDir(val) {
@@ -527,8 +533,8 @@
     $('btnDropPin').onclick = function () { if (state.pinMode) disablePinMode(); else enablePinMode(); };
     $('btnInstall').onclick = function () { commitInstall(true); };
     $('btnSkip').onclick = function () { commitInstall(false); };
-    $('btnPrev').onclick = function () { if (state.current > 0) { state.current--; renderInstall(); } };
-    $('btnNext').onclick = function () { var st = state.data.stops || []; if (state.current < st.length - 1) { state.current++; renderInstall(); } };
+    $('btnPrev').onclick = function () { if (state.current > 0) { flushForm(); state.current--; renderInstall(); } };
+    $('btnNext').onclick = function () { var st = state.data.stops || []; if (state.current < st.length - 1) { flushForm(); state.current++; renderInstall(); } };
     $('btnLocate').onclick = locateMe;
     $('btnCloseJob').onclick = function () { closeRememberedJob('Remembered job cleared on this phone. Use a share link to reopen a job.'); };
     $('btnClearSavedJob').onclick = function () { closeRememberedJob('Remembered job cleared on this phone.'); };

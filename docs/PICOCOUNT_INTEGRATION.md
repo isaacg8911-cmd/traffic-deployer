@@ -57,7 +57,7 @@ Stored on stop: `counter_unit_id`, `counter_cleared_at`, `counter_download_path`
 | Pickup UI | Download counter data | **Done** |
 | Audit / Excel | `CounterUnitID`, `CounterSerial`, `CounterCleared`, `CounterDownload` columns | **Done** (v1.0.5) |
 | Field readiness | Protocol PDF + optional COM probe in Setup report | **Done** (v1.0.5) |
-| Reports | Professional PDF/Excel from `.pcbin` | **Next** (needs sample study + template) |
+| Reports | Volume by Lane CSV from `.pcbin` / `.tvp` | **Done** — `core/volume_report.py`, Pickup + Audit export |
 
 ---
 

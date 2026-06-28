@@ -33,14 +33,33 @@ def check_all(
     app_dir: str,
     *,
     probe_gps: bool = True,
+    probe_counter: bool = False,
     gps_snapshot: dict | None = None,
     stop_server_after: bool = True,
 ) -> dict:
-    web = os.path.join(app_dir, "web")
-    data = os.path.join(app_dir, "tds_data")
+    try:
+        from ui.paths import DATA_DIR, IS_PORTABLE, LAUNCH_HINT, WEB_DIR
+    except Exception:
+        WEB_DIR = os.path.join(app_dir, "web")
+        DATA_DIR = os.path.join(app_dir, "tds_data")
+        IS_PORTABLE = False
+        LAUNCH_HINT = "Run START.bat"
+
+    web = WEB_DIR
+    data = DATA_DIR
     pmtiles = os.path.join(data, "california.pmtiles")
     fonts = os.path.join(web, "vendor", "fonts", "Noto Sans Regular", "0-255.pbf")
+    if not os.path.isfile(fonts):
+        fonts = os.path.join(data, "vendor", "fonts", "Noto Sans Regular", "0-255.pbf")
     maplibre = os.path.join(web, "vendor", "maplibre-gl.js")
+    if not os.path.isfile(maplibre):
+        maplibre = os.path.join(data, "vendor", "maplibre-gl.js")
+
+    map_fix = (
+        "Setup -> Download California map (Wi-Fi), or use Work Laptop zip from home"
+        if IS_PORTABLE
+        else f"{LAUNCH_HINT} once on Wi-Fi, or copy tds_data from home PC"
+    )
 
     items: list[dict] = []
 
@@ -48,35 +67,64 @@ def check_all(
         mb = os.path.getsize(pmtiles) / (1024 * 1024)
         if mb < 100:
             items.append(_item("basemap", "California offline map", False, level="fail",
-                               detail=f"Incomplete download ({mb:.0f} MB) — delete california.pmtiles and re-run START.bat on WiFi"))
+                               detail=f"Incomplete download ({mb:.0f} MB) — {map_fix}"))
         else:
             items.append(_item("basemap", f"California offline map ({mb:.0f} MB)", True))
     else:
         items.append(_item("basemap", "California offline map", False, level="fail",
-                           detail="Run START.bat once on WiFi, or copy tds_data from home PC"))
+                           detail=map_fix))
 
     items.append(_item("fonts", "Street label fonts", os.path.isfile(fonts), level="fail",
-                       detail="Re-run setup_maps.py"))
+                       detail=(
+                           "Re-extract Work Laptop zip (_internal/web/vendor)"
+                           if IS_PORTABLE and not os.path.isfile(fonts)
+                           else "Setup -> Download California map"
+                       )))
 
     items.append(_item("maplibre", "Map engine (MapLibre)", os.path.isfile(maplibre), level="fail",
-                       detail="Run setup_maps.py"))
+                       detail=(
+                           "Re-extract Work Laptop zip (_internal/web/vendor)"
+                           if IS_PORTABLE and not os.path.isfile(maplibre)
+                           else "Setup -> Download California map"
+                       )))
 
     for rel in ("style.js", "app.js", "index.html"):
-        items.append(_item(f"web_{rel}", f"Map UI ({rel})", os.path.isfile(os.path.join(web, rel))))
+        missing_detail = (
+            "Re-extract full zip — need _internal/web beside exe"
+            if IS_PORTABLE
+            else f"Missing {rel} under web/"
+        )
+        items.append(_item(
+            f"web_{rel}", f"Map UI ({rel})",
+            os.path.isfile(os.path.join(web, rel)),
+            detail=missing_detail if not os.path.isfile(os.path.join(web, rel)) else "",
+        ))
 
     try:
         import road_router
-        if road_router.has_graph(data):
-            g = road_router.load_graph(data)
-            n = len(g.nodes) if g else 0
-            items.append(_item("roads", f"Road routing graph ({n:,} nodes)", n > 0))
-        elif road_router.graph_file_exists(data):
-            detail = "File on disk but will not load"
-            if not road_router.HAS_ROUTING:
-                detail = "road_graph.graphml present — launch via START.bat (osmnx in .venv)"
+        from core import hardware_profile as hw
+        if road_router.graph_file_exists(data):
+            if hw.is_work_laptop():
+                mb = os.path.getsize(road_router.graph_path(data)) / (1024 * 1024)
+                items.append(_item(
+                    "roads", f"Road routing graph file ({mb:.0f} MB on disk)", mb > 0.01,
+                    detail="Loads on first route use — skipped at startup on low RAM",
+                ))
+            elif road_router.has_graph(data):
+                g = road_router.load_graph(data)
+                n = len(g.nodes) if g else 0
+                items.append(_item("roads", f"Road routing graph ({n:,} nodes)", n > 0))
             else:
-                detail = "road_graph.graphml may be corrupt — re-download or re-import"
-            items.append(_item("roads", "Road routing graph", False, level="warn", detail=detail))
+                detail = "File on disk but will not load"
+                if not road_router.HAS_ROUTING:
+                    detail = (
+                        "Re-extract Work Laptop zip from home"
+                        if IS_PORTABLE
+                        else f"road_graph.graphml present — {LAUNCH_HINT} (osmnx in .venv)"
+                    )
+                else:
+                    detail = "road_graph.graphml may be corrupt — re-download or re-import"
+                items.append(_item("roads", "Road routing graph", False, level="warn", detail=detail))
         else:
             items.append(_item("roads", "Road routing graph", False, level="warn",
                                detail="Setup → Download (WiFi) or Import road_graph.graphml from home PC"))
@@ -131,32 +179,50 @@ def check_all(
             level="warn",
             detail="docs/PicoCountSerialProtocol.pdf (VehicleCounts developer PDF)",
         ))
-        ports = picocount.list_serial_ports()
-        if ports:
-            pr = picocount.probe_port()
-            if pr.ok:
-                items.append(_item(
-                    "picocount",
-                    f"PicoCount USB ({pr.port})",
-                    True,
-                    detail="Counter responding — ready for install/pickup",
-                ))
+        if probe_counter:
+            ports = picocount.list_serial_ports()
+            if ports:
+                pr = picocount.probe_port()
+                if pr.ok:
+                    items.append(_item(
+                        "picocount",
+                        f"PicoCount USB ({pr.port})",
+                        True,
+                        detail="Counter responding — ready for install/pickup",
+                    ))
+                else:
+                    items.append(_item(
+                        "picocount",
+                        "PicoCount USB",
+                        False,
+                        level="warn",
+                        detail=pr.message,
+                    ))
             else:
                 items.append(_item(
                     "picocount",
-                    "PicoCount USB",
+                    "PicoCount USB (optional)",
+                    False,
+                    level="warn",
+                    detail="Plug VehicleCounts download cable before install",
+                ))
+        else:
+            pr = picocount.quick_counter_status()
+            if pr.ok:
+                label = (
+                    f"PicoCount port ({pr.port})"
+                    if pr.port
+                    else "PicoCount USB (optional)"
+                )
+                items.append(_item("picocount", label, True, detail=pr.message))
+            else:
+                items.append(_item(
+                    "picocount",
+                    "PicoCount USB (optional)",
                     False,
                     level="warn",
                     detail=pr.message,
                 ))
-        else:
-            items.append(_item(
-                "picocount",
-                "PicoCount USB (optional)",
-                False,
-                level="warn",
-                detail="Plug VehicleCounts download cable before install",
-            ))
     except Exception as exc:
         items.append(_item(
             "picocount",

@@ -85,10 +85,39 @@ def _read_fix_from_port(port: str, baud: int, timeout: float = 2.0, attempts: in
     return None
 
 
+def fix_from_snapshot(g: dict | None) -> tuple[float, float] | None:
+    """Non-blocking fix from GPSStream.latest() — safe on the UI thread."""
+    if not g or not g.get("fix"):
+        return None
+    lat, lon = g.get("lat"), g.get("lon")
+    if lat is None or lon is None:
+        return None
+    return float(lat), float(lon)
+
+
+def no_fix_message(g: dict | None) -> str:
+    """User-facing text when Grab GPS / origin has no fix (dialog-safe)."""
+    g = g or {}
+    if g.get("connected"):
+        sats = int(g.get("satellites") or 0)
+        return (
+            "GPS receiver is connected but there is no fix yet.\n\n"
+            f"Satellites in view: {sats}. Move to open sky, wait 30–60 seconds, "
+            "then try again.")
+    return (
+        "No GPS found.\n\n"
+        "Plug in the USB GPS receiver (not the PicoCount cable), "
+        "wait for a fix, then try again.\n\n"
+        "You can also type coordinates on Setup or skip Grab GPS.")
+
+
 def get_fix(preferred_port: str | None = None, bauds: list[int] | None = None):
     """
     Return (lat, lon) from the first port that yields a valid NMEA fix.
     Returns (None, None) if no fix / no hardware. Receiver needs clear sky view.
+
+    Slow — scans COM ports on the calling thread. Do not call from the Qt UI;
+    use fix_from_snapshot(GPSStream.latest()) instead.
     """
     if not HAS_SERIAL:
         return None, None
@@ -189,11 +218,11 @@ class GPSStream:
         self._thread.start()
         return True
 
-    def stop(self):
+    def stop(self, *, join_timeout: float = 3.5):
         self._stop = True
         t = self._thread
         if t is not None:
-            t.join(timeout=2.0)
+            t.join(timeout=join_timeout)
         self._thread = None
 
     def latest(self) -> dict:
@@ -294,11 +323,29 @@ class GPSStream:
             upd["heading_display"] = display
         self._update(**upd)
 
+    @staticmethod
+    def _is_counter_port(device: str) -> bool:
+        """Skip PicoCount FTDI adapters when auto-scanning for NMEA GPS."""
+        if not HAS_SERIAL:
+            return False
+        keywords = ("ftdi", "picocount", "vehiclecounts", "vehicle counts")
+        try:
+            for p in list_ports.comports():
+                if p.device != device:
+                    continue
+                blob = f"{p.description or ''} {p.manufacturer or ''} {p.hwid or ''}".lower()
+                return any(k in blob for k in keywords)
+        except Exception:
+            return False
+        return False
+
     def _open_port(self):
         """Find a port/baud that produces NMEA data and return an open Serial."""
         ports = [self.preferred_port] if self.preferred_port else list_serial_ports()
         for port in ports:
             if not port:
+                continue
+            if not self.preferred_port and self._is_counter_port(port):
                 continue
             for baud in self.bauds:
                 try:
@@ -350,13 +397,34 @@ class GPSStream:
                 _t.sleep(1.0)
 
 
-def diagnose() -> dict:
-    """Human-readable status for the UI / command line."""
+def diagnose(*, wait_s: float = 6.0) -> dict:
+    """Human-readable status for the UI / command line (non-blocking stream)."""
     info = {"has_serial_libs": HAS_SERIAL, "ports": describe_ports(), "fix": None}
-    if HAS_SERIAL and info["ports"]:
-        lat, lon = get_fix()
-        if lat is not None:
-            info["fix"] = {"lat": lat, "lon": lon}
+    if not HAS_SERIAL or not info["ports"]:
+        return info
+    stream = GPSStream()
+    if not stream.start():
+        return info
+    import time as _time
+    deadline = _time.time() + max(1.0, wait_s)
+    while _time.time() < deadline:
+        g = stream.latest()
+        if g.get("fix") and g.get("lat") is not None:
+            info["fix"] = {"lat": g["lat"], "lon": g["lon"]}
+            info["stream"] = {
+                "port": g.get("port"),
+                "satellites": g.get("satellites", 0),
+            }
+            break
+        _time.sleep(0.25)
+    else:
+        g = stream.latest()
+        info["stream"] = {
+            "connected": g.get("connected"),
+            "port": g.get("port"),
+            "satellites": g.get("satellites", 0),
+        }
+    stream.stop()
     return info
 
 

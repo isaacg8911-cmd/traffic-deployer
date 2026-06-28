@@ -4,6 +4,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QGroupBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from ui.simple_mode import COMPACT_UI
+
 
 class WorkflowStrip(QFrame):
     """Horizontal step indicator for Setup workflow."""
@@ -41,13 +43,19 @@ def section_group(
     stretch: int = 0,
     *,
     object_name: str | None = None,
+    compact: bool | None = None,
 ) -> QVBoxLayout:
     """Card-style group; returns inner layout for section contents."""
+    tight = COMPACT_UI if compact is None else compact
     box = QGroupBox(title)
-    box.setObjectName(object_name or "sectionCard")
+    box.setObjectName(object_name or ("sectionCardCompact" if tight else "sectionCard"))
     inner = QVBoxLayout(box)
-    inner.setContentsMargins(12, 14, 12, 12)
-    inner.setSpacing(8)
+    if tight:
+        inner.setContentsMargins(10, 10, 10, 10)
+        inner.setSpacing(6)
+    else:
+        inner.setContentsMargins(12, 14, 12, 12)
+        inner.setSpacing(8)
     parent_layout.addWidget(box, stretch)
     return inner
 
@@ -55,9 +63,12 @@ def section_group(
 def stat_card(title: str, value: str = "—") -> tuple[QFrame, QLabel]:
     """Metric tile for Route tab."""
     card = QFrame()
-    card.setObjectName("statCard")
+    card.setObjectName("statCardCompact" if COMPACT_UI else "statCard")
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(12, 10, 12, 10)
+    if COMPACT_UI:
+        lay.setContentsMargins(8, 6, 8, 6)
+    else:
+        lay.setContentsMargins(12, 10, 12, 10)
     t = QLabel(title)
     t.setObjectName("statTitle")
     v = QLabel(value)

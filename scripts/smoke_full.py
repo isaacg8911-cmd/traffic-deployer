@@ -479,12 +479,28 @@ def test_route_build_perf():
 
 def test_routing():
     print("[routing]")
+    from core import routing
     import road_router
     for raw in road_router.OVERPASS_MIRRORS:
         interp = road_router.overpass_interpreter_url(raw)
         check("overpass mirror url", "/interpreter/interpreter" not in interp, interp)
     d = road_router.dist_to_polyline_m(33.77, -117.94, [[33.77, -117.94], [33.78, -117.95]])
     check("dist_to_polyline", 0 <= d < 5)
+    stops = [
+        {"uid": "middle", "id": "M", "lat": 5.1, "lon": 0.0, "begin_lat": 5.0, "begin_lon": 0.0, "end_lat": 5.2, "end_lon": 0.0},
+        {"uid": "home", "id": "H", "lat": 1.1, "lon": 0.0, "begin_lat": 1.0, "begin_lon": 0.0, "end_lat": 1.2, "end_lon": 0.0},
+        {"uid": "far", "id": "F", "lat": 20.5, "lon": 0.0, "begin_lat": 20.0, "begin_lon": 0.0, "end_lat": 21.0, "end_lon": 0.0},
+        {"uid": "near_far", "id": "NF", "lat": 19.85, "lon": 0.0, "begin_lat": 19.8, "begin_lon": 0.0, "end_lat": 19.9, "end_lon": 0.0},
+    ]
+    ordered = routing.optimize(stops, (0.0, 0.0), tempfile.mkdtemp())["order"]
+    check("auto route starts furthest site", ordered[0]["id"] == "F")
+    check("auto route chains nearby far site", ordered[1]["id"] == "NF")
+    check("auto route ends nearest home", ordered[-1]["id"] == "H")
+    check(
+        "auto route uses closest final dot",
+        ordered[-1]["cross_side"] == "begin"
+        and abs(float(ordered[-1]["cross_lat"]) - 1.0) < 1e-9,
+    )
     g = road_router.load_graph(DATA_DIR) if road_router.graph_file_exists(DATA_DIR) else None
     if g is not None:
         start = (33.7715, -117.9431)

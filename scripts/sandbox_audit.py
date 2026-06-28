@@ -30,32 +30,43 @@ def test_synthetic_workflow():
     from core import ingest, validate, export
     from core.state import RouteState, ca_now
 
-    sites = {
-        "101": {"begin_lat": 33.77, "begin_lon": -117.94, "end_lat": 33.78, "end_lon": -117.95,
-                "lat": 33.775, "lon": -117.945, "street": "Main St"},
-        "102": {"begin_lat": 33.80, "begin_lon": -117.90, "end_lat": 33.81, "end_lon": -117.91,
-                "lat": 33.805, "lon": -117.905, "street": "Oak Ave"},
-    }
-    est_cfgs = [{"label": "Day1", "path": "fake.est", "text": "101 102"}]
-    stops_raw = ingest.match_est_files(est_cfgs, sites, (33.7715, -117.9431))
+    demo_csv = os.path.join(ROOT, "demo_data", "demo_sites.csv")
+    demo_est = os.path.join(ROOT, "demo_data", "DemoDay.EST")
+    if not os.path.isfile(demo_csv) or not os.path.isfile(demo_est):
+        warn("demo_data missing — skip synthetic workflow")
+        return
+
+    home = (33.7715, -117.9431)
+    sites = ingest.parse_excel_sites([demo_csv])
+    if len(sites) < 2:
+        fail(f"ingest parsed {len(sites)} sites (expected 2+)")
+    else:
+        ok(f"ingest parsed {len(sites)} sites")
+
+    est_cfgs = [{"label": "Day1", "path": demo_est}]
+    stops_raw = ingest.match_est_files(est_cfgs, sites, home)
     if len(stops_raw) < 2:
-        fail(f"ingest matched {len(stops_raw)} stops (expected 2)")
+        fail(f"ingest matched {len(stops_raw)} stops (expected 2+)")
     else:
         ok(f"ingest matched {len(stops_raw)} stops")
 
-    rep = validate.validate_build(["fake.xlsx"], est_cfgs, sites, stops_raw)
+    rep = validate.validate_build([demo_csv], est_cfgs, sites, stops_raw)
     ok("validate passes synthetic build") if rep["ok"] else fail(f"validate: {rep['errors']}")
 
     td, _ = ca_now()
     d = tempfile.mkdtemp()
     st = RouteState(d, profile="SANDBOX")
     st.stops = [ingest.merge_stop_progress(None, s) for s in stops_raw]
-    st.home = (33.7715, -117.9431)
+    st.home = home
     for s in st.stops:
         s["date"] = td
     st.save()
     st2 = RouteState(d, profile="SANDBOX")
-    ok("state save/load") if st2.load() and len(st2.stops) == 2 else fail("state round-trip")
+    ok("state save/load") if st2.load() and len(st2.stops) == len(stops_raw) else fail("state round-trip")
+
+    if not st2.stops:
+        fail("no stops after load")
+        return
 
     # install one, skip one
     st2.stops[0]["installed"] = True
@@ -106,28 +117,28 @@ def test_routing_paths():
 
 
 def test_ui_wiring():
+    """Delegate to scripts/test_ui_wiring.py (authoritative button/handler audit)."""
     section("UI / bridge wiring")
-    import inspect
-    import main as appmod
-    mw = appmod.MainWindow
-    handlers = [
-        "_page_setup", "_page_route", "_page_install", "_page_pickup", "_page_audit",
-        "_toggle_drive", "_start_drive", "_stop_drive", "_nav_update",
-        "_grab_gps_here", "_mark_installed", "_mark_skipped", "_export_excel",
-        "_build_route_from_uploads", "_download_roads", "_ready_offline",
-        "_refresh_field_ready", "_run_smoke_test", "_show_about",
-        "_on_voice_toggle", "_on_voice_style_changed",
-    ]
-    for h in handlers:
-        ok(h) if hasattr(mw, h) else fail(f"missing handler {h}")
+    import subprocess
 
-    bridge_src = open(os.path.join(ROOT, "bridge.py"), encoding="utf-8").read()
-    for fn in ("send_state", "send_gps", "send_nav", "send_drive_leg", "fly_to", "set_follow"):
-        ok(f"bridge.{fn}") if fn in bridge_src else fail(f"bridge missing {fn}")
-
-    appjs = open(os.path.join(WEB, "app.js"), encoding="utf-8").read()
-    for fn in ("__tdPushState", "__tdPushGps", "__tdPushNav", "__tdSetDriveLeg", "__tdFlyTo"):
-        ok(f"app.js {fn}") if fn in appjs else fail(f"app.js missing {fn}")
+    py = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
+    if not os.path.isfile(py):
+        py = sys.executable
+    proc = subprocess.run(
+        [py, os.path.join(ROOT, "scripts", "test_ui_wiring.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    out = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode == 0:
+        for line in out.splitlines():
+            if line.strip().startswith("OK"):
+                ok(line.strip())
+        ok("test_ui_wiring.py PASS")
+    else:
+        for line in out.splitlines()[-12:]:
+            fail(line.strip() if line.strip() else "test_ui_wiring failed")
 
 
 def test_gps_module():
@@ -138,16 +149,6 @@ def test_gps_module():
         ok("GPS hardware detected") if st.get("fix") else warn("GPS connected, no fix (normal indoors)")
     else:
         warn("GPS not connected — field test needed")
-
-
-def test_voice_paths():
-    section("voice")
-    import voice_nav
-    v = voice_nav.NavVoice()
-    ok("NavVoice init") if v.ready or voice_nav.tts_available() else warn("voice engine slow/start")
-    ann = voice_nav.DriveVoiceAnnouncer(v)
-    ann.reset()
-    ok("DriveVoiceAnnouncer")
 
 
 def test_edge_cases():
@@ -185,7 +186,6 @@ def main():
     test_routing_paths()
     test_ui_wiring()
     test_gps_module()
-    test_voice_paths()
     test_edge_cases()
     test_missing_polish()
     print(f"\n{'='*50}")

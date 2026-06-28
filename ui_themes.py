@@ -31,8 +31,13 @@ QGroupBox#sectionCard {
     border: 1px solid #c5d0de; border-radius: 10px;
     margin-top: 12px; padding-top: 18px; background: #ffffff;
 }
-QGroupBox#sectionCard::title {
-    subcontrol-origin: margin; left: 12px; padding: 0 6px;
+QGroupBox#sectionCardCompact {
+    font-size: 11px; font-weight: 800; color: #64748b;
+    border: 1px solid #d8e0ea; border-radius: 8px;
+    margin-top: 8px; padding-top: 12px; background: #ffffff;
+}
+QGroupBox#sectionCard::title, QGroupBox#sectionCardCompact::title {
+    subcontrol-origin: margin; left: 10px; padding: 0 4px;
 }
 #workflowStrip {
     background: #f0f4f9; border: 1px solid #c5d0de; border-radius: 10px;
@@ -55,8 +60,8 @@ QGroupBox#sectionCard::title {
 }
 QPushButton#navBtn {
     background: transparent; color: #94b8d9; border: none;
-    border-radius: 8px; padding: 10px 4px; font-size: 11px; font-weight: 700;
-    min-height: 44px;
+    border-radius: 8px; padding: 8px 2px; font-size: 10px; font-weight: 700;
+    min-height: 40px;
 }
 QPushButton#navBtn:hover { background: #1a3a5c; color: #fff; }
 QPushButton#navBtn:checked {
@@ -65,10 +70,33 @@ QPushButton#navBtn:checked {
 #statCard {
     background: #ffffff; border: 1px solid #c5d0de; border-radius: 10px;
 }
+#statCardCompact {
+    background: #ffffff; border: 1px solid #d8e0ea; border-radius: 8px;
+}
 #statTitle { font-size: 11px; font-weight: 700; color: #64748b; }
 #statValue { font-size: 18px; font-weight: 800; color: #0f2744; }
+#statCardCompact #statTitle { font-size: 10px; }
+#statCardCompact #statValue { font-size: 15px; }
+#tabContextLine {
+    font-size: 13px; font-weight: 700; color: #334155;
+    padding: 4px 0 2px 0; line-height: 1.35;
+}
 #mapOptions {
     background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px;
+}
+#dayFilterBar { background: transparent; }
+#dayFilterLabel {
+    font-size: 11px; font-weight: 800; color: #94b8d9; letter-spacing: 0.4px;
+}
+QComboBox#dayFilterCombo {
+    background: #1a3a5c; color: #f8fafc; border: 1px solid #3d5a80;
+    border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 700;
+    min-height: 24px;
+}
+QComboBox#dayFilterCombo:hover { background: #243f5c; }
+QComboBox#dayFilterCombo::drop-down { border: none; width: 18px; }
+QComboBox#dayFilterCombo QAbstractItemView {
+    background: #ffffff; color: #0f2744; selection-background-color: #dbeafe;
 }
 QPushButton#secondary {
     background: #f1f5f9; border: 1px solid #94a3b8; font-weight: 600;
@@ -78,12 +106,32 @@ QPushButton#secondary:hover { background: #e2e8f0; }
 #counterPanel {
     border: 1px solid #7eb8e8; background: #f8fbff;
 }
-#counterPanel::title { color: #0c4a6e; }
+#counterPanel[counterConnected="true"] {
+    border: 2px solid #22c55e; background: #ecfdf5;
+}
+#counterPanel[counterConnected="true"]::title {
+    color: #15803d; font-weight: 800;
+}
+QLabel#counterConnectedPill {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.5px;
+    color: #15803d; background: #dcfce7; border: 1px solid #86efac;
+    border-radius: 6px; padding: 4px 10px;
+}
+QLabel#counterConnectedPill[visible="false"] { max-height: 0; padding: 0; border: none; }
+QLabel#counterData {
+    font-size: 12px; font-weight: 600; color: #475569;
+}
+QLabel#counterData[counterEmpty="true"] { color: #15803d; }
 QLabel#counterStatus {
     border-radius: 8px; padding: 10px 12px; font-weight: 600; font-size: 13px;
     background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1;
 }
-QLabel#counterStatus[statusLevel="ok"] {
+QLabel#counterStatusCompact {
+    border-radius: 6px; padding: 6px 8px; font-weight: 600; font-size: 12px;
+    background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1;
+}
+QLabel#counterStatus[statusLevel="ok"],
+QLabel#counterStatusCompact[statusLevel="ok"] {
     background: #ecfdf5; color: #065f46; border: 1px solid #6ee7b7;
 }
 QLabel#counterStatus[statusLevel="warn"] {
@@ -94,6 +142,27 @@ QLabel#counterStatus[statusLevel="fail"] {
 }
 QLabel#counterStatus[statusLevel="busy"] {
     background: #eff6ff; color: #1e40af; border: 1px solid #93c5fd;
+}
+QLabel#counterVoltCheck,
+QLabel#counterVoltCheckCompact {
+    border-radius: 8px; padding: 8px 10px; font-weight: 700; font-size: 12px;
+    background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;
+}
+QLabel#counterVoltCheckCompact { padding: 6px 8px; font-size: 11px; }
+QLabel#counterVoltCheck[statusLevel="ok"],
+QLabel#counterVoltCheckCompact[statusLevel="ok"] {
+    background: #ecfdf5; color: #065f46; border: 1px solid #6ee7b7;
+}
+QLabel#counterVoltCheck[statusLevel="warn"],
+QLabel#counterVoltCheckCompact[statusLevel="warn"] {
+    background: #fffbeb; color: #92400e; border: 1px solid #fcd34d;
+}
+QLabel#counterVoltCheck[statusLevel="fail"],
+QLabel#counterVoltCheckCompact[statusLevel="fail"] {
+    background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5;
+}
+#counterInventoryPanel {
+    border: 1px solid #c5d0de; background: #fbfdff;
 }
 QLabel#shiftSummary {
     font-size: 13px; font-weight: 700; color: #0f2744;
@@ -159,9 +228,27 @@ QSplitter#mainSplit::handle:hover { background: #c45f14; }
 #installHeader {
     background: #ffffff; border: 1px solid #c5d0de; border-radius: 12px;
 }
+#installHeaderCompact {
+    background: #ffffff; border: 1px solid #d8e0ea; border-radius: 8px;
+}
 #installTitle { font-size: 18px; font-weight: 800; color: #0f2744; }
+#installHeaderCompact #installTitle { font-size: 15px; }
 #installSub { font-size: 13px; font-weight: 600; color: #475569; }
+#installHeaderCompact #installSub { font-size: 12px; font-weight: 600; }
 #installWarn { color: #b42318; font-weight: 700; font-size: 12px; }
+#pickupReminder {
+    font-size: 12px; font-weight: 800; color: #9a3412;
+    background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px;
+    padding: 10px 12px;
+}
+#installChecklist {
+    font-size: 12px; font-weight: 700; color: #475569;
+    background: #f8fafc; border: 1px solid #c5d0de; border-radius: 8px;
+    padding: 10px 12px;
+}
+#installChecklist[allReady="true"] {
+    background: #ecfdf5; border: 1px solid #6ee7b7; color: #065f46;
+}
 #installCompass { font-weight: 700; font-size: 14px; color: #0f2744; }
 QLabel[role="h"] {
     font-size: 11px; font-weight: 800; color: #64748b;

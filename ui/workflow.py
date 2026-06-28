@@ -13,12 +13,9 @@ STEPS = (
 
 
 def _home_ok(home: tuple[float, float], default_home: tuple | None) -> bool:
-    if default_home:
-        return True
-    return (
-        abs(float(home[0]) - DEFAULT_HOME[0]) > 1e-4
-        or abs(float(home[1]) - DEFAULT_HOME[1]) > 1e-4
-    )
+    from core.state import RouteState
+    ref = default_home if default_home is not None else home
+    return not RouteState.is_factory_home(ref[0], ref[1])
 
 
 def compute_workflow(

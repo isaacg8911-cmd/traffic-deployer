@@ -11,4 +11,3 @@ cryptography
 osmnx
 networkx
 requests
-pyttsx3

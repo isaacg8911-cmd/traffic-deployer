@@ -68,9 +68,14 @@ def main() -> int:
             route = routing.build_route(ordered, HOME, DATA)
             check("build route", bool(route.get("polyline")) and route.get("miles", 0) > 0)
             poly = route.get("polyline") or []
-            if len(poly) >= 2:
-                d_home = math.hypot(poly[-1][0] - HOME[0], poly[-1][1] - HOME[1])
-                check("route returns home", d_home < 0.02, f"tail delta {d_home:.4f}")
+            if len(poly) >= 2 and ordered:
+                last = ordered[-1]
+                clat = last.get("cross_lat", last.get("lat"))
+                clon = last.get("cross_lon", last.get("lon"))
+                if clat is not None and clon is not None:
+                    d_tail = math.hypot(
+                        poly[-1][0] - float(clat), poly[-1][1] - float(clon))
+                    check("route ends at last stop", d_tail < 0.03, f"tail delta {d_tail:.4f}")
         except Exception as exc:
             check("routing", False, str(exc))
     else:

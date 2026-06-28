@@ -22,7 +22,10 @@ def evaluate(
         if route_miles <= 0 or not field_report.get("field_ready", True):
             pass  # route check below
         if route_miles <= 0:
-            blockers.append("No built route — press BUILD OPTIMIZED ROUTE first.")
+            blockers.append(
+                "No built route — tap Apply route on Route tab after picking order, "
+                "or BUILD ROUTE → Auto-optimize."
+            )
         if not graph_loaded:
             warns.append(
                 "Road graph not loaded — routes/driving may use straight lines only. "

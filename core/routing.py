@@ -1,10 +1,12 @@
-"""Route engine: order stops by the most efficient way to CROSS each street line.
+"""Route engine: order stops for minimum drive time site 1 -> site N (open path).
 
 Each site is a street segment (begin -> end). Routing ignores the midpoint;
-it finds the best road approach to cross each segment line, orders segments to
-minimize total drive miles, traces real streets home -> crossings -> home.
+it starts at the far edge of the job from the chosen start, chains the nearest
+blue/red dot from there, and reserves a home-near endpoint for the finish.
+Home is an ordering anchor only — you drive to site 1 yourself; the app chains
+site 1..N without a return-home leg.
 
-Full pipeline (ingest, road graph, matrix/2-opt, map trace, driving):
+Full pipeline (ingest, road graph, open-path matrix/2-opt, map trace, driving):
 see ROUTING_AND_MAP.md in the project root.
 """
 from __future__ import annotations
@@ -108,6 +110,14 @@ def _cross_begin_or_end(
     return seg_e[0], seg_e[1], "end"
 
 
+def _locked_cross(stop: dict, side: str) -> tuple[float, float, str]:
+    """Drive-to point when the operator locked begin or end during manual pick."""
+    seg_b, seg_e = _seg_endpoints(stop)
+    if side == "begin":
+        return seg_b[0], seg_b[1], "begin"
+    return seg_e[0], seg_e[1], "end"
+
+
 def _assign_crossings(
     graph,
     home: tuple[float, float],
@@ -117,7 +127,11 @@ def _assign_crossings(
     """Chain crossings using begin/end endpoints only."""
     cur = (float(home[0]), float(home[1]))
     for stop in ordered:
-        lat, lon, side = _cross_begin_or_end(graph, lengths, cur, stop)
+        locked = stop.get("cross_side") if stop.get("pick_cross_locked") else None
+        if locked in ("begin", "end"):
+            lat, lon, side = _locked_cross(stop, locked)
+        else:
+            lat, lon, side = _cross_begin_or_end(graph, lengths, cur, stop)
         stop["cross_lat"], stop["cross_lon"] = lat, lon
         stop["cross_side"] = side
         cur = (lat, lon)
@@ -289,8 +303,8 @@ def _batched_road_lengths(graph, home: tuple[float, float], stops: list[dict]):
         d = lengths.get(a, {}).get(b)
         if d is not None:
             return float(d)
-        ya, xa = graph.nodes[a]["y"], graph.nodes[a]["x"]
-        yb, xb = graph.nodes[b]["y"], graph.nodes[b]["x"]
+        ya, xa = float(graph.nodes[a]["y"]), float(graph.nodes[a]["x"])
+        yb, xb = float(graph.nodes[b]["y"]), float(graph.nodes[b]["x"])
         return _haversine_km((ya, xa), (yb, xb)) * 1000.0
 
     def _seg_dist(nodes_a: list, nodes_b: list) -> float:
@@ -310,6 +324,57 @@ def _road_matrix(graph, home: tuple[float, float], stops: list[dict]) -> tuple[l
     if graph is None:
         return _haversine_matrix(home, stops, None)
     return _batched_road_lengths(graph, home, stops)
+
+
+def _stops_only_matrix(
+    graph, stops: list[dict],
+) -> tuple[list[list[float]], dict | None]:
+    """n×n road meters between stops only (0-indexed); home not included."""
+    accs = [_segment_access(graph, s) for s in stops]
+    n = len(stops)
+    if n == 0:
+        return [[]], None
+    if graph is None:
+        m = [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(n):
+                if i != j:
+                    m[i][j] = _pair_dist(None, accs[i], accs[j])
+        return m, None
+
+    def _nodes_for_acc(acc: dict) -> list:
+        nb = road_router.nearest_node(graph, acc["begin"][0], acc["begin"][1])
+        ne = road_router.nearest_node(graph, acc["end"][0], acc["end"][1])
+        return [nb, ne]
+
+    stop_nodes = [_nodes_for_acc(a) for a in accs]
+    all_nodes = {nd for pair in stop_nodes for nd in pair}
+    lengths: dict = {}
+    for src in all_nodes:
+        try:
+            lengths[src] = nx.single_source_dijkstra_path_length(graph, src, weight="length")
+        except Exception:
+            lengths[src] = {}
+
+    def _node_dist(a, b) -> float:
+        if a == b:
+            return 0.0
+        d = lengths.get(a, {}).get(b)
+        if d is not None:
+            return float(d)
+        ya, xa = float(graph.nodes[a]["y"]), float(graph.nodes[a]["x"])
+        yb, xb = float(graph.nodes[b]["y"]), float(graph.nodes[b]["x"])
+        return _haversine_km((ya, xa), (yb, xb)) * 1000.0
+
+    def _seg_dist(nodes_a: list, nodes_b: list) -> float:
+        return min(_node_dist(u, v) for u in nodes_a for v in nodes_b)
+
+    m = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                m[i][j] = _seg_dist(stop_nodes[i], stop_nodes[j])
+    return m, lengths
 
 
 def _two_opt_max_passes(n_stops: int) -> int:
@@ -557,7 +622,7 @@ def _path_len_open(matrix, route: list[int]) -> float:
 
 
 def _two_opt_open(matrix, route: list[int], max_passes: int = 8) -> list[int]:
-    """2-opt along a stop-to-stop path only (no home depot — preserves far-first start)."""
+    """2-opt along a stop-to-stop path only (open path — no depot)."""
     if len(route) < 4:
         return route
     best, best_d, improved, passes = list(route), _path_len_open(matrix, route), True, 0
@@ -572,6 +637,212 @@ def _two_opt_open(matrix, route: list[int], max_passes: int = 8) -> list[int]:
                 if cand_d + 1e-6 < best_d:
                     best, best_d, improved = cand, cand_d, True
     return best
+
+
+def _or_opt_open(matrix, route: list[int], *, max_rounds: int = 3) -> list[int]:
+    """Relocate one stop on an open path — helps when 2-opt plateaus."""
+    if len(route) < 4:
+        return route
+    best = list(route)
+    best_d = _path_len_open(matrix, best)
+    for _ in range(max_rounds):
+        improved = False
+        for i in range(len(best)):
+            city = best.pop(i)
+            for pos in range(len(best) + 1):
+                trial = best[:pos] + [city] + best[pos:]
+                d = _path_len_open(matrix, trial)
+                if d + 1e-6 < best_d:
+                    best, best_d, improved = trial, d, True
+                    break
+            else:
+                best.insert(i, city)
+            if improved:
+                break
+        if not improved:
+            break
+    return best
+
+
+def _exact_open_path(matrix, n_stops: int) -> list[int] | None:
+    """Brute-force best open path on the stop-only matrix (small n only)."""
+    if n_stops > EXACT_MATRIX_MAX_STOPS:
+        return None
+    best_route: list[int] | None = None
+    best_d = float("inf")
+    for perm in itertools.permutations(range(n_stops)):
+        r = list(perm)
+        if n_stops < 2:
+            d = 0.0
+        else:
+            d = _path_len_open(matrix, r)
+        if d < best_d:
+            best_d, best_route = d, r
+    return best_route
+
+
+def _open_path_heuristic(matrix, n_stops: int) -> list[int]:
+    """Try each start; NN chain + open 2-opt/or-opt; pick lowest path cost."""
+    if n_stops <= 1:
+        return list(range(n_stops))
+    best_route: list[int] | None = None
+    best_d = float("inf")
+    for start in range(n_stops):
+        route = [start]
+        rem = set(range(n_stops)) - {start}
+        cur = start
+        while rem:
+            nxt = min(rem, key=lambda j: matrix[cur][j])
+            route.append(nxt)
+            rem.remove(nxt)
+            cur = nxt
+        if n_stops >= 5:
+            route = _two_opt_open(matrix, route, max_passes=_two_opt_max_passes(n_stops))
+        if n_stops <= 50:
+            route = _or_opt_open(matrix, route, max_rounds=2 if n_stops <= 30 else 1)
+        d = _path_len_open(matrix, route)
+        if d < best_d:
+            best_d, best_route = d, route
+    return best_route or [0]
+
+
+def _assign_crossings_open(
+    graph,
+    ordered: list[dict],
+    lengths: dict | None = None,
+) -> list[dict]:
+    """Chain crossings stop-to-stop; site 1 oriented toward site 2 (no home leg)."""
+    if not ordered:
+        return ordered
+    if len(ordered) == 1:
+        stop = ordered[0]
+        locked = stop.get("cross_side") if stop.get("pick_cross_locked") else None
+        if locked in ("begin", "end"):
+            lat, lon, side = _locked_cross(stop, locked)
+        else:
+            lat, lon, side = _cross_begin_or_end(
+                graph, lengths, (float(stop["lat"]), float(stop["lon"])), stop)
+        stop["cross_lat"], stop["cross_lon"], stop["cross_side"] = lat, lon, side
+        return ordered
+
+    s0 = ordered[0]
+    locked0 = s0.get("cross_side") if s0.get("pick_cross_locked") else None
+    if locked0 in ("begin", "end"):
+        lat, lon, side = _locked_cross(s0, locked0)
+    else:
+        s1 = ordered[1]
+        seg_b, seg_e = _seg_endpoints(s0)
+        toward = (float(s1["lat"]), float(s1["lon"]))
+        d_b = _cached_dist(graph, lengths, toward, seg_b)
+        d_e = _cached_dist(graph, lengths, toward, seg_e)
+        if d_b <= d_e:
+            lat, lon, side = seg_b[0], seg_b[1], "begin"
+        else:
+            lat, lon, side = seg_e[0], seg_e[1], "end"
+    s0["cross_lat"], s0["cross_lon"], s0["cross_side"] = lat, lon, side
+
+    cur = (lat, lon)
+    for stop in ordered[1:]:
+        locked = stop.get("cross_side") if stop.get("pick_cross_locked") else None
+        if locked in ("begin", "end"):
+            lat, lon, side = _locked_cross(stop, locked)
+        else:
+            lat, lon, side = _cross_begin_or_end(graph, lengths, cur, stop)
+        stop["cross_lat"], stop["cross_lon"], stop["cross_side"] = lat, lon, side
+        cur = (lat, lon)
+    return ordered
+
+
+def _endpoint_distances(
+    graph,
+    lengths: dict | None,
+    cur: tuple[float, float],
+    stop: dict,
+) -> tuple[float, float]:
+    seg_b, seg_e = _seg_endpoints(stop)
+    return (
+        _cached_dist(graph, lengths, cur, seg_b),
+        _cached_dist(graph, lengths, cur, seg_e),
+    )
+
+
+def _set_crossing_side(stop: dict, side: str) -> tuple[float, float]:
+    lat, lon, side = _locked_cross(stop, side)
+    stop["cross_lat"], stop["cross_lon"], stop["cross_side"] = lat, lon, side
+    return lat, lon
+
+
+def _nearest_endpoint_from(
+    graph,
+    lengths: dict | None,
+    cur: tuple[float, float],
+    stop: dict,
+) -> tuple[float, str]:
+    d_b, d_e = _endpoint_distances(graph, lengths, cur, stop)
+    if d_b <= d_e:
+        return d_b, "begin"
+    return d_e, "end"
+
+
+def _order_far_first_homeward(
+    stops: list[dict],
+    home: tuple[float, float],
+    graph,
+) -> list[dict]:
+    """Field rule: start farthest from home, chain nearest dots, finish nearest home."""
+    n = len(stops)
+    if n <= 1:
+        return _assign_crossings(graph, home, list(stops), lengths=None)
+
+    _, lengths = _road_matrix(graph, home, stops)
+    work = [copy.deepcopy(s) for s in stops]
+    home_pt = (float(home[0]), float(home[1]))
+    remaining = set(range(n))
+
+    def home_near(i: int) -> tuple[float, str]:
+        return _nearest_endpoint_from(graph, lengths, home_pt, work[i])
+
+    first_idx = max(remaining, key=lambda i: home_near(i)[0])
+    _, first_side = home_near(first_idx)
+    remaining.remove(first_idx)
+
+    ordered: list[dict] = [work[first_idx]]
+    cur = _set_crossing_side(ordered[-1], first_side)
+
+    final_idx: int | None = None
+    if remaining:
+        final_idx = min(remaining, key=lambda i: home_near(i)[0])
+        remaining.remove(final_idx)
+
+    while remaining:
+        nxt_idx = min(
+            remaining,
+            key=lambda i: _nearest_endpoint_from(graph, lengths, cur, work[i])[0],
+        )
+        _, side = _nearest_endpoint_from(graph, lengths, cur, work[nxt_idx])
+        remaining.remove(nxt_idx)
+        ordered.append(work[nxt_idx])
+        cur = _set_crossing_side(ordered[-1], side)
+
+    if final_idx is not None:
+        _, final_side = home_near(final_idx)
+        ordered.append(work[final_idx])
+        _set_crossing_side(ordered[-1], final_side)
+
+    return ordered
+
+
+def _optimize_open_path(stops: list[dict], graph) -> list[dict]:
+    """Order stops to minimize road miles site 1 -> site N (open Hamiltonian path)."""
+    n = len(stops)
+    if n <= 1:
+        return list(stops)
+    matrix, lengths = _stops_only_matrix(graph, stops)
+    route_idx = _exact_open_path(matrix, n)
+    if route_idx is None:
+        route_idx = _open_path_heuristic(matrix, n)
+    ordered = [stops[i] for i in route_idx]
+    return _assign_crossings_open(graph, ordered, lengths=lengths)
 
 
 def _tour_cluster_trail_back(
@@ -659,7 +930,7 @@ def _finish_crossings(
 
 
 def optimize(stops: list[dict], home: tuple[float, float], data_dir: str) -> dict:
-    """Order segments for minimum road miles to cross each street line."""
+    """Order stops farthest-first, nearest dot-to-dot, ending near home."""
     if not stops:
         return {"order": [], "graph": False}
 
@@ -672,46 +943,148 @@ def optimize(stops: list[dict], home: tuple[float, float], data_dir: str) -> dic
     if road_router.HAS_ROUTING and _HAS_NX and road_router.has_graph(data_dir):
         graph = road_router.load_graph(data_dir)
 
-    use_zones = n >= ZONE_MIN_STOPS and graph is not None
-    if use_zones:
-        ordered = _optimize_zoned(stops, home, graph)
-        ordered = _finish_crossings(graph, home, ordered, stops, zoned=True)
-    else:
-        route = _matrix_tour(graph, home, stops, n)
-        ordered = [stops[i - 1] for i in route]
-        ordered = _finish_crossings(graph, home, ordered, stops, zoned=False)
+    ordered = _order_far_first_homeward(stops, home, graph)
     return {"order": ordered, "graph": graph is not None}
 
 
 def assign_crossings_for_display(
     stops: list[dict], home: tuple[float, float], data_dir: str
 ) -> list[dict]:
-    """Set cross_lat/lon on stops for map preview (before full route build)."""
+    """Preview the same far-first blue/red crossing order used by BUILD ROUTE."""
     if not stops:
         return stops
     graph = None
-    lengths = None
     if road_router.HAS_ROUTING and road_router.has_graph(data_dir):
         graph = road_router.load_graph(data_dir)
-        if graph is not None and _HAS_NX:
-            _, lengths = _batched_road_lengths(graph, home, stops)
     out = copy.deepcopy(stops)
-    return _assign_crossings(graph, home, out, lengths=lengths)
+    return _order_far_first_homeward(out, home, graph)
+
+
+def sanitize_leg_polyline(
+    poly: list,
+    home: tuple[float, float],
+    dest: tuple[float, float],
+    *,
+    max_leg_km: float = 100.0,
+    max_jump_km: float = 8.0,
+) -> list | None:
+    """Drop outlier/jump points so map guide lines stay near the job area."""
+    if not poly or len(poly) < 2:
+        return None
+    h = (float(home[0]), float(home[1]))
+    d = (float(dest[0]), float(dest[1]))
+
+    def near_job(lat: float, lon: float) -> bool:
+        return (
+            min(_haversine_km(h, (lat, lon)), _haversine_km(d, (lat, lon))) <= max_leg_km
+        )
+
+    cleaned: list[list[float]] = []
+    for p in poly:
+        lat, lon = float(p[0]), float(p[1])
+        if near_job(lat, lon):
+            cleaned.append([lat, lon])
+    if len(cleaned) < 2:
+        if near_job(h[0], h[1]) and near_job(d[0], d[1]):
+            return [[h[0], h[1]], [d[0], d[1]]]
+        return None
+
+    chunks: list[list[list[float]]] = []
+    cur = [cleaned[0]]
+    for i in range(1, len(cleaned)):
+        a = (cur[-1][0], cur[-1][1])
+        b = (cleaned[i][0], cleaned[i][1])
+        if _haversine_km(a, b) > max_jump_km:
+            if len(cur) >= 2:
+                chunks.append(cur)
+            cur = [cleaned[i]]
+        else:
+            cur.append(cleaned[i])
+    if len(cur) >= 2:
+        chunks.append(cur)
+    if not chunks:
+        return [[h[0], h[1]], [d[0], d[1]]]
+
+    def chunk_score(chunk: list[list[float]]) -> float:
+        start = (chunk[0][0], chunk[0][1])
+        return _haversine_km(h, start)
+
+    best = min(chunks, key=chunk_score)
+    if _haversine_km((best[0][0], best[0][1]), h) > 2.0:
+        best = [[h[0], h[1]]] + best
+    if _haversine_km((best[-1][0], best[-1][1]), d) > 0.05:
+        best = best + [[d[0], d[1]]]
+    if _haversine_km((best[0][0], best[0][1]), (best[-1][0], best[-1][1])) > max_leg_km * 1.5:
+        return None
+    return best
+
+
+def build_site_legs(
+    ordered_stops: list[dict],
+    home: tuple[float, float],
+    data_dir: str,
+    *,
+    graph=None,
+) -> list[dict]:
+    """Legs site 1 -> site 2 -> ... -> site N. Site 1 has 0 mi (you drive there)."""
+    del home
+    if not ordered_stops:
+        return []
+    if graph is None and road_router.has_graph(data_dir):
+        graph = road_router.load_graph(data_dir)
+    out: list[dict] = []
+    prev = _stop_pt(ordered_stops[0])
+    for i, stop in enumerate(ordered_stops):
+        dest = _stop_pt(stop)
+        entry: dict = {
+            "index": i,
+            "to_uid": stop["uid"],
+            "to_id": stop.get("id"),
+            "from": (
+                "Site 1 (you drive here)"
+                if i == 0
+                else f"Site {ordered_stops[i - 1].get('id')}"
+            ),
+            "to": f"Site {stop.get('id')}",
+            "polyline": [],
+            "miles": 0.0,
+            "ok": False,
+        }
+        if i == 0:
+            entry["polyline"] = [[dest[0], dest[1]]]
+            entry["ok"] = True
+            out.append(entry)
+            continue
+        if graph is not None and road_router.HAS_ROUTING:
+            leg = road_router.route_between(graph, prev, dest, include_turns=False)
+            coords = _snap_leg_end(leg.get("polyline") or [], dest)
+            raw = [[float(c[0]), float(c[1])] for c in coords]
+            clean = sanitize_leg_polyline(raw, prev, dest)
+            entry["polyline"] = clean or [[prev[0], prev[1]], [dest[0], dest[1]]]
+            entry["miles"] = float(leg.get("miles") or 0.0)
+            entry["ok"] = bool(leg.get("ok")) and clean is not None
+        else:
+            entry["polyline"] = [[prev[0], prev[1]], [dest[0], dest[1]]]
+            entry["miles"] = _haversine_km(prev, dest) * 0.621371
+            entry["ok"] = True
+        out.append(entry)
+        prev = dest
+    return out
 
 
 def build_route(ordered_stops: list[dict], home: tuple[float, float], data_dir: str) -> dict:
-    """Real road polyline tracing home -> each line crossing -> home."""
+    """Real road polyline tracing site 1 -> site 2 -> ... -> site N (no home legs)."""
+    del home
     if not ordered_stops:
         return {"polyline": [], "miles": 0.0, "legs": [], "graph": False}
 
     graph = road_router.load_graph(data_dir) if road_router.has_graph(data_dir) else None
     ordered = list(ordered_stops)
+    lengths = None
     if graph is not None:
-        _, lengths = _batched_road_lengths(graph, home, ordered)
-    else:
-        lengths = None
+        _, lengths = _stops_only_matrix(graph, ordered)
     if any(s.get("cross_lat") is None or s.get("cross_lon") is None for s in ordered):
-        ordered = _assign_crossings(graph, home, ordered, lengths=lengths)
+        ordered = _assign_crossings_open(graph, ordered, lengths=lengths)
     try:
         from core import street_intel
         street_intel.annotate_stops(ordered, data_dir)
@@ -719,22 +1092,17 @@ def build_route(ordered_stops: list[dict], home: tuple[float, float], data_dir: 
         pass
 
     if road_router.HAS_ROUTING and graph is not None:
-        targets = [(*_stop_pt(s), f"Site {s['id']}") for s in ordered]
-        legs = road_router.directions_for_stops(
-            graph, home, targets, include_turns=False)
-        last = _stop_pt(ordered[-1])
-        ret = road_router.route_between(graph, last, home, include_turns=False)
-        ret["from"] = f"Stop {len(ordered)}"
-        ret["to"] = "Home"
-        legs.append(ret)
+        legs: list[dict] = []
         polyline, miles = [], 0.0
         failed = 0
-        for i, leg in enumerate(legs):
-            coords = leg.get("polyline") or []
-            if i < len(ordered):
-                touch = _stop_pt(ordered[i])
-                coords = _snap_leg_end(coords, touch)
-                leg["polyline"] = coords
+        for i in range(len(ordered) - 1):
+            a = _stop_pt(ordered[i])
+            b = _stop_pt(ordered[i + 1])
+            leg = road_router.route_between(graph, a, b, include_turns=False)
+            leg["from"] = f"Site {ordered[i]['id']}"
+            leg["to"] = f"Site {ordered[i + 1]['id']}"
+            coords = _snap_leg_end(leg.get("polyline") or [], b)
+            leg["polyline"] = coords
             if not leg.get("ok"):
                 failed += 1
             if coords:
@@ -744,12 +1112,29 @@ def build_route(ordered_stops: list[dict], home: tuple[float, float], data_dir: 
                     polyline.extend(coords)
             if leg.get("ok"):
                 miles += leg.get("miles", 0.0)
-        out = {"polyline": polyline, "miles": miles, "legs": legs, "graph": True}
+            legs.append(leg)
+        out = {
+            "polyline": polyline,
+            "miles": miles,
+            "legs": legs,
+            "graph": True,
+            "site_legs": build_site_legs(ordered, (0.0, 0.0), data_dir, graph=graph),
+        }
         if failed:
             out["failed_legs"] = failed
         return out
 
-    pts = [(float(home[0]), float(home[1]))] + [_stop_pt(s) for s in ordered] + [(float(home[0]), float(home[1]))]
+    pts = [_stop_pt(s) for s in ordered]
     polyline = [[p[0], p[1]] for p in pts]
-    miles = sum(_haversine_km(pts[i], pts[i + 1]) for i in range(len(pts) - 1)) * 0.621371
-    return {"polyline": polyline, "miles": miles, "legs": [], "graph": False}
+    miles = (
+        sum(_haversine_km(pts[i], pts[i + 1]) for i in range(len(pts) - 1)) * 0.621371
+        if len(pts) >= 2
+        else 0.0
+    )
+    return {
+        "polyline": polyline,
+        "miles": miles,
+        "legs": [],
+        "graph": False,
+        "site_legs": build_site_legs(ordered, (0.0, 0.0), data_dir, graph=None),
+    }

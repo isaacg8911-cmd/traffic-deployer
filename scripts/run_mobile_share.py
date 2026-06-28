@@ -109,10 +109,17 @@ def _make_demo(port: int, admin_key: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mobile public share mode (Cloudflare tunnel).")
     parser.add_argument("--demo", action="store_true", help="create a demo job and print its share link")
+    parser.add_argument(
+        "--open-uploads",
+        action="store_true",
+        help="let the phone upload its own Excel + .EST on the public URL (no admin key)",
+    )
     parser.add_argument("--port", type=int, default=int(os.environ.get("TD_MOBILE_PORT", "8800")))
     args = parser.parse_args()
 
     os.environ["TD_MOBILE_PUBLIC"] = "1"
+    if args.open_uploads:
+        os.environ["TD_MOBILE_OPEN_CREATE"] = "1"
 
     from mobile_web import settings
 
@@ -149,7 +156,11 @@ def main() -> int:
 
     print("=" * 64)
     print(f"  PUBLIC URL : {public_url}")
-    print("  Mode       : share-only (crew open jobs from a share link)")
+    if settings.open_uploads():
+        print("  Mode       : OPEN uploads (open this URL on the phone and import")
+        print("               your Excel + .EST directly — no demo, no admin key)")
+    else:
+        print("  Mode       : share-only (crew open jobs from a share link)")
     if settings.admin_key_is_generated():
         print(f"  ADMIN KEY  : {admin_key}")
         print("               (needed to create jobs on the public server;")

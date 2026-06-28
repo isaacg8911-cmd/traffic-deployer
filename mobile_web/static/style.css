@@ -140,6 +140,9 @@ a.primary, a.secondary { text-decoration: none; text-align: center; display: blo
 #publicNote { display: none; }
 body.public-mode #createBlock { display: none; }
 body.public-mode #publicNote { display: block; }
+/* Open-uploads deploy: public tunnel that still lets the phone create/import. */
+body.public-open #createBlock { display: block; }
+body.public-open #publicNote { display: none; }
 
 /* Share-with-crew block (Audit tab) */
 .share { margin-top: 14px; }

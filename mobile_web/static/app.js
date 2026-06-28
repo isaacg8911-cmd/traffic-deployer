@@ -46,6 +46,18 @@
     try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) { return null; }
   }
   function clearSession() { localStorage.removeItem(LS_KEY); }
+  function closeRememberedJob(msg) {
+    clearSession();
+    state.jobId = null;
+    state.token = null;
+    state.data = null;
+    state.reorderMode = false;
+    showStart();
+    if (msg) {
+      $('startMsg').textContent = msg;
+      $('startMsg').className = 'msg ok';
+    }
+  }
 
   // ----------------------------------------------------------------- map
   function initMap() {
@@ -530,7 +542,8 @@
     $('btnPrev').onclick = function () { if (state.current > 0) { state.current--; renderInstall(); } };
     $('btnNext').onclick = function () { var st = state.data.stops || []; if (state.current < st.length - 1) { state.current++; renderInstall(); } };
     $('btnLocate').onclick = locateMe;
-    $('btnCloseJob').onclick = function () { clearSession(); state.jobId = null; state.token = null; state.data = null; state.reorderMode = false; showStart(); };
+    $('btnCloseJob').onclick = function () { closeRememberedJob('Remembered job cleared on this phone. Use a share link to reopen a job.'); };
+    $('btnClearSavedJob').onclick = function () { closeRememberedJob('Remembered job cleared on this phone.'); };
     $('btnCopyShare').onclick = copyShare;
     Array.prototype.forEach.call(document.querySelectorAll('#tabbar button'), function (b) {
       b.onclick = function () { if (state.tab === 'install') flushForm(); setTab(b.dataset.tab); };
@@ -550,17 +563,15 @@
     return { jobId: m[1], token: token };
   }
 
-  function applyPublicMode(isPublic) {
+  function applyPublicMode(isPublic, canCreate) {
     state.publicMode = !!isPublic;
+    state.canCreate = !!canCreate;
     if (isPublic) document.body.classList.add('public-mode');
+    // Open-uploads deploy: public tunnel but the phone may still create/import.
+    if (isPublic && canCreate) document.body.classList.add('public-open');
   }
 
-  function boot() {
-    wire();
-    api('/api/config').then(function (cfg) {
-      state.tileUrl = cfg.tile_url; applyPublicMode(cfg.public_mode); initMap();
-    }).catch(function () { initMap(); });
-
+  function finishBoot() {
     var share = shareTarget();
     if (share && share.jobId) {
       $('startMsg').textContent = 'Opening shared job…';
@@ -572,6 +583,11 @@
         $('startMsg').textContent = e.message || 'This share link is invalid or expired.';
         $('startMsg').className = 'msg err';
       });
+    } else if (state.publicMode) {
+      // Public/share links are explicit. The bare tunnel URL should not surprise
+      // a crew phone by reopening an old job from browser storage.
+      clearSession();
+      showStart();
     } else {
       var sess = loadSession();
       if (sess && sess.jobId) {
@@ -580,6 +596,13 @@
         showStart();
       }
     }
+  }
+
+  function boot() {
+    wire();
+    api('/api/config').then(function (cfg) {
+      state.tileUrl = cfg.tile_url; applyPublicMode(cfg.public_mode, cfg.can_create); initMap(); finishBoot();
+    }).catch(function () { initMap(); finishBoot(); });
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(function () {});
     }

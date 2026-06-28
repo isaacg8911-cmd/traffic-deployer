@@ -29,6 +29,17 @@ def public_mode() -> bool:
     return os.environ.get("TD_MOBILE_PUBLIC", "") == "1"
 
 
+def open_uploads() -> bool:
+    """Allow job creation/import from any phone, even over a public tunnel.
+
+    Set TD_MOBILE_OPEN_CREATE=1 to let the crew upload their own Excel + .EST
+    from the phone on a public URL (no admin key, no share-link required). The
+    tunnel URL is random and unguessable; use this for a single-operator field
+    deploy, not a widely-shared address.
+    """
+    return os.environ.get("TD_MOBILE_OPEN_CREATE", "") == "1"
+
+
 def admin_key() -> str:
     """The admin key for privileged actions (job creation in public mode).
 
@@ -75,6 +86,9 @@ def default_link_ttl_hours() -> float:
 
 def creation_allowed(admin_header: str | None) -> bool:
     """Whether a job-creation request is allowed given the presented admin key."""
+    if open_uploads():
+        # Operator chose to let phones upload directly (even on a public tunnel).
+        return True
     key = admin_key()
     if not public_mode() and not key:
         # Local mode, no key configured: open creation (same as before).

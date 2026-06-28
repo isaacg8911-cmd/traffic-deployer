@@ -106,9 +106,10 @@ def config() -> dict:
     return {
         "tile_url": TILE_URL,
         "tile_attribution": TILE_ATTRIB,
-        # Public/share-only mode hides job creation on the phone start screen.
+        # Public/share-only mode hides job creation on the phone start screen,
+        # UNLESS the operator turned on open uploads (TD_MOBILE_OPEN_CREATE=1).
         "public_mode": settings.public_mode(),
-        "can_create": not settings.public_mode(),
+        "can_create": settings.creation_allowed(None),
     }
 
 

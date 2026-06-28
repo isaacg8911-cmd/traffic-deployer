@@ -43,7 +43,8 @@
         </label>
         <button id="btnOpen" class="secondary">Reopen job</button>
       </div>
-      <p id="publicNote" class="muted">Open your job from the share link your dispatcher sent you.</p>
+      <p id="publicNote" class="muted">Open your job from the share link your dispatcher sent you. The plain public URL will not auto-open old sites.</p>
+      <button id="btnClearSavedJob" class="ghost">Clear remembered job on this phone</button>
       <div id="startMsg" class="msg"></div>
     </div>
   </section>
@@ -135,7 +136,7 @@
         </div>
         <img id="shareQr" class="qr" alt="Scan to open job" />
       </div>
-      <button id="btnCloseJob" class="ghost">Close job</button>
+      <button id="btnCloseJob" class="ghost">Close / clear remembered job</button>
       <div id="jobMeta" class="msg"></div>
     </div>
   </section>
@@ -151,6 +152,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/vendor/maplibre-gl.js"></script>
-  <script src="/app.js?v=4"></script>
+  <script src="/app.js?v=6"></script>
 </body>
 </html>

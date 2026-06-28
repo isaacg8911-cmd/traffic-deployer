@@ -111,6 +111,8 @@ def build_map_state(
             "polyline": polyline,
             "miles": float(route.get("miles") or 0.0),
             "graph": bool(route.get("graph")),
+            # True after a manual reorder until the drive line is re-traced.
+            "stale": bool(route.get("stale")),
         },
         "highlight_uid": hi,
         "counts": progress_counts(stops),

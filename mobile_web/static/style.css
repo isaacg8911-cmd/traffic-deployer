@@ -108,6 +108,18 @@ a.primary, a.secondary { text-decoration: none; text-align: center; display: blo
 .list li .grow { display: flex; flex-direction: column; }
 .list li .sub { font-size: 12px; color: var(--muted); }
 .list li.current { outline: 2px solid var(--blue); }
+.list li.reordering { cursor: default; }
+
+/* Reorder up/down controls */
+.secondary.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+.reorder-btns { display: flex; gap: 6px; flex: 0 0 auto; }
+.reorder-btns .rbtn {
+  width: 44px; height: 44px; padding: 0; border-radius: 10px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+  font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center;
+}
+.reorder-btns .rbtn:active { background: var(--blue); border-color: var(--blue); color: #fff; }
+.reorder-btns .rbtn:disabled { opacity: .35; }
 
 /* Tab bar */
 #tabbar {

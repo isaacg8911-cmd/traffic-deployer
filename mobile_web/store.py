@@ -169,6 +169,27 @@ class JobStore:
                     return stop
         return None
 
+    def move_stop(self, job: dict, uid: str, direction: str) -> str:
+        """Move one stop up/down in the manual order.
+
+        Returns: 'moved' | 'edge' (already at top/bottom) | 'not_found'.
+        Does NOT persist — the caller saves after re-tracing so the write is
+        atomic with the new route. Pure list reorder; numbering is derived from
+        position in `map_state.build_map_state`, so nothing else to renumber.
+        """
+        if direction not in ("up", "down"):
+            raise ValueError("direction must be 'up' or 'down'")
+        with _LOCK:
+            stops = job.get("stops") or []
+            idx = next((i for i, s in enumerate(stops) if s.get("uid") == uid), -1)
+            if idx < 0:
+                return "not_found"
+            swap = idx - 1 if direction == "up" else idx + 1
+            if swap < 0 or swap >= len(stops):
+                return "edge"
+            stops[idx], stops[swap] = stops[swap], stops[idx]
+            return "moved"
+
     def delete(self, job_id: str) -> bool:
         path = self._path(job_id)
         with _LOCK:

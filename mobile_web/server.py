@@ -306,6 +306,29 @@ def get_map_state(job_id: str, request: Request) -> dict:
     return _job_state(job)
 
 
+def _trace_current_order(job: dict) -> bool:
+    """(Re)build the polyline for the job's CURRENT stop order — no re-optimize.
+
+    Field-safe: any routing failure leaves the existing route intact and returns
+    False instead of raising, so a phone never crashes on a bad graph/leg.
+    """
+    stops = job.get("stops") or []
+    if not stops:
+        job["route"] = {"polyline": [], "miles": 0.0, "graph": False}
+        return True
+    try:
+        home = tuple(job["home"])
+        route = routing.build_route(stops, home, DATA_DIR)
+    except Exception:
+        return False
+    job["route"] = {
+        "polyline": route.get("polyline", []),
+        "miles": float(route.get("miles") or 0.0),
+        "graph": bool(route.get("graph")),
+    }
+    return True
+
+
 @app.post("/api/jobs/{job_id}/route")
 def build_route(job_id: str, request: Request) -> dict:
     """Optimize stop order + trace the route. Runs in the threadpool (sync def)."""
@@ -325,6 +348,50 @@ def build_route(job_id: str, request: Request) -> dict:
     }
     store.save(job)
     return {"state": _job_state(job), "graph": res.get("graph", False)}
+
+
+@app.post("/api/jobs/{job_id}/retrace")
+def retrace_route(job_id: str, request: Request) -> dict:
+    """Re-draw the drive line for the CURRENT manual order (no re-optimize)."""
+    job = _authorize(request, job_id)
+    if not (job.get("stops") or []):
+        raise HTTPException(status_code=422, detail="No stops to route.")
+    traced = _trace_current_order(job)
+    store.save(job)
+    return {"state": _job_state(job), "traced": traced}
+
+
+@app.post("/api/jobs/{job_id}/stops/{uid}/move")
+async def move_stop(job_id: str, uid: str, request: Request) -> dict:
+    """Move a stop up/down in the manual order.
+
+    Body/query `dir`: 'up' or 'down'. This is a cheap list reorder + renumber
+    only — it does NOT re-trace the drive line (that can take seconds when a
+    road graph is present). Stop numbers update instantly so rapid field taps
+    stay snappy; the user taps "Re-trace line" once when the order is set.
+    Hitting the top/bottom is a no-op (200), not an error.
+    """
+    job = _authorize(request, job_id)
+    direction = ""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            direction = str(body.get("dir") or "")
+    except Exception:
+        direction = ""
+    if not direction:
+        direction = request.query_params.get("dir", "")
+    if direction not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="dir must be 'up' or 'down'.")
+
+    result = store.move_stop(job, uid, direction)
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail="Stop not found.")
+    if result == "moved":
+        # Mark the traced line stale so the UI can prompt a re-trace.
+        job["route"]["stale"] = True
+        store.save(job)
+    return {"state": _job_state(job), "moved": result == "moved"}
 
 
 @app.patch("/api/jobs/{job_id}/stops/{uid}")

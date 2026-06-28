@@ -7,7 +7,7 @@
   var DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
   var LS_KEY = 'td_mobile_job';
 
-  var state = { jobId: null, token: null, data: null, tab: 'route', current: 0, pinMode: false, tileUrl: null, publicMode: false, shareUrl: null };
+  var state = { jobId: null, token: null, data: null, tab: 'route', current: 0, pinMode: false, tileUrl: null, publicMode: false, shareUrl: null, reorderMode: false, busy: false };
   var map = null, mapReady = false, meMarker = null, pinMarker = null;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -182,15 +182,75 @@
 
   function renderRoute() {
     var ul = $('stopList'); ul.innerHTML = '';
-    var miles = state.data.route ? state.data.route.miles : 0;
-    $('routeMiles').textContent = miles ? (miles.toFixed(1) + ' mi') : 'not routed';
-    (state.data.stops || []).forEach(function (s, i) {
+    var route = state.data.route || {};
+    var miles = route.miles || 0;
+    $('routeMiles').textContent = route.stale ? 'order changed — re-trace' : (miles ? (miles.toFixed(1) + ' mi') : 'not routed');
+    if (state.reorderMode) {
+      $('btnRetrace').classList.toggle('active', !!route.stale);
+      $('reorderHint').textContent = route.stale
+        ? 'Order changed — tap Re-trace line to redraw the drive path.'
+        : 'Tap ▲ / ▼ to set your own order, then Re-trace line.';
+    }
+    var stops = state.data.stops || [];
+    var last = stops.length - 1;
+    stops.forEach(function (s, i) {
       var li = document.createElement('li');
-      li.className = s.status + (i === state.current ? ' current' : '');
-      li.innerHTML = '<span class="dot"></span><span class="grow"><b>' + (s.seq || (i + 1)) + '. Site ' + s.id + '</b>' +
+      li.className = s.status + (i === state.current ? ' current' : '') + (state.reorderMode ? ' reordering' : '');
+      var label = '<span class="grow"><b>' + (s.seq || (i + 1)) + '. Site ' + s.id + '</b>' +
         '<span class="sub">' + esc(s.street) + (s.sheet ? ' · ' + esc(s.sheet) : '') + '</span></span>';
-      li.onclick = function () { state.current = i; setTab('install'); };
+      if (state.reorderMode) {
+        li.innerHTML = label +
+          '<span class="reorder-btns">' +
+          '<button class="rbtn" data-dir="up"' + (i === 0 ? ' disabled' : '') + ' aria-label="Move up">▲</button>' +
+          '<button class="rbtn" data-dir="down"' + (i === last ? ' disabled' : '') + ' aria-label="Move down">▼</button>' +
+          '</span>';
+        var ups = li.querySelectorAll('.rbtn');
+        Array.prototype.forEach.call(ups, function (btn) {
+          btn.onclick = function (ev) {
+            ev.stopPropagation();
+            if (btn.disabled) return;
+            moveStop(s.uid, btn.dataset.dir);
+          };
+        });
+      } else {
+        li.innerHTML = '<span class="dot"></span>' + label;
+        li.onclick = function () { state.current = i; setTab('install'); };
+      }
       ul.appendChild(li);
+    });
+  }
+
+  function setReorderMode(on) {
+    state.reorderMode = !!on;
+    $('btnReorder').textContent = state.reorderMode ? 'Done reordering' : 'Reorder stops';
+    $('btnReorder').classList.toggle('active', state.reorderMode);
+    $('btnRetrace').classList.toggle('hidden', !state.reorderMode);
+    $('reorderHint').classList.toggle('hidden', !state.reorderMode);
+    renderRoute();
+  }
+
+  function moveStop(uid, dir) {
+    if (state.busy) return;
+    state.busy = true;
+    api('/api/jobs/' + state.jobId + '/stops/' + encodeURIComponent(uid) + '/move', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dir: dir })
+    }).then(function (res) {
+      applyState(res.state);
+    }).catch(function (e) { toast(e.message); })
+      .finally(function () { state.busy = false; });
+  }
+
+  function retraceRoute() {
+    if (state.busy) return;
+    state.busy = true;
+    $('btnRetrace').disabled = true; $('btnRetrace').textContent = 'Re-tracing…';
+    api('/api/jobs/' + state.jobId + '/retrace', { method: 'POST' }).then(function (res) {
+      applyState(res.state); fitToStops();
+      toast(res.traced ? 'Line re-traced for your order' : 'Order saved (line unchanged)');
+    }).catch(function (e) { toast(e.message); }).finally(function () {
+      state.busy = false;
+      $('btnRetrace').disabled = false; $('btnRetrace').textContent = 'Re-trace line';
     });
   }
 
@@ -372,6 +432,7 @@
   function buildRoute() {
     $('btnBuildRoute').disabled = true; $('btnBuildRoute').textContent = 'Building…';
     api('/api/jobs/' + state.jobId + '/route', { method: 'POST' }).then(function (res) {
+      if (state.reorderMode) setReorderMode(false);
       applyState(res.state); fitToStops();
       toast(res.graph ? 'Route built on streets' : 'Route built (straight-line — no road map on server)');
     }).catch(function (e) { toast(e.message); }).finally(function () {
@@ -460,6 +521,8 @@
     $('btnImport').onclick = importJob;
     $('btnOpen').onclick = function () { openJob($('openId').value.trim(), $('openToken').value.trim()).catch(function (e) { $('startMsg').textContent = e.message; $('startMsg').className = 'msg err'; }); };
     $('btnBuildRoute').onclick = buildRoute;
+    $('btnReorder').onclick = function () { setReorderMode(!state.reorderMode); };
+    $('btnRetrace').onclick = retraceRoute;
     $('btnGrab').onclick = grabGps;
     $('btnDropPin').onclick = function () { if (state.pinMode) disablePinMode(); else enablePinMode(); };
     $('btnInstall').onclick = function () { commitInstall(true); };
@@ -467,7 +530,7 @@
     $('btnPrev').onclick = function () { if (state.current > 0) { state.current--; renderInstall(); } };
     $('btnNext').onclick = function () { var st = state.data.stops || []; if (state.current < st.length - 1) { state.current++; renderInstall(); } };
     $('btnLocate').onclick = locateMe;
-    $('btnCloseJob').onclick = function () { clearSession(); state.jobId = null; state.token = null; state.data = null; showStart(); };
+    $('btnCloseJob').onclick = function () { clearSession(); state.jobId = null; state.token = null; state.data = null; state.reorderMode = false; showStart(); };
     $('btnCopyShare').onclick = copyShare;
     Array.prototype.forEach.call(document.querySelectorAll('#tabbar button'), function (b) {
       b.onclick = function () { if (state.tab === 'install') flushForm(); setTab(b.dataset.tab); };

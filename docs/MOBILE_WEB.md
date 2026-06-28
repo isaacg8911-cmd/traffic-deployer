@@ -10,10 +10,10 @@ Qt shell. Location comes from the phone browser.
 RUN_MOBILE.bat
 ```
 
-This starts the server and prints two URLs:
+This starts the server (HTTPS by default) and prints two URLs:
 
-- On this PC: `http://127.0.0.1:8800`
-- On phone: `http://<lan-ip>:8800` (same Wi-Fi)
+- On this PC: `https://127.0.0.1:8800`
+- On phone: `https://<lan-ip>:8800` (same Wi-Fi)
 
 Open the phone URL, then "Add to Home Screen" to install the app icon.
 
@@ -22,10 +22,16 @@ osmnx on startup; after that it is fast.
 
 ### Geolocation note
 
-Phone browser geolocation needs a **secure context**. It works on `localhost`,
-but over LAN by IP the browser blocks `getCurrentPosition` unless the page is
-HTTPS. For real field use, host the server behind an HTTPS reverse proxy (or a
-tunnel). The "Drop pin" fallback works without geolocation.
+Phone browser geolocation needs a **secure context** — over LAN by IP the
+browser blocks `getCurrentPosition` on plain HTTP. The launcher now serves
+**HTTPS by default** using a self-signed certificate that names this PC's LAN IP
+(generated into `tds_data/mobile_certs/`, git-ignored). The phone shows a
+one-time "connection is not private" warning — tap **Advanced -> proceed** — and
+then "Grab GPS" works in the field.
+
+For a warning-free experience in production, put the server behind a trusted cert
+/ HTTPS reverse proxy. To force plain HTTP (drop-pin only, no phone GPS), set
+`TD_MOBILE_HTTP=1`. The "Drop pin" fallback always works without geolocation.
 
 ## Phone vs laptop
 
@@ -48,6 +54,7 @@ tunnel). The "Drop pin" fallback works without geolocation.
 
 - `mobile_web/server.py` — FastAPI app (REST + static PWA)
 - `mobile_web/store.py` — web-safe JSON job store (token-scoped, in-memory cached)
+- `mobile_web/tls.py` — self-signed LAN cert (secure context for phone GPS)
 - `mobile_web/static/` — the PWA (index.html, app.js, style.css, sw.js, manifest)
 - `core/map_state.py` — Qt-free map payload shared with the renderer
 - Reuses `core.ingest`, `core.routing`, `core.export` unchanged
@@ -73,8 +80,9 @@ header or `?token=` query.
 
 ```
 .venv\Scripts\python.exe scripts\mobile_user_prove.py     # user flow
+.venv\Scripts\python.exe scripts\mobile_tls_prove.py      # real HTTPS secure context
 .venv\Scripts\python.exe scripts\mobile_stress_loop.py    # load + latency
-.venv\Scripts\python.exe scripts\mobile_app_check.py      # both + audit
+.venv\Scripts\python.exe scripts\mobile_app_check.py      # all + audit
 ```
 
 The audit writes `logs/mobile_check/latest.md` (strengths / weaknesses /
@@ -82,6 +90,7 @@ improvements). Stress latency logs to `logs/mobile_stress/`.
 
 ## Known limits / next steps
 
+- HTTPS is self-signed (one-time phone warning); use a trusted cert/proxy in prod
 - Job token only, not full multi-user auth (phase 2)
 - Online-first: no offline field queue yet (IndexedDB sync is phase 2)
 - Heavy route builds (large jobs with a server road graph) should be backgrounded

@@ -24,12 +24,14 @@ if not os.path.isfile(PY):
 
 STEPS = [
     ("user_prove", "scripts/mobile_user_prove.py"),
+    ("tls_prove", "scripts/mobile_tls_prove.py"),
     ("stress_loop", "scripts/mobile_stress_loop.py"),
 ]
 
 # Known improvement backlog — surfaced every run so they are not forgotten.
 KNOWN_IMPROVEMENTS = [
-    "Phone geolocation needs HTTPS over LAN (works on localhost); host behind TLS for field use",
+    "HTTPS over LAN now on by default (self-signed); phone must accept the cert once — "
+    "use a trusted cert / reverse proxy to skip the warning in production",
     "No real multi-user auth yet — job token only (phase 2)",
     "Offline field mode not implemented — online-first; brief drops not yet queued in IndexedDB",
     "Server-side road graph optional — without it, routes are straight-line, not street-traced",
@@ -78,6 +80,18 @@ def _audit(results: list[dict]) -> dict:
         weaknesses.append("User test failures: " + ", ".join(up["failed"]))
     elif not by.get("user_prove", {}).get("ok"):
         weaknesses.append("User test did not pass — see logs/mobile_check tail")
+
+    tp = _load(os.path.join(REPORT_DIR, "proofs", "tls_prove.json"))
+    if by.get("tls_prove", {}).get("ok") and tp:
+        strengths.append(
+            f"HTTPS secure context: {tp['passed']}/{tp['total']} TLS checks pass "
+            "(self-signed cert names the LAN IP; real handshake serves /api/healthz; "
+            "phone geolocation works over LAN)"
+        )
+    elif tp and tp.get("failed"):
+        weaknesses.append("TLS test failures: " + ", ".join(tp["failed"]))
+    elif not by.get("tls_prove", {}).get("ok"):
+        weaknesses.append("TLS test did not pass — see logs/mobile_check tail")
 
     # Latency + load signal from the freshest stress log line.
     stress = _latest_stress()

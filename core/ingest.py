@@ -20,6 +20,31 @@ CA_LAT_MIN, CA_LAT_MAX = 30.0, 40.0
 CA_LON_MIN, CA_LON_MAX = -125.0, -110.0
 
 
+class ExcelEngineMissing(RuntimeError):
+    """pandas could not read a spreadsheet because its reader engine is absent.
+
+    .xls needs ``xlrd``; .xlsx/.xlsm need ``openpyxl``. pandas imports these
+    lazily at read time, so a partial venv or a frozen build that did not bundle
+    them fails here. We raise instead of silently returning zero sites — a
+    missing engine is a fix-the-install problem, not a bad-file problem.
+    """
+
+
+def _engine_hint(path: str, exc: Exception) -> str:
+    ext = os.path.splitext(str(path))[1].lower()
+    name = os.path.basename(str(path)) or str(path)
+    pkg = {".xls": "xlrd", ".xlsx": "openpyxl", ".xlsm": "openpyxl"}.get(ext)
+    if pkg:
+        return (
+            f"Can't read '{name}'. This {ext} file needs the '{pkg}' package, "
+            f"which is missing from this install.\n\n"
+            f"Fix: run START.bat to repair the environment (or rebuild the "
+            f"portable app). As a quick workaround, open the file in Excel and "
+            f"Save As .csv, then upload the .csv."
+        )
+    return f"Can't read '{name}': {exc}"
+
+
 def _haversine_km(lat1, lon1, lat2, lon2):
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
@@ -69,6 +94,12 @@ def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
                 frames = {"Sheet1": pd.read_csv(path, encoding="latin-1")}
             else:
                 frames = pd.read_excel(path, sheet_name=None)
+        except ImportError as exc:
+            # Missing pandas reader engine (xlrd/openpyxl). Fatal config error:
+            # every spreadsheet would fail the same way, so surface it loudly
+            # instead of dropping all sites and showing a misleading
+            # "no coordinates found" message.
+            raise ExcelEngineMissing(_engine_hint(path, exc)) from exc
         except Exception:
             continue
 
@@ -142,7 +173,8 @@ def match_est_files(est_configs: list[dict], excel_sites: dict[str, dict],
 # Field progress preserved when re-building route from the same uploads.
 _PROGRESS_KEYS = (
     "installed", "skipped", "picked_up",
-    "field_lat", "field_lon", "serial", "lanes", "direction", "notes",
+    "field_lat", "field_lon", "serial", "lanes", "direction", "direction_source",
+    "direction_bearing", "notes",
     "date", "exact_time", "street_warning", "cross_lat", "cross_lon", "cross_side",
     "install_photo_path",
     "counter_unit_id", "counter_serial", "counter_cleared_at", "counter_download_path",
@@ -166,7 +198,9 @@ def merge_stop_progress(old: dict | None, fresh: dict) -> dict:
 
 def new_stop(site_id: str, sheet: str, data: dict) -> dict:
     """Create a fresh stop record (with begin/end + midpoint) and workflow fields."""
-    return {
+    from core.direction import apply_segment_hint
+
+    stop = {
         "id": str(site_id),
         "uid": f"{sheet}_{site_id}",
         "sheet": sheet,
@@ -188,7 +222,8 @@ def new_stop(site_id: str, sheet: str, data: dict) -> dict:
         "field_lon": None,
         "serial": "",
         "lanes": 2,
-        "direction": "n",
+        "direction": "",
+        "direction_source": "needs_gps",
         "notes": "",
         "installed": False,
         "skipped": False,
@@ -198,3 +233,5 @@ def new_stop(site_id: str, sheet: str, data: dict) -> dict:
         # TrafficViewer Pro .tvp metadata linked at pickup/install (Phase 1).
         "tvp": None,
     }
+    apply_segment_hint(stop)
+    return stop

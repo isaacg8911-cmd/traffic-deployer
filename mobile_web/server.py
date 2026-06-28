@@ -117,7 +117,12 @@ def config() -> dict:
 #  Job creation
 # --------------------------------------------------------------------------- #
 def _build_stops(excel_paths, est_configs, home):
-    sites = ingest.parse_excel_sites(excel_paths)
+    try:
+        sites = ingest.parse_excel_sites(excel_paths)
+    except ingest.ExcelEngineMissing as exc:
+        # Spreadsheet reader engine not installed on this host (e.g. xlrd for
+        # legacy .xls). Surface a clean, actionable message instead of a 500.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not sites:
         raise HTTPException(
             status_code=422,

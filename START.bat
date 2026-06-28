@@ -25,7 +25,7 @@ if not exist ".venv\Scripts\python.exe" (
 call ".venv\Scripts\activate.bat"
 
 REM Verify dependencies are actually installed (handles partial installs).
-python -c "import PySide6, PySide6.QtWebEngineWidgets, pandas, serial, pynmea2, cryptography, osmnx, networkx, pyttsx3" 1>nul 2>nul
+python -c "import PySide6, PySide6.QtWebEngineWidgets, pandas, xlrd, openpyxl, xlsxwriter, serial, pynmea2, cryptography, osmnx, networkx" 1>nul 2>nul
 if errorlevel 1 (
     echo Installing / repairing dependencies...
     python -m pip install --upgrade pip

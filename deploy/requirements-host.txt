@@ -3,7 +3,7 @@
 # road graph is bundled, which is the expected behavior on a hosted box.
 #
 # Used by the repo-root Dockerfile. Keep in sync with the imports actually
-# reached by mobile_web.server (core.ingest/export -> pandas+openpyxl,
+# reached by mobile_web.server (core.ingest/export -> pandas + Excel engines,
 # road_router -> numpy, core.routing -> networkx optional).
 fastapi
 uvicorn[standard]
@@ -11,5 +11,9 @@ python-multipart
 segno
 pandas
 numpy
+# Excel engines: openpyxl reads/writes .xlsx; xlrd reads legacy .xls uploads
+# (field crews still hand out .xls). Without xlrd a .xls upload fails on import.
 openpyxl
+xlrd
+xlsxwriter
 networkx

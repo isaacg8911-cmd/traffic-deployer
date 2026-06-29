@@ -73,8 +73,11 @@ def main() -> int:
         # ---- PWA shell
         r = client.get("/")
         ucheck("pwa_shell", r.status_code == 200 and "Traffic Deployer" in r.text)
-        ucheck("app_js_v10", "app.js?v=10" in r.text)
-        r = client.get("/app.js?v=10")
+        import re
+        js_ver = re.search(r"app\.js\?v=(\d+)", r.text)
+        js_v = js_ver.group(1) if js_ver else ""
+        ucheck("app_js_versioned", bool(js_v), f"v={js_v or 'missing'}")
+        r = client.get(f"/app.js?v={js_v}" if js_v else "/app.js")
         ucheck("remember_job_fix", r.status_code == 200 and "publicMode && !state.canCreate" in r.text)
 
         # ---- open-create: demo without admin key

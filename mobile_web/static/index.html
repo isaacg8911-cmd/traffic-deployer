@@ -54,6 +54,12 @@
     <button id="btnLocate" class="map-fab" title="Center on me">◎</button>
   </div>
 
+  <!-- Drag to resize: slide up for more menu, down for more map -->
+  <div id="sheetHandle" class="sheet-handle hidden" role="separator" aria-orientation="horizontal"
+       aria-label="Drag up or down to resize the map" tabindex="0" title="Drag to see more map or more menu">
+    <span class="grip"></span>
+  </div>
+
   <!-- Route tab -->
   <section id="routeScreen" class="screen tab hidden">
     <div class="panel">
@@ -149,6 +155,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/vendor/maplibre-gl.js"></script>
-  <script src="/app.js?v=16"></script>
+  <script src="/app.js?v=17"></script>
 </body>
 </html>

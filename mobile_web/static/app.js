@@ -6,8 +6,10 @@
 
   var DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
   var LS_KEY = 'td_mobile_job';
+  var SHEET_KEY = 'td_sheet_pct';
+  var SHEET_MIN = 24, SHEET_MAX = 80;
 
-  var state = { jobId: null, token: null, data: null, tab: 'route', current: 0, pinMode: false, tileUrl: null, publicMode: false, shareUrl: null, reorderMode: false, busy: false };
+  var state = { jobId: null, token: null, data: null, tab: 'route', current: 0, pinMode: false, tileUrl: null, publicMode: false, shareUrl: null, reorderMode: false, busy: false, sheetPct: 50 };
   var map = null, mapReady = false, meMarker = null, pinMarker = null, siteRefPopup = null;
 
   /* Per-site map colors — palette resets when the next site is far away (new neighborhood). */
@@ -610,6 +612,79 @@
     });
   }
 
+  // ----------------------------------------------------------------- sheet resize
+  // Let the field user drag the boundary between the map and the menu panel:
+  // slide up to get more menu, slide down to see more map. The chosen split is
+  // remembered per-phone so it survives reloads and session restore.
+  function setSheetPct(pct) {
+    pct = Math.max(SHEET_MIN, Math.min(SHEET_MAX, pct));
+    state.sheetPct = pct;
+    document.documentElement.style.setProperty('--sheet-pct', String(pct));
+  }
+
+  function resizeMapSoon(delay) {
+    if (map) setTimeout(function () { map.resize(); }, delay || 0);
+  }
+
+  function initSheet() {
+    var handle = $('sheetHandle');
+    if (!handle) return;
+    var saved = parseFloat(localStorage.getItem(SHEET_KEY));
+    setSheetPct(isNaN(saved) ? 50 : saved);
+
+    var dragging = false, raf = 0;
+
+    function pctFromY(clientY) {
+      var tabbar = $('tabbar');
+      var tabTop = tabbar && !tabbar.classList.contains('hidden')
+        ? tabbar.getBoundingClientRect().top : window.innerHeight;
+      var bodyH = window.innerHeight || document.documentElement.clientHeight || 1;
+      // Panel lives below the handle; map fills above it.
+      var panelPx = tabTop - clientY - (handle.offsetHeight || 26);
+      return panelPx / bodyH * 100;
+    }
+
+    function apply(clientY) {
+      setSheetPct(pctFromY(clientY));
+      if (!raf) raf = requestAnimationFrame(function () { raf = 0; if (map) map.resize(); });
+    }
+
+    handle.addEventListener('pointerdown', function (e) {
+      dragging = true;
+      handle.classList.add('dragging');
+      if (handle.setPointerCapture) try { handle.setPointerCapture(e.pointerId); } catch (er) {}
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      apply(e.clientY);
+      e.preventDefault();
+    });
+    function end(e) {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove('dragging');
+      if (handle.releasePointerCapture && e) try { handle.releasePointerCapture(e.pointerId); } catch (er) {}
+      localStorage.setItem(SHEET_KEY, String(state.sheetPct));
+      resizeMapSoon(60);
+    }
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+    handle.addEventListener('lostpointercapture', end);
+
+    // Keyboard nudge for accessibility / fine control.
+    handle.addEventListener('keydown', function (e) {
+      var step = 0;
+      if (e.key === 'ArrowUp') step = 4;
+      else if (e.key === 'ArrowDown') step = -4;
+      else return;
+      setSheetPct(state.sheetPct + step);
+      localStorage.setItem(SHEET_KEY, String(state.sheetPct));
+      if (map) map.resize();
+      e.preventDefault();
+    });
+  }
+
   // ----------------------------------------------------------------- tabs
   var MAP_TABS = { route: 1, install: 1, pickup: 1 };
   function setTab(tab) {
@@ -622,6 +697,7 @@
     });
     var showMap = !!MAP_TABS[tab];
     $('mapWrap').classList.toggle('hidden', !showMap);
+    $('sheetHandle').classList.toggle('hidden', !showMap);
     document.body.classList.toggle('has-map', showMap);
     if (showMap && map) {
       setTimeout(function () { map.resize(); }, 60);
@@ -662,6 +738,7 @@
     $('startScreen').classList.remove('hidden');
     $('tabbar').classList.add('hidden');
     $('mapWrap').classList.add('hidden');
+    $('sheetHandle').classList.add('hidden');
     document.body.classList.remove('has-map');
     ['route', 'install', 'pickup', 'audit'].forEach(function (t) { $(t + 'Screen').classList.add('hidden'); });
   }
@@ -765,6 +842,7 @@
 
   function boot() {
     wire();
+    initSheet();
     window.addEventListener('online', function () { setOffline(false); toast('Back online'); });
     window.addEventListener('offline', function () { setOffline(true); });
     setOffline(!navigator.onLine);

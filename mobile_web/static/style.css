@@ -12,6 +12,7 @@
   --orange: #e65100;
   --tabh: 56px;
   --toph: 48px;
+  --sheet-pct: 50;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -85,10 +86,31 @@ body { display: flex; flex-direction: column; }
   background: var(--blue); color: #fff; font: inherit; font-weight: 700; cursor: pointer;
 }
 
-/* When a map-backed tab is active, map takes top ~45% and panel scrolls under it */
+/* When a map-backed tab is active the map fills the top and the panel sits
+   under it. The split is user-adjustable via #sheetHandle (drag up = more menu,
+   drag down = more map); --sheet-pct is the panel's share of the screen. */
 body.has-map #routeScreen,
 body.has-map #installScreen,
-body.has-map #pickupScreen { flex: 0 0 auto; max-height: 55%; }
+body.has-map #pickupScreen {
+  flex: 0 0 auto;
+  height: calc(var(--sheet-pct) * 1%);
+  min-height: 92px;
+  max-height: 82%;
+}
+
+/* Drag handle between map and panel */
+.sheet-handle {
+  flex: 0 0 auto; height: 26px; display: flex; align-items: center; justify-content: center;
+  background: var(--panel); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.sheet-handle .grip {
+  width: 46px; height: 5px; border-radius: 999px; background: var(--muted);
+  opacity: .7; transition: background .12s, opacity .12s, width .12s;
+}
+.sheet-handle:active .grip, .sheet-handle.dragging .grip,
+.sheet-handle:focus-visible .grip { background: var(--blue); opacity: 1; width: 60px; }
+.sheet-handle:focus-visible { outline: none; }
 
 .panel { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .row { display: flex; gap: 8px; align-items: stretch; }

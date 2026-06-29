@@ -96,34 +96,27 @@
 
   function addLayers() {
     map.addSource('stops', { type: 'geojson', data: fc() });
-    map.addSource('segments', { type: 'geojson', data: fc() });
     map.addSource('site-pts', { type: 'geojson', data: fc() });
     map.addSource('route', { type: 'geojson', data: fc() });
     map.addSource('home', { type: 'geojson', data: fc() });
 
     map.addLayer({
-      id: 'segments-line', type: 'line', source: 'segments',
-      paint: {
-        'line-color': '#5e35b1',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 3.5],
-        'line-opacity': 0.88,
-        'line-dasharray': [3, 2]
-      }
-    });
-    map.addLayer({
       id: 'route-line', type: 'line', source: 'route',
       paint: { 'line-color': '#1976d2', 'line-width': 4, 'line-opacity': 0.8 }
     });
+    // Begin (blue) / end (red) markers — fine, crisp dots that sit on the street.
     map.addLayer({
       id: 'site-begin', type: 'circle', source: 'site-pts',
       filter: ['==', ['get', 'kind'], 'begin'],
       paint: {
         'circle-radius': [
-          'case', ['boolean', ['get', 'selected'], false], 11, 8
+          'interpolate', ['linear'], ['zoom'],
+          11, ['case', ['boolean', ['get', 'selected'], false], 5, 3.5],
+          16, ['case', ['boolean', ['get', 'selected'], false], 8, 6]
         ],
         'circle-color': '#1565c0',
         'circle-stroke-color': '#ffffff',
-        'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 3, 2]
+        'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 2.5, 1.5]
       }
     });
     map.addLayer({
@@ -131,11 +124,13 @@
       filter: ['==', ['get', 'kind'], 'end'],
       paint: {
         'circle-radius': [
-          'case', ['boolean', ['get', 'selected'], false], 11, 8
+          'interpolate', ['linear'], ['zoom'],
+          11, ['case', ['boolean', ['get', 'selected'], false], 5, 3.5],
+          16, ['case', ['boolean', ['get', 'selected'], false], 8, 6]
         ],
         'circle-color': '#c62828',
         'circle-stroke-color': '#ffffff',
-        'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 3, 2]
+        'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 2.5, 1.5]
       }
     });
     map.addLayer({
@@ -160,7 +155,7 @@
     });
     map.addLayer({
       id: 'home-dot', type: 'circle', source: 'home',
-      paint: { 'circle-radius': 6, 'circle-color': '#9c27b0', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' }
+      paint: { 'circle-radius': 6, 'circle-color': '#0f2744', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' }
     });
 
     function onSitePointClick(e, side) {
@@ -205,15 +200,10 @@
   function renderMap() {
     if (!mapReady || !state.data) return;
     var d = state.data, hi = d.highlight_uid;
-    var segFeats = [], siteFeats = [];
+    var siteFeats = [];
     (d.stops || []).forEach(function (s) {
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
       if (bLat == null || bLon == null || eLat == null || eLon == null) return;
-      segFeats.push({
-        type: 'Feature',
-        properties: { uid: s.uid },
-        geometry: { type: 'LineString', coordinates: [[bLon, bLat], [eLon, eLat]] }
-      });
       var selBegin = s.cross_side === 'begin';
       var selEnd = s.cross_side === 'end';
       siteFeats.push({
@@ -227,7 +217,6 @@
         geometry: { type: 'Point', coordinates: [eLon, eLat] }
       });
     });
-    map.getSource('segments').setData(fc(segFeats));
     map.getSource('site-pts').setData(fc(siteFeats));
 
     var feats = (d.stops || []).map(function (s) {

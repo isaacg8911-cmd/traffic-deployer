@@ -33,7 +33,18 @@
     return h;
   }
 
+  function setOffline(on) {
+    var bar = $('offlineBanner');
+    if (!bar) return;
+    bar.classList.toggle('hidden', !on);
+    document.body.classList.toggle('offline', !!on);
+  }
+
   function api(path, opts) {
+    if (!navigator.onLine) {
+      setOffline(true);
+      return Promise.reject(new Error('No network — edits cannot save until you are back online.'));
+    }
     opts = opts || {};
     opts.headers = headers(opts.headers);
     return fetch(path, opts).then(function (r) {
@@ -256,6 +267,7 @@
     } else {
       setMapLayerVis('home-dot', false);
     }
+
   }
 
   function fitToStops() {
@@ -314,9 +326,12 @@
     var route = state.data.route || {};
     var miles = route.miles || 0;
     var stops = state.data.stops || [];
-    $('routeMiles').textContent = miles ? (miles.toFixed(1) + ' mi') : (stops.length + ' stops');
+    var milesLabel = miles ? (miles.toFixed(1) + ' mi') : (stops.length + ' stops');
+    if (route.stale) milesLabel += ' · order changed';
+    $('routeMiles').textContent = milesLabel;
+    $('routeMiles').classList.toggle('stale', !!route.stale);
     if (state.reorderMode) {
-      $('reorderHint').textContent = 'Tap ▲ / ▼ to set order, then Build route. Tap a dot for site reference.';
+      $('reorderHint').textContent = 'Tap ▲ / ▼ to set order. Build route re-optimizes if needed.';
     }
     var last = stops.length - 1;
     stops.forEach(function (s, i) {
@@ -362,19 +377,11 @@
       body: JSON.stringify({ dir: dir })
     }).then(function (res) {
       applyState(res.state);
+      if (res.moved && (res.state.route || {}).stale) {
+        toast('Order changed');
+      }
     }).catch(function (e) { toast(e.message); })
       .finally(function () { state.busy = false; });
-  }
-
-  function retraceRoute() {
-    if (state.busy) return;
-    state.busy = true;
-    api('/api/jobs/' + state.jobId + '/retrace', { method: 'POST' }).then(function (res) {
-      applyState(res.state); fitToStops();
-      toast('Stop order saved');
-    }).catch(function (e) { toast(e.message); }).finally(function () {
-      state.busy = false;
-    });
   }
 
   function renderInstall() {
@@ -724,6 +731,9 @@
 
   function boot() {
     wire();
+    window.addEventListener('online', function () { setOffline(false); toast('Back online'); });
+    window.addEventListener('offline', function () { setOffline(true); });
+    setOffline(!navigator.onLine);
     api('/api/config').then(function (cfg) {
       state.tileUrl = cfg.tile_url; applyPublicMode(cfg.public_mode, cfg.can_create); initMap(); finishBoot();
     }).catch(function () { initMap(); finishBoot(); });

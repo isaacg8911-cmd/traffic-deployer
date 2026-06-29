@@ -136,7 +136,7 @@ def run(cycles: int) -> tuple[bool, dict]:
            {"stops": 80, "map_state_kb": payload_kb, "edit_p95_ms": round(_pct(edit_lat, 95), 1)},
            required=False)
 
-    # ---- scenario 5: rapid manual reorder — hammer move up/down + re-trace.
+    # ---- scenario 5: rapid manual reorder — hammer move up/down only.
     # Proves the order edits never drop/duplicate a stop and stay responsive
     # under fast field taps.
     reorder_lat: list[float] = []
@@ -153,11 +153,10 @@ def run(cycles: int) -> tuple[bool, dict]:
         reorder_lat.append((time.perf_counter() - t) * 1000)
         if rm.status_code != 200:
             reorder_errors += 1
-    rt = client.post(f"/api/jobs/{job_id}/retrace", headers=auth)
     final = client.get(f"/api/jobs/{job_id}/map-state", headers=auth).json()
     final_uids = sorted(s["uid"] for s in final["stops"])
     no_loss = final_uids == sorted(uids)
-    record("rapid_reorder", reorder_errors == 0 and no_loss and rt.status_code == 200,
+    record("rapid_reorder", reorder_errors == 0 and no_loss,
            {"moves": moves, "errors": reorder_errors, "stops_intact": no_loss,
             "p95_ms": round(_pct(reorder_lat, 95), 1)})
 

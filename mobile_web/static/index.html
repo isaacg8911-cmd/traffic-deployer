@@ -15,6 +15,9 @@
     <div id="brand">Traffic Deployer</div>
     <div id="progressPill" class="pill">—</div>
   </header>
+  <div id="offlineBanner" class="offline-banner hidden" role="status">
+    Offline — installs and edits cannot save until you reconnect.
+  </div>
 
   <!-- Start / job-load screen -->
   <section id="startScreen" class="screen">
@@ -61,7 +64,7 @@
       <div class="row">
         <button id="btnReorder" class="secondary grow">Reorder stops</button>
       </div>
-      <div id="reorderHint" class="muted hidden">Tap ▲ / ▼ to set order, then Build route. Tap a dot for site reference.</div>
+      <div id="reorderHint" class="muted hidden">Tap ▲ / ▼ to set order. Tap a dot for site reference.</div>
       <ul id="stopList" class="list"></ul>
     </div>
   </section>
@@ -146,6 +149,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/vendor/maplibre-gl.js"></script>
-  <script src="/app.js?v=14"></script>
+  <script src="/app.js?v=15"></script>
 </body>
 </html>

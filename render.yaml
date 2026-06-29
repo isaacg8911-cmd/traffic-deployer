@@ -1,42 +1,21 @@
-# Render Blueprint — always-on host for the Traffic Deployer mobile PWA.
-# https://render.com  ->  New  ->  Blueprint  ->  pick this repo.
-#
-# Render reads this file, builds the repo-root Dockerfile, and runs the mobile
-# server in share-only public mode. After the first deploy:
-#   1. open the service -> Environment -> copy the generated TD_MOBILE_ADMIN_KEY
-#   2. create a job:  POST https://<your-service>.onrender.com/api/jobs/demo
-#                     with header  x-admin-key: <that key>   (the response has share_url)
-#   3. text the share_url to the crew.
+# Render Blueprint — share-only hosted mobile PWA.
+# Crew opens jobs via share link; job creation requires TD_MOBILE_ADMIN_KEY.
 services:
   - type: web
     name: traffic-deployer-mobile
     runtime: docker
+    plan: starter
     dockerfilePath: ./Dockerfile
-    # 'free' = no monthly cost. Trade-offs: the instance SLEEPS after ~15 min of
-    # inactivity (the next open cold-starts in ~30-50s) and has NO persistent
-    # disk, so jobs are lost when it sleeps/restarts and old share links 404.
-    # Upgrade to 'starter' (~$7/mo) + the disk block below to keep jobs always on.
-    plan: free
     healthCheckPath: /api/healthz
-    autoDeploy: true
+    disk:
+      name: tds-data
+      mountPath: /app/tds_data
+      sizeGB: 1
     envVars:
       - key: TD_MOBILE_PUBLIC
         value: "1"
-      # Open uploads: any phone can import .xls + .est and tap "Import job"
-      # WITHOUT an admin key (matches the laptop tunnel flow). The free URL is
-      # guessable, so only use this for low-sensitivity field data.
-      - key: TD_MOBILE_OPEN_CREATE
-        value: "1"
-      # Still generated for admin-only endpoints (revoke/extend/status). The crew
-      # never needs it because open uploads is on.
-      - key: TD_MOBILE_ADMIN_KEY
-        generateValue: true
-      # Share links self-expire after this many hours (a shift). 0 = never.
       - key: TD_MOBILE_LINK_TTL_HOURS
         value: "16"
-    # Persistent disk is NOT available on the free plan. To keep jobs across
-    # restarts, switch plan to 'starter' and uncomment:
-    # disk:
-    #   name: tds-data
-    #   mountPath: /app/tds_data
-    #   sizeGB: 1
+      - key: TD_MOBILE_ADMIN_KEY
+        generateValue: true
+      # Do NOT set TD_MOBILE_OPEN_CREATE here — hosted default is share-only.

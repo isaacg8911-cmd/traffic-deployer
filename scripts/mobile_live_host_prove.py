@@ -34,9 +34,16 @@ def _pct(values: list[float], p: float) -> float:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True, help="e.g. https://tds-field-app.onrender.com")
+    parser.add_argument("--admin-key", default=os.environ.get("TD_MOBILE_ADMIN_KEY", ""))
+    parser.add_argument(
+        "--open-create",
+        action="store_true",
+        help="Expect TD_MOBILE_OPEN_CREATE=1 (demo without admin key allowed)",
+    )
     parser.add_argument("--cycles", type=int, default=2, help="stress repeat factor")
     args = parser.parse_args()
     base = args.base.rstrip("/")
+    admin_h = {"x-admin-key": args.admin_key} if args.admin_key else {}
 
     user_checks: list[dict] = []
     stress: list[dict] = []
@@ -68,7 +75,11 @@ def main() -> int:
         cfg = r.json() if r.status_code == 200 else {}
         ucheck("config_ok", r.status_code == 200, str(r.status_code))
         ucheck("public_mode", cfg.get("public_mode") is True)
-        ucheck("open_create", cfg.get("can_create") is True, "can_create")
+        can_create = bool(cfg.get("can_create"))
+        if args.open_create:
+            ucheck("open_create", can_create is True, "can_create")
+        else:
+            ucheck("creation_gated", can_create is False, f"can_create={can_create}")
 
         # ---- PWA shell
         r = client.get("/")
@@ -78,13 +89,25 @@ def main() -> int:
         js_v = js_ver.group(1) if js_ver else ""
         ucheck("app_js_versioned", bool(js_v), f"v={js_v or 'missing'}")
         r = client.get(f"/app.js?v={js_v}" if js_v else "/app.js")
+        ucheck("no_route_line_layer", r.status_code == 200 and "route-line" not in r.text)
+        ucheck("no_retrace_button", r.status_code == 200 and "btnRetrace" not in r.text)
         ucheck("remember_job_fix", r.status_code == 200 and "publicMode && !state.canCreate" in r.text)
 
-        # ---- open-create: demo without admin key
+        # ---- job creation posture
         t0 = time.perf_counter()
         r = client.post("/api/jobs/demo")
         demo_ms = (time.perf_counter() - t0) * 1000
-        ucheck("demo_no_key", r.status_code == 200, str(r.status_code), demo_ms)
+        if args.open_create:
+            ucheck("demo_no_key", r.status_code == 200, str(r.status_code), demo_ms)
+        else:
+            ucheck("demo_blocked_no_key", r.status_code == 403, str(r.status_code), demo_ms)
+            if not args.admin_key:
+                print("[WARN] --admin-key not set; cannot continue share-only live prove.")
+                return _finish(base, user_checks, stress, 1)
+            t0 = time.perf_counter()
+            r = client.post("/api/jobs/demo", headers=admin_h)
+            demo_ms = (time.perf_counter() - t0) * 1000
+            ucheck("demo_with_admin_key", r.status_code == 200, str(r.status_code), demo_ms)
         if r.status_code != 200:
             return _finish(base, user_checks, stress, 1)
         body = r.json()
@@ -111,15 +134,13 @@ def main() -> int:
         first_uid = state["stops"][0]["uid"]
         uids = [s["uid"] for s in state["stops"]]
 
-        # ---- reorder + retrace
+        # ---- reorder without any map line tracing
         if len(uids) > 1:
             second = uids[1]
             r = client.post(f"/api/jobs/{job_id}/stops/{second}/move", headers=auth, json={"dir": "up"})
             ucheck("reorder_up", r.status_code == 200 and r.json().get("moved") is True)
             r = client.post(f"/api/jobs/{job_id}/stops/{second}/move", headers=auth, json={"dir": "down"})
             ucheck("reorder_restore", r.status_code == 200)
-            r = client.post(f"/api/jobs/{job_id}/retrace", headers=auth)
-            ucheck("retrace", r.status_code == 200)
 
         # ---- grab / install / pickup
         s0 = state["stops"][0]
@@ -252,13 +273,12 @@ def main() -> int:
             reorder_lat.append((time.perf_counter() - s) * 1000)
             if rm.status_code != 200:
                 reorder_errors += 1
-        rt = client.post(f"/api/jobs/{job_id}/retrace", headers=auth)
         final = client.get(f"/api/jobs/{job_id}/map-state", headers=auth).json()
         final_uids = sorted(s["uid"] for s in final["stops"])
         no_loss = final_uids == sorted(uids)
         srecord(
             "rapid_reorder",
-            reorder_errors == 0 and no_loss and rt.status_code == 200,
+            reorder_errors == 0 and no_loss,
             {"moves": moves, "errors": reorder_errors, "stops_intact": no_loss,
              "p95_ms": round(_pct(reorder_lat, 95), 1)},
         )

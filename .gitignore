@@ -12,7 +12,11 @@ cache/
 # Downloaded tooling / vendored map libraries (re-fetched by setup_maps.py)
 pmtiles.exe
 pmtiles
-web/vendor/
+web/vendor/*
+# ...except the MapLibre lib the Render mobile PWA needs at build time
+# (Render builds from GitHub, not local disk — these must be in the repo).
+!web/vendor/maplibre-gl.js
+!web/vendor/maplibre-gl.css
 
 # PRIVATE field data — never push to GitHub
 tds_data/

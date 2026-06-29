@@ -85,10 +85,14 @@ def main() -> int:
         moved_ok = r.status_code == 200 and r.json().get("moved") is True
         new_order = [s["uid"] for s in r.json()["state"]["stops"]] if r.status_code == 200 else []
         check("reorder_move_up", moved_ok and new_order[0] == second, str(r.status_code))
-        # move it back DOWN — order restored to the optimized one
+        r = client.get(f"/api/jobs/{job_id}", headers=auth)
+        order_after_read = [s["uid"] for s in r.json()["state"]["stops"]] if r.status_code == 200 else []
+        check("reorder_persists_order", order_after_read == new_order, "manual order kept")
         r = client.post(f"/api/jobs/{job_id}/stops/{second}/move", headers=auth, json={"dir": "down"})
-        restored = r.status_code == 200 and [s["uid"] for s in r.json()["state"]["stops"]] == order0
-        check("reorder_move_down_restores", restored, str(r.status_code))
+        moved_down = r.status_code == 200 and r.json().get("moved") is True
+        stale_after_move = bool((r.json()["state"].get("route") or {}).get("stale"))
+        check("reorder_move_down_restores", moved_down and [s["uid"] for s in r.json()["state"]["stops"]] == order0, str(r.status_code))
+        check("reorder_marks_stale", stale_after_move, "route.stale")
         # top stop moving UP is a safe no-op (edge), not an error
         r = client.post(f"/api/jobs/{job_id}/stops/{order0[0]}/move", headers=auth, json={"dir": "up"})
         check("reorder_edge_noop", r.status_code == 200 and r.json().get("moved") is False, str(r.status_code))
@@ -98,9 +102,6 @@ def main() -> int:
         # unknown stop rejected
         r = client.post(f"/api/jobs/{job_id}/stops/nope/move", headers=auth, json={"dir": "up"})
         check("reorder_unknown_stop_rejected", r.status_code == 404, str(r.status_code))
-        # re-trace the current order (no re-optimize)
-        r = client.post(f"/api/jobs/{job_id}/retrace", headers=auth)
-        check("retrace_current_order", r.status_code == 200 and "state" in r.json(), str(r.status_code))
         # re-read clean state for downstream steps
         state = client.get(f"/api/jobs/{job_id}", headers=auth).json()["state"]
         first_uid = state["stops"][0]["uid"]

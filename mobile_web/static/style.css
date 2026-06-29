@@ -145,6 +145,13 @@ a.primary, a.secondary { text-decoration: none; text-align: center; display: blo
 }
 #tabbar button.active { color: var(--ink); box-shadow: inset 0 3px 0 var(--blue); }
 
+.offline-banner {
+  flex: 0 0 auto; background: #5d4037; color: #ffccbc; text-align: center;
+  padding: 8px 12px; font-size: 13px; font-weight: 700;
+}
+body.offline #topbar { border-bottom-color: #8d6e63; }
+#routeMiles.stale { color: #ffb74d; font-weight: 700; }
+
 .msg { font-size: 13px; color: var(--muted); min-height: 16px; }
 .msg.err { color: #ff8a80; }
 .msg.ok { color: #a5d6a7; }

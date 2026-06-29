@@ -98,11 +98,19 @@ def _job_state(job: dict) -> dict:
 # --------------------------------------------------------------------------- #
 @app.get("/api/healthz")
 def healthz() -> dict:
-    return {"ok": True, "service": "traffic-deployer-mobile"}
+    persist = os.path.isdir(JOBS_DIR) and os.access(JOBS_DIR, os.W_OK)
+    return {
+        "ok": True,
+        "service": "traffic-deployer-mobile",
+        "persistent_storage": persist,
+        "public_mode": settings.public_mode(),
+        "open_create": settings.open_uploads(),
+    }
 
 
 @app.get("/api/config")
 def config() -> dict:
+    persist = os.path.isdir(JOBS_DIR) and os.access(JOBS_DIR, os.W_OK)
     return {
         "tile_url": TILE_URL,
         "tile_attribution": TILE_ATTRIB,
@@ -110,6 +118,8 @@ def config() -> dict:
         # UNLESS the operator turned on open uploads (TD_MOBILE_OPEN_CREATE=1).
         "public_mode": settings.public_mode(),
         "can_create": settings.creation_allowed(None),
+        "persistent_storage": persist,
+        "single_worker_required": True,
     }
 
 
@@ -331,7 +341,7 @@ def _trace_current_order(job: dict) -> bool:
     """
     stops = job.get("stops") or []
     if not stops:
-        job["route"] = {"polyline": [], "miles": 0.0, "graph": False}
+        job["route"] = {"polyline": [], "miles": 0.0, "graph": False, "stale": False}
         return True
     try:
         home = tuple(job["home"]) if job.get("home") else None
@@ -342,6 +352,7 @@ def _trace_current_order(job: dict) -> bool:
         "polyline": route.get("polyline", []),
         "miles": float(route.get("miles") or 0.0),
         "graph": bool(route.get("graph")),
+        "stale": False,
     }
     return True
 
@@ -362,6 +373,7 @@ def build_route(job_id: str, request: Request) -> dict:
         "polyline": route.get("polyline", []),
         "miles": float(route.get("miles") or 0.0),
         "graph": bool(route.get("graph")),
+        "stale": False,
     }
     store.save(job)
     return {"state": _job_state(job), "graph": res.get("graph", False)}
@@ -383,9 +395,8 @@ async def move_stop(job_id: str, uid: str, request: Request) -> dict:
     """Move a stop up/down in the manual order.
 
     Body/query `dir`: 'up' or 'down'. This is a cheap list reorder + renumber
-    only — it does NOT re-trace the drive line (that can take seconds when a
-    road graph is present). Stop numbers update instantly so rapid field taps
-    stay snappy; the user taps "Re-trace line" once when the order is set.
+    only. Stop numbers update instantly so rapid field taps stay snappy; the
+    mobile map remains dots-only per field UX direction.
     Hitting the top/bottom is a no-op (200), not an error.
     """
     job = _authorize(request, job_id)
@@ -405,8 +416,10 @@ async def move_stop(job_id: str, uid: str, request: Request) -> dict:
     if result == "not_found":
         raise HTTPException(status_code=404, detail="Stop not found.")
     if result == "moved":
-        # Mark the traced line stale so the UI can prompt a re-trace.
-        job["route"]["stale"] = True
+        # Mark route metrics stale so the UI can tell the operator the order changed.
+        route = job.get("route") or {"polyline": [], "miles": 0.0, "graph": False}
+        route["stale"] = True
+        job["route"] = route
         store.save(job)
     return {"state": _job_state(job), "moved": result == "moved"}
 

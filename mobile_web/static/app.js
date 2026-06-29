@@ -142,6 +142,7 @@
 
   function addLayers() {
     map.addSource('site-pts', { type: 'geojson', data: fc() });
+    map.addSource('field-gps', { type: 'geojson', data: fc() });
     map.addSource('home', { type: 'geojson', data: fc() });
 
     map.addLayer({
@@ -161,6 +162,18 @@
       }
     });
     map.addLayer({
+      id: 'field-gps-dot', type: 'circle', source: 'field-gps',
+      paint: {
+        'circle-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 8, 16, 13
+        ],
+        'circle-color': ['get', 'color'],
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 2.5
+      }
+    });
+    map.addLayer({
       id: 'home-dot', type: 'circle', source: 'home',
       paint: { 'circle-radius': 6, 'circle-color': '#0f2744', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' }
     });
@@ -169,27 +182,36 @@
       if (state.pinMode) return;
       showSitePopup(e);
     });
+    map.on('click', 'field-gps-dot', function (e) {
+      if (state.pinMode) return;
+      showSitePopup(e);
+    });
     map.on('mouseenter', 'site-dot', function () { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'site-dot', function () { map.getCanvas().style.cursor = ''; });
+    map.on('mouseenter', 'field-gps-dot', function () { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'field-gps-dot', function () { map.getCanvas().style.cursor = ''; });
   }
 
   function showSitePopup(e) {
     var f = e.features && e.features[0];
     if (!f || !f.properties) return;
     var p = f.properties;
-    var kindLabel = p.kind === 'begin' ? 'Begin' : 'End';
+    var kindLabel = p.kind === 'field'
+      ? 'Installed GPS'
+      : (p.kind === 'begin' ? 'Begin' : 'End');
     var html =
       '<div class="site-popup">' +
-      '<div class="site-popup-title">Site ' + esc(p.id) + '</div>' +
+      '<div class="site-popup-badge">Site</div>' +
+      '<div class="site-popup-title">' + esc(p.id) + '</div>' +
       '<div class="site-popup-meta">Stop ' + esc(String(p.seq || '—')) + ' · ' + kindLabel + '</div>' +
       (p.street ? '<div class="site-popup-street">' + esc(p.street) + '</div>' : '');
-    if (state.tab === 'route' && !state.reorderMode) {
+    if (state.tab === 'route' && !state.reorderMode && p.kind !== 'field') {
       html += '<button type="button" class="site-popup-btn">Set drive-to here</button>';
     }
     html += '</div>';
     if (siteRefPopup) siteRefPopup.remove();
     siteRefPopup = new maplibregl.Popup({
-      closeButton: true, maxWidth: '260px', offset: 14, className: 'site-popup-wrap'
+      closeButton: true, maxWidth: '280px', offset: 16, className: 'site-popup-wrap'
     })
       .setLngLat(e.lngLat)
       .setHTML(html)
@@ -231,11 +253,21 @@
     var siteColors = siteColorsForStops(stops);
     var siteFeats = [];
 
+    var fieldFeats = [];
     stops.forEach(function (s, i) {
+      var color = siteColors[s.uid] || SITE_PALETTE[0];
+      if (s.installed && s.field_lat != null && s.field_lon != null) {
+        fieldFeats.push({
+          type: 'Feature',
+          properties: {
+            uid: s.uid, id: s.id, seq: String(s.seq || (i + 1)),
+            street: s.street || '', color: color, kind: 'field'
+          },
+          geometry: { type: 'Point', coordinates: [s.field_lon, s.field_lat] }
+        });
+      }
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
       if (bLat == null || bLon == null || eLat == null || eLon == null) return;
-      if (onInstall && s.uid !== currentUid) return;
-      var color = siteColors[s.uid] || SITE_PALETTE[0];
       var seq = String(s.seq || (i + 1));
       var active = s.uid === currentUid;
       var shared = {
@@ -257,7 +289,9 @@
       });
     });
     map.getSource('site-pts').setData(fc(siteFeats));
+    map.getSource('field-gps').setData(fc(fieldFeats));
     setMapLayerVis('site-dot', siteFeats.length > 0);
+    setMapLayerVis('field-gps-dot', fieldFeats.length > 0);
 
     if (d.home) {
       map.getSource('home').setData(fc([{
@@ -599,7 +633,7 @@
         hint.textContent = 'Tap a dot for site reference · same color = begin & end';
         hint.classList.remove('hidden');
       } else if (state.tab === 'install' && !state.pinMode) {
-        hint.textContent = 'Begin & end dots for this site — tap for site number';
+        hint.textContent = 'All site dots stay visible — tap any dot for site number · GPS dot appears after INSTALL';
         hint.classList.remove('hidden');
       } else if (!state.pinMode) {
         hint.classList.add('hidden');

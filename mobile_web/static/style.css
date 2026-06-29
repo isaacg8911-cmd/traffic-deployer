@@ -63,14 +63,23 @@ body { display: flex; flex-direction: column; }
   background: #fff; color: #0f2744; font-size: 22px; box-shadow: 0 2px 10px rgba(0,0,0,.4);
 }
 
-/* Site reference popup (map dot tap) */
+/* Site reference popup (map dot tap) — high-contrast on map tiles */
 .site-popup-wrap .maplibregl-popup-content {
-  background: var(--panel); color: var(--ink); border-radius: 12px;
-  padding: 12px 14px; box-shadow: 0 4px 20px rgba(0,0,0,.45); border: 1px solid var(--line);
+  background: #ffffff; color: #0f2744; border-radius: 14px;
+  padding: 14px 16px; box-shadow: 0 6px 24px rgba(0,0,0,.55); border: 2px solid #0f2744;
 }
-.site-popup-title { font-size: 16px; font-weight: 800; margin-bottom: 2px; }
-.site-popup-meta { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-.site-popup-street { font-size: 12px; color: var(--ink); margin-bottom: 8px; }
+.site-popup-wrap .maplibregl-popup-close-button {
+  color: #0f2744; font-size: 22px; font-weight: 700; padding: 6px 10px;
+}
+.site-popup-wrap .maplibregl-popup-tip { border-top-color: #ffffff; }
+.site-popup-badge {
+  display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .06em;
+  text-transform: uppercase; color: #fff; background: #0f2744; border-radius: 6px;
+  padding: 3px 8px; margin-bottom: 6px;
+}
+.site-popup-title { font-size: 28px; font-weight: 900; line-height: 1.1; margin-bottom: 4px; color: #0f2744; }
+.site-popup-meta { font-size: 14px; font-weight: 600; color: #37474f; margin-bottom: 6px; }
+.site-popup-street { font-size: 13px; color: #546e7a; margin-bottom: 8px; }
 .site-popup-btn {
   display: block; width: 100%; margin-top: 6px; padding: 10px; border: none; border-radius: 9px;
   background: var(--blue); color: #fff; font: inherit; font-weight: 700; cursor: pointer;

@@ -39,7 +39,7 @@ STEPS = [
     ("golden_routes", "scripts/golden_routes.py", True),
     ("benchmark_route", "scripts/benchmark_route.py", True),
     ("offline_session", "scripts/test_offline_session.py", True),
-    ("verify_portable", "scripts/verify_portable.py", False),
+    ("verify_exe_build", "scripts/verify_exe_build.py", False),
     ("demo_workflow_portable", "scripts/demo_workflow_portable.py", False),
     ("picocount_sandbox", "scripts/picocount_sandbox.py", False),
 ]

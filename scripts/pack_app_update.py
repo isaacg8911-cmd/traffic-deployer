@@ -26,7 +26,7 @@ def main() -> int:
     exe = os.path.join(DIST, "TrafficDeployer.exe")
     internal = os.path.join(DIST, "_internal")
     if not os.path.isfile(exe):
-        print(f"FAIL: run build_portable.ps1 first — {exe}")
+        print(f"FAIL: run build_exe.ps1 first — {exe}")
         return 1
     if not os.path.isdir(internal):
         print(f"FAIL: _internal missing after PyInstaller build — {internal}")

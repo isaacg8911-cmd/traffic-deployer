@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec — run via scripts/build_portable.ps1
+# PyInstaller spec — run via scripts/build_exe.ps1 (work-laptop exe)
 
 import os
 

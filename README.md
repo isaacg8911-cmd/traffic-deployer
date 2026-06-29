@@ -1,28 +1,39 @@
 # Traffic Deployer
 
-Desktop field tool for traffic deployers (**v1.0.5**): offline California map, **Excel + `.EST`** ingest, **efficient multi-stop routing on real streets**, USB GPS live trace, **PicoCount 2500** USB install/pickup, and audit export with counter columns. Data stays on the laptop.
+Two delivery surfaces only (**SCOPE.md**):
 
-**Field test checklist:** [docs/TOMORROW_MORNING.md](docs/TOMORROW_MORNING.md) · **Overnight ship notes:** [docs/NIGHT_SHIP_SUMMARY_2026-06-03.md](docs/NIGHT_SHIP_SUMMARY_2026-06-03.md)
+| Surface | For |
+|---------|-----|
+| **Work laptop exe** | Offline field desktop — USB GPS, PicoCount, California map |
+| **Render web app** | Hosted mobile PWA — crew share links |
 
-## Quick start
+## Work laptop — quick start
 
-1. Install [Python 3.10+](https://www.python.org/downloads/)
-2. Double-click **`START.bat`**
-3. Follow **[HOW_TO_RUN.md](HOW_TO_RUN.md)**
+1. Home PC: `BUILD_WORK_LAPTOP.bat` → `VERIFY_WORK_LAPTOP.bat`
+2. Copy `dist\TrafficDeployer-WorkLaptop.zip` to field laptop
+3. Unzip → **`OPEN_APP.bat`**
+
+Full handover: **[WORK_LAPTOP.md](WORK_LAPTOP.md)** · daily dev: **[HOW_TO_RUN.md](HOW_TO_RUN.md)**
+
+## Render mobile — quick start
+
+1. Deploy via `render.yaml` on Render
+2. Prove: `scripts/mobile_host_smoke.py`
+
+Guide: **[docs/MOBILE_HOST_DEPLOY.md](docs/MOBILE_HOST_DEPLOY.md)**
 
 ## Documentation
 
 | Doc | Contents |
 |-----|----------|
-| [HOW_TO_RUN.md](HOW_TO_RUN.md) | Daily workflow, GPS, offline mode, smoke tests |
-| **PROVE.bat** | One-click: smoke + demo + golden + benchmark + counter sandbox (no GUI) |
-| [docs/PICOCOUNT_INTEGRATION.md](docs/PICOCOUNT_INTEGRATION.md) | PicoCount 2500 USB workflow |
-| [ROUTING_AND_MAP.md](ROUTING_AND_MAP.md) | **How efficient routes are built and traced on the map** (segment lines, OSM graph, ordering, polylines) |
-| [packaging/PORTABLE_INSTALL.txt](packaging/PORTABLE_INSTALL.txt) | Work-laptop unzip checklist |
+| [HOW_TO_RUN.md](HOW_TO_RUN.md) | Desktop workflow, GPS, offline mode, smoke tests |
+| [WORK_LAPTOP.md](WORK_LAPTOP.md) | Zip handover, updates, USB fixes |
+| [docs/MOBILE_HOST_DEPLOY.md](docs/MOBILE_HOST_DEPLOY.md) | Render deploy + share links |
+| [ROUTING_AND_MAP.md](ROUTING_AND_MAP.md) | Route build and map trace |
 
 ## Routing in one sentence
 
-Sites are **street segments** (begin/end); the app downloads a local **road graph**, **orders** segments to minimize drive miles between **line crossings**, then **traces** the tour on OSM drive geometry for the map and turn-by-turn driving.
+Sites are **street segments**; the app downloads a local **road graph**, **orders** segments to minimize drive miles, then **traces** the tour on OSM geometry.
 
 ## License / data
 

@@ -1,6 +1,6 @@
-# Build portable Traffic Deployer folder (PyInstaller one-folder).
+# Build work-laptop exe folder (PyInstaller one-folder).
 # Requires: .venv with pip install pyinstaller
-# Run from repo root:  powershell -ExecutionPolicy Bypass -File scripts\build_portable.ps1
+# Run from repo root:  powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -30,5 +30,5 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $Out = Join-Path $Root "dist\TrafficDeployer"
 Write-Host ""
 Write-Host "Built: $Out"
-Write-Host "Copy tds_data\ (road graph + basemap) beside the exe for offline field use."
+Write-Host "Next: BUILD_WORK_LAPTOP.bat packs map + graph into TrafficDeployer-WorkLaptop.zip"
 exit 0

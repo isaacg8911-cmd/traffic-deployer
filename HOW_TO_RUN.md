@@ -18,8 +18,7 @@ Full handover: **[WORK_LAPTOP.md](WORK_LAPTOP.md)**
 
 Do **not** use `START.bat` on the work laptop zip — use **`OPEN_APP.bat`**.
 
-**How routing and map tracing work (segment lines, road graph, efficient order):**
-see **[ROUTING_AND_MAP.md](ROUTING_AND_MAP.md)**.
+**Routing / map trace:** **[ROUTING_AND_MAP.md](ROUTING_AND_MAP.md)** · **Mobile (Render only):** **[docs/MOBILE_HOST_DEPLOY.md](docs/MOBILE_HOST_DEPLOY.md)**
 
 ## First time (needs internet, ~5-10 minutes)
 
@@ -175,17 +174,7 @@ USER_PROVE.bat
 APP_CHECK.bat
 ```
 
-Portable `.exe` folder (optional, needs PyInstaller once):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build_portable.ps1
-```
-
-Output: `dist\TrafficDeployer\` — copy your `tds_data\` road graph beside it for offline use.
-
-```powershell
-.\scripts\smoke_test.ps1
-```
+Work-laptop exe is built only via **`BUILD_WORK_LAPTOP.bat`** (not a separate portable product).
 
 Headless only:
 

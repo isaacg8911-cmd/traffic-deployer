@@ -24,26 +24,21 @@ if not os.path.isfile(PY):
 
 STEPS = [
     ("user_prove", "scripts/mobile_user_prove.py"),
-    ("tls_prove", "scripts/mobile_tls_prove.py"),
     ("share_prove", "scripts/mobile_share_prove.py"),
     ("stress_loop", "scripts/mobile_stress_loop.py"),
+    ("browser_prove", "scripts/mobile_browser_prove.py"),
 ]
 
 # Known improvement backlog — surfaced every run so they are not forgotten.
 KNOWN_IMPROVEMENTS = [
-    "HTTPS over LAN now on by default (self-signed); phone must accept the cert once — "
-    "use a trusted cert / reverse proxy to skip the warning in production",
-    "Always-on host deploy ready (Dockerfile + render.yaml/fly.toml, proven via "
-    "scripts/mobile_host_smoke.py); laptop Cloudflare tunnel remains the default — "
-    "deploy to Render/Fly for a 24/7 URL without the laptop on",
-    "Share links now support revoke + self-expiry (TD_MOBILE_LINK_TTL_HOURS, "
+    "Render is the only hosted surface — Dockerfile + render.yaml; prove with "
+    "scripts/mobile_host_smoke.py (share-only) and mobile_live_host_prove.py",
+    "Share links support revoke + self-expiry (TD_MOBILE_LINK_TTL_HOURS, "
     "scripts/manage_share_link.py); full multi-user auth still phase 2",
-    "Hosted deploy means job data lives on the host — use same-Wi-Fi mode for "
-    "data that must never leave the machine",
-    "Offline field mode not implemented — online-first; brief drops not yet queued in IndexedDB",
+    "Hosted deploy means job data lives on Render — not for data that must never leave your machine",
+    "Offline queue (IndexedDB) not implemented — banner blocks saves when offline",
     "Server-side road graph optional — without it, routes are straight-line, not street-traced",
     "No undo on mobile install/skip (desktop has undo)",
-    "Browser/device E2E (Playwright) not wired — current proof is in-process API simulation",
 ]
 
 
@@ -54,10 +49,17 @@ def _run(name: str, script: str) -> dict:
         proc = subprocess.run([PY, path], cwd=ROOT, capture_output=True, text=True, timeout=600)
         out = (proc.stdout or "") + (proc.stderr or "")
         tail = out.encode("ascii", "replace").decode("ascii")[-2500:]
-        return {"name": name, "ok": proc.returncode == 0,
-                "seconds": round(time.perf_counter() - t0, 1), "tail": tail}
+        skipped = proc.returncode == 2
+        ok = proc.returncode == 0 or skipped
+        return {
+            "name": name,
+            "ok": ok,
+            "skipped": skipped,
+            "seconds": round(time.perf_counter() - t0, 1),
+            "tail": tail,
+        }
     except subprocess.TimeoutExpired:
-        return {"name": name, "ok": False, "seconds": 600.0, "tail": "TIMEOUT"}
+        return {"name": name, "ok": False, "skipped": False, "seconds": 600.0, "tail": "TIMEOUT"}
 
 
 def _load(path: str) -> dict | None:
@@ -87,18 +89,6 @@ def _audit(results: list[dict]) -> dict:
         weaknesses.append("User test failures: " + ", ".join(up["failed"]))
     elif not by.get("user_prove", {}).get("ok"):
         weaknesses.append("User test did not pass — see logs/mobile_check tail")
-
-    tp = _load(os.path.join(REPORT_DIR, "proofs", "tls_prove.json"))
-    if by.get("tls_prove", {}).get("ok") and tp:
-        strengths.append(
-            f"HTTPS secure context: {tp['passed']}/{tp['total']} TLS checks pass "
-            "(self-signed cert names the LAN IP; real handshake serves /api/healthz; "
-            "phone geolocation works over LAN)"
-        )
-    elif tp and tp.get("failed"):
-        weaknesses.append("TLS test failures: " + ", ".join(tp["failed"]))
-    elif not by.get("tls_prove", {}).get("ok"):
-        weaknesses.append("TLS test did not pass — see logs/mobile_check tail")
 
     sp = _load(os.path.join(REPORT_DIR, "proofs", "share_prove.json"))
     if by.get("share_prove", {}).get("ok") and sp:
@@ -139,6 +129,23 @@ def _audit(results: list[dict]) -> dict:
     elif not by.get("stress_loop", {}).get("ok"):
         weaknesses.append("Stress loop did not pass — see logs/mobile_stress")
 
+    bp = _load(os.path.join(REPORT_DIR, "proofs", "browser_prove.json"))
+    br = by.get("browser_prove", {})
+    if br.get("skipped"):
+        improvements.append(
+            "Browser proof skipped (install playwright + chromium) — "
+            "scripts/mobile_browser_prove.py"
+        )
+    elif br.get("ok") and bp:
+        strengths.append(
+            f"Browser/PWA proof: {bp['passed']}/{bp['total']} checks "
+            "(map canvas, route UI, reorder without route lines, offline banner, session restore)"
+        )
+    elif bp and bp.get("failed"):
+        weaknesses.append("Browser test failures: " + ", ".join(bp["failed"]))
+    elif not br.get("ok"):
+        weaknesses.append("Browser test did not pass — see logs/mobile_check tail")
+
     if not weaknesses:
         weaknesses.append("(none blocking) — see improvements for next-step polish")
 
@@ -175,7 +182,10 @@ def _write_md(report: dict, path: str) -> None:
         "",
     ]
     for r in report["results"]:
-        lines.append(f"- [{'OK' if r['ok'] else 'FAIL'}] `{r['name']}` — {r['seconds']}s")
+        tag = "OK" if r["ok"] else "FAIL"
+        if r.get("skipped"):
+            tag = "SKIP"
+        lines.append(f"- [{tag}] `{r['name']}` — {r['seconds']}s")
     for title, key in (("Strengths", "strengths"), ("Weaknesses", "weaknesses"),
                        ("Improvements / next steps", "improvements")):
         lines += ["", f"## {title}", ""]

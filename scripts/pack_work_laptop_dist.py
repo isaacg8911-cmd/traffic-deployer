@@ -1,4 +1,4 @@
-"""Pack dist/TrafficDeployer for work laptop + zip. Run after build_portable.ps1."""
+"""Pack dist/TrafficDeployer for work laptop + zip. Run after build_exe.ps1."""
 from __future__ import annotations
 
 import os
@@ -25,7 +25,7 @@ def _copytree(src: str, dst: str) -> None:
 
 def main() -> int:
     if not os.path.isfile(os.path.join(DIST, "TrafficDeployer.exe")):
-        print(f"FAIL: run build_portable.ps1 first — {DIST}")
+        print(f"FAIL: run build_exe.ps1 first — {DIST}")
         return 1
 
     internal_web = os.path.join(DIST, "_internal", "web")

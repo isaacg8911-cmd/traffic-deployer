@@ -22,7 +22,7 @@ def main() -> int:
 
     scripts = (
         "verify_handoff_freshness.py",
-        "verify_portable.py",
+        "verify_exe_build.py",
         "audit_portable_paths.py",
         "audit_portable_scenarios.py",
         "demo_workflow_portable.py",

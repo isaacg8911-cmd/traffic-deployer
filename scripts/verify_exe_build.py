@@ -1,4 +1,4 @@
-"""Verify PyInstaller output + portable path/HTTP audit (required before work-laptop zip)."""
+"""Verify PyInstaller output before work-laptop zip (required gate)."""
 from __future__ import annotations
 
 import os
@@ -14,10 +14,10 @@ def main() -> int:
     fails: list[str] = []
     if os.path.isfile(EXE):
         mb = os.path.getsize(EXE) / (1024 * 1024)
-        print(f"  OK  portable exe ({mb:.1f} MB)")
+        print(f"  OK  work-laptop exe ({mb:.1f} MB)")
     else:
         fails.append(f"missing {EXE}")
-        print(f"  FAIL portable exe — run scripts/build_portable.ps1")
+        print("  FAIL work-laptop exe — run scripts/build_exe.ps1")
 
     web_in_dist = os.path.join(ROOT, "dist", "TrafficDeployer", "_internal", "web", "app.js")
     if os.path.isfile(web_in_dist):
@@ -37,7 +37,7 @@ def main() -> int:
 
     for label, script in (
         ("demo_workflow (source)", "demo_workflow.py"),
-        ("demo_workflow (portable)", "demo_workflow_portable.py"),
+        ("demo_workflow (frozen exe)", "demo_workflow_portable.py"),
     ):
         proc2 = subprocess.run(
             [PY, os.path.join(ROOT, "scripts", script)],
@@ -56,9 +56,9 @@ def main() -> int:
                     print(f"       {line}")
 
     if fails:
-        print(f"\nPORTABLE VERIFY FAIL ({len(fails)})")
+        print(f"\nEXE BUILD VERIFY FAIL ({len(fails)})")
         return 1
-    print("\nPORTABLE VERIFY PASS — safe for work-laptop zip")
+    print("\nEXE BUILD VERIFY PASS — safe for work-laptop zip")
     return 0
 
 

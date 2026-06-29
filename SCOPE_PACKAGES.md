@@ -76,7 +76,7 @@ Director-approved bundles. Forge lists these in `build` / `ship` menus.
 | P40 | **Shift summary** | End-of-day summary on Audit tab. | `smoke_full` shift_summary |
 | P41 | **Field strip++** | Route strip shows next-stop distance. | `START.bat` Route |
 | P42 | **main.py slim (pages)** | Audit + Pickup pages in `ui/pages/`. | `PROVE.bat` |
-| P43 | **Portable build** | `traffic_deployer.spec` + `scripts/build_portable.ps1`. | build script |
+| P43 | **Work-laptop exe build** | `traffic_deployer.spec` + `scripts/build_exe.ps1` (internal; ship via zip). | `BUILD_WORK_LAPTOP.bat` |
 | P44 | **PROVE full** | smoke + demo + preflight + golden + benchmark. | `PROVE.bat` |
 | P45 | **OR-Tools optional** | TSP 10ΓÇô15 stops when `ortools` installed. | benchmark |
 | ΓÇö | **GPS heading** | Slightly smoother heading buffer (16 samples). | field GPS |

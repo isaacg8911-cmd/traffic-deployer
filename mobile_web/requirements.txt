@@ -1,8 +1,8 @@
-# Mobile web lane (in addition to the desktop requirements.txt).
+# Mobile web lane (Render Docker image).
 # Install: pip install -r mobile_web/requirements.txt
 fastapi
 uvicorn[standard]
 python-multipart
 httpx
-cryptography
 segno
+playwright

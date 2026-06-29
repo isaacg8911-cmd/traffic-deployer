@@ -12,7 +12,7 @@ if (-not (Test-Path $Py)) {
 }
 
 Write-Host "Building portable exe..."
-& (Join-Path $Root "scripts\build_portable.ps1")
+& (Join-Path $Root "scripts\build_exe.ps1")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "Staging app-only update folder (no map, no zip)..."

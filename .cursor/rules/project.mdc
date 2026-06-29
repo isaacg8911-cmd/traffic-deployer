@@ -47,11 +47,12 @@ Edit only **KEY FILES** from the packet. Proof command = HOW_TO_RUN.md - do not 
 
 | Change type | Command |
 |-------------|---------|
-| Routing / core / persistence | `SMOKE.bat` or `python scripts/smoke_full.py` |
-| UI / map / Install tab | `USER_PROVE.bat` or `python scripts/app_check.py --tier user` |
-| Ship / full audit | `APP_CHECK.bat` or `python scripts/app_check.py --tier full` |
+| Routing / core / persistence (desktop) | `SMOKE.bat` or `python scripts/smoke_full.py` |
+| UI / map / Install tab (desktop) | `USER_PROVE.bat` or `python scripts/app_check.py --tier user` |
+| Ship / full audit (desktop) | `APP_CHECK.bat` or `python scripts/app_check.py --tier full` |
+| Mobile / Render web | `python scripts/mobile_app_check.py` |
 
-Audit report: `logs/app_check/latest.md` (strengths, weaknesses, coverage gaps).
+Audit report: `logs/app_check/latest.md` (desktop) · `logs/mobile_check/latest.md` (Render mobile).
 
 
 ## Structure
@@ -76,7 +77,6 @@ After proven Done on build/ship: **auto-commit + auto-push** to current branch p
 
 ## Stack
 
-
-
+- **Products:** Render web (`mobile_web/` + `Dockerfile` + `render.yaml`) and work-laptop exe (`BUILD_WORK_LAPTOP.bat`) only — no other delivery surfaces
 - Python 3.10+, PySide6, Qt WebEngine, `local_server.py`, OSMnx routing - **ROUTING_AND_MAP.md**
 - Do not break SwiftShader/WebGL env in `main.py` without map test

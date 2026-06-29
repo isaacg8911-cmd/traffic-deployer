@@ -21,7 +21,7 @@ STEPS: tuple[tuple[str, bool], ...] = (
     ("verify_handoff_freshness.py", True),
     ("verify_frozen_bundle.py", True),
     ("verify_work_laptop_zip.py", True),
-    ("verify_portable.py", True),
+    ("verify_exe_build.py", True),
     ("audit_portable_scenarios.py", True),
     ("demo_workflow.py", True),
     ("demo_workflow_portable.py", True),

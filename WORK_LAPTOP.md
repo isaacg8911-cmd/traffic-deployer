@@ -154,4 +154,4 @@ Shift data in `tds_data\` is separate — crash logs do not contain client job f
 | Path | When |
 |------|------|
 | **Work laptop zip** (this doc) | Work PC has no Python — use `TrafficDeployer.exe` |
-| **Source + START.bat** | Dev PC or Python installed — see `packaging/PORTABLE_INSTALL.txt` / `HOW_TO_RUN.md` |
+| **Home dev PC** | Build/test source with `START.bat` — ships via `BUILD_WORK_LAPTOP.bat`, not as a field product |

@@ -18,8 +18,8 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "WARN: preflight reported critical issues - fix map/fonts before field."
 }
 
-Write-Host "Building portable exe..."
-& (Join-Path $Root "scripts\build_portable.ps1")
+Write-Host "Building work-laptop exe..."
+& (Join-Path $Root "scripts\build_exe.ps1")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "Packing work-laptop dist + zip..."

@@ -8,7 +8,14 @@
   var LS_KEY = 'td_mobile_job';
 
   var state = { jobId: null, token: null, data: null, tab: 'route', current: 0, pinMode: false, tileUrl: null, publicMode: false, shareUrl: null, reorderMode: false, busy: false };
-  var map = null, mapReady = false, meMarker = null, pinMarker = null;
+  var map = null, mapReady = false, meMarker = null, pinMarker = null, siteRefPopup = null;
+
+  /* Per-site map colors — palette resets when the next site is far away (new neighborhood). */
+  var SITE_PALETTE = [
+    '#1976d2', '#e65100', '#2e7d32', '#7b1fa2', '#00838f',
+    '#c62828', '#f57f17', '#3949ab', '#558b2f', '#6d4c41'
+  ];
+  var COLOR_RESET_KM = 4;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -94,91 +101,96 @@
 
   function fc(features) { return { type: 'FeatureCollection', features: features || [] }; }
 
+  function haversineKm(lat1, lon1, lat2, lon2) {
+    var R = 6371, dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function siteColorsForStops(stops) {
+    var colors = {}, paletteIdx = 0, lastCentroid = null;
+    (stops || []).forEach(function (s) {
+      var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
+      if (bLat == null || bLon == null || eLat == null || eLon == null) return;
+      var cLat = (bLat + eLat) / 2, cLon = (bLon + eLon) / 2;
+      if (lastCentroid != null) {
+        var d = haversineKm(lastCentroid[0], lastCentroid[1], cLat, cLon);
+        paletteIdx = d > COLOR_RESET_KM ? 0 : (paletteIdx + 1) % SITE_PALETTE.length;
+      }
+      colors[s.uid] = SITE_PALETTE[paletteIdx];
+      lastCentroid = [cLat, cLon];
+    });
+    return colors;
+  }
+
+  function setMapLayerVis(id, on) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+  }
+
   function addLayers() {
-    map.addSource('stops', { type: 'geojson', data: fc() });
     map.addSource('site-pts', { type: 'geojson', data: fc() });
-    map.addSource('route', { type: 'geojson', data: fc() });
     map.addSource('home', { type: 'geojson', data: fc() });
 
     map.addLayer({
-      id: 'route-line', type: 'line', source: 'route',
-      paint: { 'line-color': '#1976d2', 'line-width': 4, 'line-opacity': 0.8 }
-    });
-    // Begin (blue) / end (red) markers — fine, crisp dots that sit on the street.
-    map.addLayer({
-      id: 'site-begin', type: 'circle', source: 'site-pts',
-      filter: ['==', ['get', 'kind'], 'begin'],
+      id: 'site-dot', type: 'circle', source: 'site-pts',
       paint: {
         'circle-radius': [
           'interpolate', ['linear'], ['zoom'],
-          11, ['case', ['boolean', ['get', 'selected'], false], 5, 3.5],
-          16, ['case', ['boolean', ['get', 'selected'], false], 8, 6]
+          11, ['case', ['boolean', ['get', 'active'], false], 5.5, 3.5],
+          16, ['case', ['boolean', ['get', 'active'], false], 9, 6]
         ],
-        'circle-color': '#1565c0',
+        'circle-color': ['get', 'color'],
         'circle-stroke-color': '#ffffff',
-        'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 2.5, 1.5]
+        'circle-stroke-width': [
+          'case', ['boolean', ['get', 'selected'], false], 2.5,
+          ['case', ['boolean', ['get', 'active'], false], 2, 1.5]
+        ]
       }
-    });
-    map.addLayer({
-      id: 'site-end', type: 'circle', source: 'site-pts',
-      filter: ['==', ['get', 'kind'], 'end'],
-      paint: {
-        'circle-radius': [
-          'interpolate', ['linear'], ['zoom'],
-          11, ['case', ['boolean', ['get', 'selected'], false], 5, 3.5],
-          16, ['case', ['boolean', ['get', 'selected'], false], 8, 6]
-        ],
-        'circle-color': '#c62828',
-        'circle-stroke-color': '#ffffff',
-        'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 2.5, 1.5]
-      }
-    });
-    map.addLayer({
-      id: 'stop-dot', type: 'circle', source: 'stops',
-      paint: {
-        'circle-radius': ['case', ['==', ['get', 'highlight'], true], 11, 7],
-        'circle-color': [
-          'match', ['get', 'status'],
-          'installed', '#2e7d32',
-          'skipped', '#c62828',
-          'picked_up', '#1565c0',
-          '#e65100'
-        ],
-        'circle-stroke-width': ['case', ['==', ['get', 'highlight'], true], 3, 1.5],
-        'circle-stroke-color': '#ffffff'
-      }
-    });
-    map.addLayer({
-      id: 'stop-label', type: 'symbol', source: 'stops',
-      layout: { 'text-field': ['get', 'seq'], 'text-size': 11, 'text-offset': [0, -1.1] },
-      paint: { 'text-color': '#0b1320', 'text-halo-color': '#fff', 'text-halo-width': 1.5 }
     });
     map.addLayer({
       id: 'home-dot', type: 'circle', source: 'home',
       paint: { 'circle-radius': 6, 'circle-color': '#0f2744', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' }
     });
 
-    function onSitePointClick(e, side) {
-      if (state.pinMode || state.tab !== 'route') return;
-      var f = e.features && e.features[0];
-      if (!f || !f.properties || !f.properties.uid) return;
-      setCrossSide(f.properties.uid, side);
+    map.on('click', 'site-dot', function (e) {
+      if (state.pinMode) return;
+      showSitePopup(e);
+    });
+    map.on('mouseenter', 'site-dot', function () { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'site-dot', function () { map.getCanvas().style.cursor = ''; });
+  }
+
+  function showSitePopup(e) {
+    var f = e.features && e.features[0];
+    if (!f || !f.properties) return;
+    var p = f.properties;
+    var kindLabel = p.kind === 'begin' ? 'Begin' : 'End';
+    var html =
+      '<div class="site-popup">' +
+      '<div class="site-popup-title">Site ' + esc(p.id) + '</div>' +
+      '<div class="site-popup-meta">Stop ' + esc(String(p.seq || '—')) + ' · ' + kindLabel + '</div>' +
+      (p.street ? '<div class="site-popup-street">' + esc(p.street) + '</div>' : '');
+    if (state.tab === 'route' && !state.reorderMode) {
+      html += '<button type="button" class="site-popup-btn">Set drive-to here</button>';
     }
-
-    map.on('click', 'site-begin', function (e) { onSitePointClick(e, 'begin'); });
-    map.on('click', 'site-end', function (e) { onSitePointClick(e, 'end'); });
-    ['site-begin', 'site-end'].forEach(function (id) {
-      map.on('mouseenter', id, function () { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', id, function () { map.getCanvas().style.cursor = ''; });
-    });
-
-    map.on('click', 'stop-dot', function (e) {
-      var f = e.features && e.features[0];
-      if (!f) return;
-      var uid = f.properties.uid;
-      var idx = (state.data.stops || []).findIndex(function (s) { return s.uid === uid; });
-      if (idx >= 0) { state.current = idx; setTab('install'); }
-    });
+    html += '</div>';
+    if (siteRefPopup) siteRefPopup.remove();
+    siteRefPopup = new maplibregl.Popup({
+      closeButton: true, maxWidth: '260px', offset: 14, className: 'site-popup-wrap'
+    })
+      .setLngLat(e.lngLat)
+      .setHTML(html)
+      .addTo(map);
+    var btn = siteRefPopup.getElement().querySelector('.site-popup-btn');
+    if (btn) {
+      btn.onclick = function () {
+        setCrossSide(p.uid, p.kind);
+        siteRefPopup.remove();
+        siteRefPopup = null;
+      };
+    }
   }
 
   function stopAnchor(s) {
@@ -190,54 +202,59 @@
 
   function setCrossSide(uid, side) {
     if (state.busy || side !== 'begin' && side !== 'end') return;
+    var siteId = uid;
+    (state.data.stops || []).forEach(function (s) { if (s.uid === uid) siteId = s.id; });
     state.busy = true;
     patchStop(uid, { cross_side: side }).then(function () {
-      toast('Drive-to ' + (side === 'begin' ? 'begin (blue)' : 'end (red)') + ' set');
+      toast('Drive-to set · Site ' + siteId + ' (' + side + ')');
     }).catch(function (e) { toast(e.message); })
       .finally(function () { state.busy = false; });
   }
 
   function renderMap() {
     if (!mapReady || !state.data) return;
-    var d = state.data, hi = d.highlight_uid;
+    var d = state.data;
+    var stops = d.stops || [];
+    var onInstall = state.tab === 'install';
+    var currentUid = onInstall && stops[state.current] ? stops[state.current].uid : null;
+    var siteColors = siteColorsForStops(stops);
     var siteFeats = [];
-    (d.stops || []).forEach(function (s) {
+
+    stops.forEach(function (s, i) {
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
       if (bLat == null || bLon == null || eLat == null || eLon == null) return;
-      var selBegin = s.cross_side === 'begin';
-      var selEnd = s.cross_side === 'end';
+      if (onInstall && s.uid !== currentUid) return;
+      var color = siteColors[s.uid] || SITE_PALETTE[0];
+      var seq = String(s.seq || (i + 1));
+      var active = s.uid === currentUid;
+      var shared = {
+        uid: s.uid, id: s.id, seq: seq, street: s.street || '', color: color, active: active
+      };
       siteFeats.push({
         type: 'Feature',
-        properties: { uid: s.uid, kind: 'begin', id: s.id, selected: selBegin },
+        properties: Object.assign({}, shared, {
+          kind: 'begin', selected: s.cross_side === 'begin'
+        }),
         geometry: { type: 'Point', coordinates: [bLon, bLat] }
       });
       siteFeats.push({
         type: 'Feature',
-        properties: { uid: s.uid, kind: 'end', id: s.id, selected: selEnd },
+        properties: Object.assign({}, shared, {
+          kind: 'end', selected: s.cross_side === 'end'
+        }),
         geometry: { type: 'Point', coordinates: [eLon, eLat] }
       });
     });
     map.getSource('site-pts').setData(fc(siteFeats));
-
-    var feats = (d.stops || []).map(function (s) {
-      var a = stopAnchor(s);
-      if (!a) return null;
-      return {
-        type: 'Feature',
-        properties: { uid: s.uid, seq: String(s.seq || ''), status: s.status, highlight: s.uid === hi },
-        geometry: { type: 'Point', coordinates: [a[1], a[0]] }
-      };
-    }).filter(Boolean);
-    map.getSource('stops').setData(fc(feats));
-
-    var poly = (d.route && d.route.polyline) || [];
-    var routeFeat = poly.length >= 2
-      ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: poly.map(function (p) { return [p[1], p[0]]; }) } }]
-      : [];
-    map.getSource('route').setData(fc(routeFeat));
+    setMapLayerVis('site-dot', siteFeats.length > 0);
 
     if (d.home) {
-      map.getSource('home').setData(fc([{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [d.home[1], d.home[0]] } }]));
+      map.getSource('home').setData(fc([{
+        type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [d.home[1], d.home[0]] }
+      }]));
+      setMapLayerVis('home-dot', state.tab !== 'install');
+    } else {
+      setMapLayerVis('home-dot', false);
     }
   }
 
@@ -256,9 +273,18 @@
     map.fitBounds(b, { padding: 50, maxZoom: 15, duration: 500 });
   }
 
-  function flyToStop(s) {
-    if (!mapReady || !s || !s.anchor) return;
-    map.flyTo({ center: [s.anchor[1], s.anchor[0]], zoom: 16, duration: 500 });
+  function flyToSite(s) {
+    if (!mapReady || !s) return;
+    var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
+    if (bLat != null && bLon != null && eLat != null && eLon != null) {
+      var b = new maplibregl.LngLatBounds();
+      b.extend([bLon, bLat]);
+      b.extend([eLon, eLat]);
+      map.fitBounds(b, { padding: 60, maxZoom: 17, duration: 500 });
+      return;
+    }
+    var a = stopAnchor(s);
+    if (a) map.flyTo({ center: [a[1], a[0]], zoom: 16, duration: 500 });
   }
 
   // ----------------------------------------------------------------- data sync
@@ -287,14 +313,11 @@
     var ul = $('stopList'); ul.innerHTML = '';
     var route = state.data.route || {};
     var miles = route.miles || 0;
-    $('routeMiles').textContent = route.stale ? 'order changed — re-trace' : (miles ? (miles.toFixed(1) + ' mi') : 'not routed');
-    if (state.reorderMode) {
-      $('btnRetrace').classList.toggle('active', !!route.stale);
-      $('reorderHint').textContent = route.stale
-        ? 'Order changed — tap Re-trace line to redraw the drive path.'
-        : 'Tap ▲ / ▼ to set order. On the map, tap blue (begin) or red (end) for drive-to.';
-    }
     var stops = state.data.stops || [];
+    $('routeMiles').textContent = miles ? (miles.toFixed(1) + ' mi') : (stops.length + ' stops');
+    if (state.reorderMode) {
+      $('reorderHint').textContent = 'Tap ▲ / ▼ to set order, then Build route. Tap a dot for site reference.';
+    }
     var last = stops.length - 1;
     stops.forEach(function (s, i) {
       var li = document.createElement('li');
@@ -327,7 +350,6 @@
     state.reorderMode = !!on;
     $('btnReorder').textContent = state.reorderMode ? 'Done reordering' : 'Reorder stops';
     $('btnReorder').classList.toggle('active', state.reorderMode);
-    $('btnRetrace').classList.toggle('hidden', !state.reorderMode);
     $('reorderHint').classList.toggle('hidden', !state.reorderMode);
     renderRoute();
   }
@@ -347,13 +369,11 @@
   function retraceRoute() {
     if (state.busy) return;
     state.busy = true;
-    $('btnRetrace').disabled = true; $('btnRetrace').textContent = 'Re-tracing…';
     api('/api/jobs/' + state.jobId + '/retrace', { method: 'POST' }).then(function (res) {
       applyState(res.state); fitToStops();
-      toast(res.traced ? 'Line re-traced for your order' : 'Order saved (line unchanged)');
+      toast('Stop order saved');
     }).catch(function (e) { toast(e.message); }).finally(function () {
       state.busy = false;
-      $('btnRetrace').disabled = false; $('btnRetrace').textContent = 'Re-trace line';
     });
   }
 
@@ -381,7 +401,10 @@
     // Only recenter when the user is actually on the Install tab — otherwise a
     // background state refresh (reorder, pickup, autosave) would yank the map
     // away from the route overview the user is looking at.
-    if (state.tab === 'install') flyToStop(s);
+    if (state.tab === 'install') {
+      flyToSite(s);
+      renderMap();
+    }
   }
 
   function fillDir(val) {
@@ -403,7 +426,7 @@
       li.innerHTML = '<span class="dot"></span><span class="grow"><b>Site ' + s.id + '</b>' +
         '<span class="sub">' + esc(s.street) + (s.picked_up ? ' · picked up' : ' · tap to pick up') + '</span></span>';
       li.onclick = function () {
-        if (s.picked_up) { flyToStop(s); return; }
+        if (s.picked_up) { flyToSite(s); return; }
         patchStop(s.uid, { picked_up: true }).then(function () { toast('Picked up Site ' + s.id); });
       };
       ul.appendChild(li);
@@ -540,7 +563,7 @@
     api('/api/jobs/' + state.jobId + '/route', { method: 'POST' }).then(function (res) {
       if (state.reorderMode) setReorderMode(false);
       applyState(res.state); fitToStops();
-      toast(res.graph ? 'Route built on streets' : 'Route built (straight-line — no road map on server)');
+      toast(res.graph ? 'Route order optimized' : 'Route order set');
     }).catch(function (e) { toast(e.message); }).finally(function () {
       $('btnBuildRoute').disabled = false; $('btnBuildRoute').textContent = 'Build route';
     });
@@ -559,11 +582,17 @@
     var showMap = !!MAP_TABS[tab];
     $('mapWrap').classList.toggle('hidden', !showMap);
     document.body.classList.toggle('has-map', showMap);
-    if (showMap && map) setTimeout(function () { map.resize(); }, 60);
+    if (showMap && map) {
+      setTimeout(function () { map.resize(); }, 60);
+      if (mapReady) renderMap();
+    }
     var hint = $('mapHint');
     if (hint) {
       if (state.tab === 'route' && !state.pinMode) {
-        hint.textContent = 'Blue = begin, red = end — tap to set drive-to';
+        hint.textContent = 'Tap a dot for site reference · same color = begin & end';
+        hint.classList.remove('hidden');
+      } else if (state.tab === 'install' && !state.pinMode) {
+        hint.textContent = 'Begin & end dots for this site — tap for site number';
         hint.classList.remove('hidden');
       } else if (!state.pinMode) {
         hint.classList.add('hidden');
@@ -625,7 +654,6 @@
     $('btnOpen').onclick = function () { openJob($('openId').value.trim(), $('openToken').value.trim()).catch(function (e) { $('startMsg').textContent = e.message; $('startMsg').className = 'msg err'; }); };
     $('btnBuildRoute').onclick = buildRoute;
     $('btnReorder').onclick = function () { setReorderMode(!state.reorderMode); };
-    $('btnRetrace').onclick = retraceRoute;
     $('btnGrab').onclick = grabGps;
     $('btnDropPin').onclick = function () { if (state.pinMode) disablePinMode(); else enablePinMode(); };
     $('btnInstall').onclick = function () { commitInstall(true); };

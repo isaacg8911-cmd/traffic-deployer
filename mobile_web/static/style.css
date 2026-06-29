@@ -63,6 +63,19 @@ body { display: flex; flex-direction: column; }
   background: #fff; color: #0f2744; font-size: 22px; box-shadow: 0 2px 10px rgba(0,0,0,.4);
 }
 
+/* Site reference popup (map dot tap) */
+.site-popup-wrap .maplibregl-popup-content {
+  background: var(--panel); color: var(--ink); border-radius: 12px;
+  padding: 12px 14px; box-shadow: 0 4px 20px rgba(0,0,0,.45); border: 1px solid var(--line);
+}
+.site-popup-title { font-size: 16px; font-weight: 800; margin-bottom: 2px; }
+.site-popup-meta { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.site-popup-street { font-size: 12px; color: var(--ink); margin-bottom: 8px; }
+.site-popup-btn {
+  display: block; width: 100%; margin-top: 6px; padding: 10px; border: none; border-radius: 9px;
+  background: var(--blue); color: #fff; font: inherit; font-weight: 700; cursor: pointer;
+}
+
 /* When a map-backed tab is active, map takes top ~45% and panel scrolls under it */
 body.has-map #routeScreen,
 body.has-map #installScreen,

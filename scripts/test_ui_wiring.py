@@ -285,7 +285,7 @@ def test_bridge_and_map():
         "bridge.onMapClick",
         "fireStopClick",
         "map.on('click'",
-        "alreadyPicked",
+        "kind: 'begin'",
         "pick_waiting",
     ):
         ok(f"app.js {needle.split('(')[0]}") if needle in appjs else fail(f"app.js missing {needle}")

@@ -96,12 +96,47 @@
 
   function addLayers() {
     map.addSource('stops', { type: 'geojson', data: fc() });
+    map.addSource('segments', { type: 'geojson', data: fc() });
+    map.addSource('site-pts', { type: 'geojson', data: fc() });
     map.addSource('route', { type: 'geojson', data: fc() });
     map.addSource('home', { type: 'geojson', data: fc() });
 
     map.addLayer({
+      id: 'segments-line', type: 'line', source: 'segments',
+      paint: {
+        'line-color': '#5e35b1',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 3.5],
+        'line-opacity': 0.88,
+        'line-dasharray': [3, 2]
+      }
+    });
+    map.addLayer({
       id: 'route-line', type: 'line', source: 'route',
       paint: { 'line-color': '#1976d2', 'line-width': 4, 'line-opacity': 0.8 }
+    });
+    map.addLayer({
+      id: 'site-begin', type: 'circle', source: 'site-pts',
+      filter: ['==', ['get', 'kind'], 'begin'],
+      paint: {
+        'circle-radius': [
+          'case', ['boolean', ['get', 'selected'], false], 11, 8
+        ],
+        'circle-color': '#1565c0',
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 3, 2]
+      }
+    });
+    map.addLayer({
+      id: 'site-end', type: 'circle', source: 'site-pts',
+      filter: ['==', ['get', 'kind'], 'end'],
+      paint: {
+        'circle-radius': [
+          'case', ['boolean', ['get', 'selected'], false], 11, 8
+        ],
+        'circle-color': '#c62828',
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 3, 2]
+      }
     });
     map.addLayer({
       id: 'stop-dot', type: 'circle', source: 'stops',
@@ -128,6 +163,20 @@
       paint: { 'circle-radius': 6, 'circle-color': '#9c27b0', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' }
     });
 
+    function onSitePointClick(e, side) {
+      if (state.pinMode || state.tab !== 'route') return;
+      var f = e.features && e.features[0];
+      if (!f || !f.properties || !f.properties.uid) return;
+      setCrossSide(f.properties.uid, side);
+    }
+
+    map.on('click', 'site-begin', function (e) { onSitePointClick(e, 'begin'); });
+    map.on('click', 'site-end', function (e) { onSitePointClick(e, 'end'); });
+    ['site-begin', 'site-end'].forEach(function (id) {
+      map.on('mouseenter', id, function () { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', id, function () { map.getCanvas().style.cursor = ''; });
+    });
+
     map.on('click', 'stop-dot', function (e) {
       var f = e.features && e.features[0];
       if (!f) return;
@@ -137,11 +186,52 @@
     });
   }
 
+  function stopAnchor(s) {
+    if (s.cross_lat != null && s.cross_lon != null) return [s.cross_lat, s.cross_lon];
+    if (s.anchor && s.anchor.length >= 2) return [s.anchor[0], s.anchor[1]];
+    if (s.lat != null && s.lon != null) return [s.lat, s.lon];
+    return null;
+  }
+
+  function setCrossSide(uid, side) {
+    if (state.busy || side !== 'begin' && side !== 'end') return;
+    state.busy = true;
+    patchStop(uid, { cross_side: side }).then(function () {
+      toast('Drive-to ' + (side === 'begin' ? 'begin (blue)' : 'end (red)') + ' set');
+    }).catch(function (e) { toast(e.message); })
+      .finally(function () { state.busy = false; });
+  }
+
   function renderMap() {
     if (!mapReady || !state.data) return;
     var d = state.data, hi = d.highlight_uid;
+    var segFeats = [], siteFeats = [];
+    (d.stops || []).forEach(function (s) {
+      var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
+      if (bLat == null || bLon == null || eLat == null || eLon == null) return;
+      segFeats.push({
+        type: 'Feature',
+        properties: { uid: s.uid },
+        geometry: { type: 'LineString', coordinates: [[bLon, bLat], [eLon, eLat]] }
+      });
+      var selBegin = s.cross_side === 'begin';
+      var selEnd = s.cross_side === 'end';
+      siteFeats.push({
+        type: 'Feature',
+        properties: { uid: s.uid, kind: 'begin', id: s.id, selected: selBegin },
+        geometry: { type: 'Point', coordinates: [bLon, bLat] }
+      });
+      siteFeats.push({
+        type: 'Feature',
+        properties: { uid: s.uid, kind: 'end', id: s.id, selected: selEnd },
+        geometry: { type: 'Point', coordinates: [eLon, eLat] }
+      });
+    });
+    map.getSource('segments').setData(fc(segFeats));
+    map.getSource('site-pts').setData(fc(siteFeats));
+
     var feats = (d.stops || []).map(function (s) {
-      var a = s.anchor || (s.lat != null ? [s.lat, s.lon] : null);
+      var a = stopAnchor(s);
       if (!a) return null;
       return {
         type: 'Feature',
@@ -165,7 +255,12 @@
   function fitToStops() {
     if (!mapReady || !state.data) return;
     var pts = [];
-    (state.data.stops || []).forEach(function (s) { if (s.anchor) pts.push([s.anchor[1], s.anchor[0]]); });
+    (state.data.stops || []).forEach(function (s) {
+      if (s.begin_lat != null && s.begin_lon != null) pts.push([s.begin_lon, s.begin_lat]);
+      if (s.end_lat != null && s.end_lon != null) pts.push([s.end_lon, s.end_lat]);
+      var a = stopAnchor(s);
+      if (a) pts.push([a[1], a[0]]);
+    });
     if (state.data.home) pts.push([state.data.home[1], state.data.home[0]]);
     if (!pts.length) return;
     var b = pts.reduce(function (bb, p) { return bb.extend(p); }, new maplibregl.LngLatBounds(pts[0], pts[0]));
@@ -208,7 +303,7 @@
       $('btnRetrace').classList.toggle('active', !!route.stale);
       $('reorderHint').textContent = route.stale
         ? 'Order changed — tap Re-trace line to redraw the drive path.'
-        : 'Tap ▲ / ▼ to set your own order, then Re-trace line.';
+        : 'Tap ▲ / ▼ to set order. On the map, tap blue (begin) or red (end) for drive-to.';
     }
     var stops = state.data.stops || [];
     var last = stops.length - 1;
@@ -476,6 +571,15 @@
     $('mapWrap').classList.toggle('hidden', !showMap);
     document.body.classList.toggle('has-map', showMap);
     if (showMap && map) setTimeout(function () { map.resize(); }, 60);
+    var hint = $('mapHint');
+    if (hint) {
+      if (state.tab === 'route' && !state.pinMode) {
+        hint.textContent = 'Blue = begin, red = end — tap to set drive-to';
+        hint.classList.remove('hidden');
+      } else if (!state.pinMode) {
+        hint.classList.add('hidden');
+      }
+    }
     if (tab === 'install') renderInstall();
     if (tab === 'audit') renderAudit();
   }

@@ -60,6 +60,21 @@ def main() -> int:
     check("build_route", r.status_code == 200, str(r.status_code))
     state = r.json()["state"]
     first_uid = state["stops"][0]["uid"]
+    s0 = state["stops"][0]
+    blat, blon = s0.get("begin_lat"), s0.get("begin_lon")
+    r = client.patch(
+        f"/api/jobs/{job_id}/stops/{first_uid}",
+        headers=auth,
+        json={"cross_side": "begin"},
+    )
+    patched = r.status_code == 200 and r.json()["stop"].get("cross_side") == "begin"
+    check("cross_side_begin", patched, str(r.status_code))
+    if patched and blat is not None:
+        check(
+            "cross_side_coords",
+            abs(float(r.json()["stop"]["cross_lat"]) - float(blat)) < 1e-6,
+            "begin lat",
+        )
 
     # 4b. manual reorder (choose your own order, like the laptop)
     if len(state["stops"]) > 1:

@@ -503,19 +503,27 @@
       map.addLayer({ id: 'site-begin', type: 'circle', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'begin'],
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 8, 15, 9],
+          'circle-radius': [
+            'case', ['boolean', ['get', 'selected'], false],
+            ['interpolate', ['linear'], ['zoom'], 10, 7, 14, 11, 15, 12],
+            ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 8, 15, 9]
+          ],
           'circle-color': '#1565c0',
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
+          'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 3, 2],
           'circle-opacity': 0.95
         } });
       map.addLayer({ id: 'site-end', type: 'circle', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'end'],
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 8, 15, 9],
+          'circle-radius': [
+            'case', ['boolean', ['get', 'selected'], false],
+            ['interpolate', ['linear'], ['zoom'], 10, 7, 14, 11, 15, 12],
+            ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 8, 15, 9]
+          ],
           'circle-color': '#c62828',
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
+          'circle-stroke-width': ['case', ['boolean', ['get', 'selected'], false], 3, 2],
           'circle-opacity': 0.95
         } });
       var siteLabelLayout = {
@@ -748,17 +756,16 @@
         coords = [[bLon, bLat], [eLon, eLat]];
       }
       var dotLabel = siteDotLabel(s, i, picking, pickLetters);
-      var alreadyPicked = picking && pickIdx[s.uid];
       segs.push({ type: 'Feature', properties: { seq: picking ? dotLabel : (s.seq || (i + 1)) },
                   geometry: { type: 'LineString', coordinates: coords } });
-      if (!alreadyPicked) {
-        pts.push(pt(bLat, bLon, {
-          kind: 'begin', uid: s.uid, seq: dotLabel, id: s.id, street: s.street || ''
-        }));
-        pts.push(pt(eLat, eLon, {
-          kind: 'end', uid: s.uid, seq: dotLabel, id: s.id, street: s.street || ''
-        }));
-      }
+      pts.push(pt(bLat, bLon, {
+        kind: 'begin', uid: s.uid, seq: dotLabel, id: s.id, street: s.street || '',
+        selected: s.cross_side === 'begin'
+      }));
+      pts.push(pt(eLat, eLon, {
+        kind: 'end', uid: s.uid, seq: dotLabel, id: s.id, street: s.street || '',
+        selected: s.cross_side === 'end'
+      }));
       if (!driving && fieldCoordsOk(s.field_lat, s.field_lon)
           && (s.installed || (currentUid && s.uid === currentUid))) {
         installs.push(pt(s.field_lat, s.field_lon, {
@@ -804,10 +811,11 @@
       setLayerVis('route-line', showNextLeg);
     }
     setLayerVis('segments-line', showSegs);
-    setLayerVis('site-begin', hasSites);
-    setLayerVis('site-end', hasSites);
-    setLayerVis('site-begin-label', hasSites && picking);
-    setLayerVis('site-end-label', hasSites && picking);
+    var hasPts = pts.length > 0;
+    setLayerVis('site-begin', hasPts);
+    setLayerVis('site-end', hasPts);
+    setLayerVis('site-begin-label', hasPts && picking);
+    setLayerVis('site-end-label', hasPts && picking);
     setLayerVis('pick-target-circle', false);
     setLayerVis('pick-target-label', false);
     setLayerVis('stop-circle', (showStops || picking) && stops.length > 0);

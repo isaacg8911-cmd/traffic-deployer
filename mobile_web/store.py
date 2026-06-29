@@ -226,6 +226,17 @@ _EDITABLE_FLAGS = ("installed", "skipped", "picked_up")
 def _apply_stop_patch(stop: dict, patch: dict) -> None:
     from core.state import ca_now
 
+    side = patch.get("cross_side")
+    if side in ("begin", "end"):
+        stop["cross_side"] = side
+        stop["pick_cross_locked"] = True
+        if side == "begin":
+            stop["cross_lat"] = stop.get("begin_lat")
+            stop["cross_lon"] = stop.get("begin_lon")
+        else:
+            stop["cross_lat"] = stop.get("end_lat")
+            stop["cross_lon"] = stop.get("end_lon")
+
     for key in _EDITABLE_TEXT:
         if key in patch and patch[key] is not None:
             stop[key] = str(patch[key])[:300]

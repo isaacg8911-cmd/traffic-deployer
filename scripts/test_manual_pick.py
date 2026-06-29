@@ -64,7 +64,7 @@ def main() -> int:
         ("_parse_stop_click", "main.py begin|end click payload"),
         ("pick_cross_locked", "main.py locked crossing"),
         ("pick_waiting", "main.py map banner hint"),
-        ("alreadyPicked", "app.js hide beg/end after pick"),
+        ("kind: 'begin'", "app.js always show begin/end"),
         ("pick_waiting", "app.js map banner"),
         ("pick_sides", "threads.py apply respects sides"),
         ("pick_cross_locked", "routing.py honor locked side"),

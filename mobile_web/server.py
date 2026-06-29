@@ -420,6 +420,9 @@ async def patch_stop(job_id: str, uid: str, request: Request) -> dict:
     stop = store.update_stop(job, uid, patch)
     if stop is None:
         raise HTTPException(status_code=404, detail="Stop not found.")
+    if patch.get("cross_side") in ("begin", "end") and job.get("route"):
+        job["route"]["stale"] = True
+        store.save(job)
     return {"stop": map_state.public_stop(stop), "state": _job_state(job)}
 
 

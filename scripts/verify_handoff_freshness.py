@@ -34,7 +34,7 @@ SOURCE_MARKERS = (
     ("main.py", "_enter_pick_map_focus"),
     ("main.py", "_parse_stop_click"),
     ("main.py", "_commit_home_start"),
-    ("web/app.js", "alreadyPicked"),
+    ("web/app.js", "kind: 'begin'"),
     ("web/app.js", "pick_waiting"),
     ("core/routing.py", "pick_cross_locked"),
     ("core/state.py", "set_start_point"),

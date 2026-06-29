@@ -1,4 +1,4 @@
-"""Prove the mobile share-only PUBLIC mode + share links.
+"""Prove the mobile public modes + share links.
 
 Covers the public field model: "text a link, phone works anywhere", but the
 public start page cannot create or browse jobs.
@@ -22,6 +22,12 @@ PUBLIC mode checks (TD_MOBILE_PUBLIC=1, fresh app import):
   - EXPIRY: a link past its expiry 404s even with a valid token; admin status
     reports "expired"; extend gives it more time
 
+PUBLIC open-create checks (TD_MOBILE_PUBLIC=1 + TD_MOBILE_OPEN_CREATE=1):
+  - config reports public_mode=true / can_create=true
+  - demo/import creation is allowed without the admin key
+  - separate jobs get separate tokens; one token cannot open the other job
+  - revoke/status/extend still require the admin key
+
 Writes logs/mobile_check/proofs/share_prove.json. Exit 0 = all checks passed.
 """
 from __future__ import annotations
@@ -44,7 +50,7 @@ def _fresh_client(env: dict):
     settings (public mode) are evaluated under the given environment."""
     from fastapi.testclient import TestClient
 
-    for key in ("TD_MOBILE_PUBLIC", "TD_MOBILE_ADMIN_KEY", "TD_MOBILE_PUBLIC_URL"):
+    for key in ("TD_MOBILE_PUBLIC", "TD_MOBILE_ADMIN_KEY", "TD_MOBILE_PUBLIC_URL", "TD_MOBILE_OPEN_CREATE"):
         os.environ.pop(key, None)
     os.environ.update(env)
 
@@ -138,10 +144,10 @@ def main() -> int:
 
     # ------------------------------------------------- REVOKE (lost phone)
     admin_h = {"x-admin-key": "secret-admin"}
-    # revoke needs the admin key
+    # link management needs the job's own token or the admin key (no anonymous management)
     r = pclient.post(f"/api/jobs/{pjob}/revoke")
-    check("revoke_requires_admin", r.status_code == 403, str(r.status_code))
-    # admin revokes the link
+    check("revoke_requires_auth", r.status_code == 404, str(r.status_code))
+    # admin revokes the link (fallback for a lost phone, without the token)
     r = pclient.post(f"/api/jobs/{pjob}/revoke", headers=admin_h)
     check("revoke_with_admin_ok", r.status_code == 200 and r.json().get("link_status") == "revoked")
     # the valid token no longer opens the job
@@ -176,8 +182,66 @@ def main() -> int:
     r = pclient.get(f"/api/jobs/{ejob}", headers={"x-job-token": etoken})
     check("extended_token_works", r.status_code == 200, str(r.status_code))
 
+    # ------------------------------------------------- PUBLIC OPEN-CREATE
+    oclient, _ = _fresh_client(
+        {
+            "TD_MOBILE_PUBLIC": "1",
+            "TD_MOBILE_OPEN_CREATE": "1",
+            "TD_MOBILE_ADMIN_KEY": "secret-admin",
+            "TD_MOBILE_PUBLIC_URL": public_origin,
+        }
+    )
+    r = oclient.get("/api/config")
+    ocfg = r.json()
+    check("open_public_config_is_public", ocfg.get("public_mode") is True)
+    check("open_public_can_create", ocfg.get("can_create") is True)
+
+    r = oclient.post("/api/jobs/demo")
+    check("open_demo_no_key", r.status_code == 200, str(r.status_code))
+    obody1 = r.json()
+    ojob1, otoken1 = obody1.get("job_id"), obody1.get("token")
+    r = oclient.post("/api/jobs/demo")
+    check("open_second_job_no_key", r.status_code == 200, str(r.status_code))
+    obody2 = r.json()
+    ojob2, otoken2 = obody2.get("job_id"), obody2.get("token")
+    check("open_jobs_have_separate_ids", bool(ojob1 and ojob2 and ojob1 != ojob2))
+    check("open_jobs_have_separate_tokens", bool(otoken1 and otoken2 and otoken1 != otoken2))
+
+    r = oclient.get(f"/api/jobs/{ojob1}", headers={"x-job-token": otoken1})
+    check("open_job1_token_opens_job1", r.status_code == 200, str(r.status_code))
+    r = oclient.get(f"/api/jobs/{ojob1}", headers={"x-job-token": otoken2})
+    check("open_job2_token_cannot_open_job1", r.status_code == 404, str(r.status_code))
+
+    r = oclient.post("/api/jobs/import", data={})
+    check("open_import_no_key_reaches_validation", r.status_code == 422, str(r.status_code))
+
+    # Equal use: each coworker self-manages their OWN job with its link token.
+    j1 = {"x-job-token": otoken1}
+    r = oclient.get(f"/api/jobs/{ojob1}/status", headers=j1)
+    check("self_status_with_own_token", r.status_code == 200 and r.json().get("link_status") == "active")
+    r = oclient.post(f"/api/jobs/{ojob1}/extend", headers=j1, json={"hours": 4})
+    check("self_extend_with_own_token", r.status_code == 200 and r.json().get("link_status") == "active")
+    r = oclient.post(f"/api/jobs/{ojob1}/revoke", headers=j1)
+    check("self_revoke_with_own_token", r.status_code == 200 and r.json().get("link_status") == "revoked")
+    r = oclient.get(f"/api/jobs/{ojob1}", headers=j1)
+    check("self_revoked_token_blocked", r.status_code == 404, str(r.status_code))
+    r = oclient.post(f"/api/jobs/{ojob1}/extend", headers=j1, json={"hours": 4})
+    check("self_unrevoke_with_own_token", r.status_code == 200 and r.json().get("link_status") == "active")
+    r = oclient.get(f"/api/jobs/{ojob1}", headers=j1)
+    check("self_reopened_after_extend", r.status_code == 200, str(r.status_code))
+
+    # A coworker cannot manage someone else's job with their own (different) token.
+    r = oclient.post(f"/api/jobs/{ojob1}/revoke", headers={"x-job-token": otoken2})
+    check("cross_job_manage_blocked", r.status_code == 404, str(r.status_code))
+    # No anonymous management.
+    r = oclient.post(f"/api/jobs/{ojob1}/revoke")
+    check("anon_manage_blocked", r.status_code == 404, str(r.status_code))
+    # Admin key still works as a fallback.
+    r = oclient.post(f"/api/jobs/{ojob1}/revoke", headers=admin_h)
+    check("admin_fallback_revoke_ok", r.status_code == 200 and r.json().get("link_status") == "revoked")
+
     # reset env so we don't leak public mode to other in-process steps
-    for key in ("TD_MOBILE_PUBLIC", "TD_MOBILE_ADMIN_KEY", "TD_MOBILE_PUBLIC_URL"):
+    for key in ("TD_MOBILE_PUBLIC", "TD_MOBILE_ADMIN_KEY", "TD_MOBILE_PUBLIC_URL", "TD_MOBILE_OPEN_CREATE"):
         os.environ.pop(key, None)
 
     failed = [c["name"] for c in checks if not c["ok"]]

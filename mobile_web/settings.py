@@ -1,4 +1,4 @@
-"""Runtime settings for the mobile lane — share-only public mode + admin key.
+"""Runtime settings for the mobile lane — public mode + optional open uploads.
 
 Two deployment shapes:
 
@@ -6,12 +6,14 @@ Two deployment shapes:
     - Same Wi-Fi / hotspot. The start screen can create demo/import jobs.
     - Admin key optional.
 
-  PUBLIC (share-only)   TD_MOBILE_PUBLIC=1
-    - Reachable over the internet (tunnel / host). The crew may ONLY open a job
-      via a share link (/join/<job_id>?token=<secret>). The public start screen
-      hides job creation; there is no public job list.
-    - Job creation (demo/import) requires the admin key (TD_MOBILE_ADMIN_KEY)
-      via the `x-admin-key` header, so random visitors cannot create jobs.
+  PUBLIC (self-serve)   TD_MOBILE_PUBLIC=1 + TD_MOBILE_OPEN_CREATE=1
+    - Reachable over the internet (Render host). Coworkers can import their own
+      files from the public start screen. Each import creates a separate job and
+      secret share link (/join/<job_id>?token=<secret>).
+
+  PUBLIC (share-only)   TD_MOBILE_PUBLIC=1 without TD_MOBILE_OPEN_CREATE
+    - The crew may ONLY open a job via a share link. Job creation requires the
+      admin key (TD_MOBILE_ADMIN_KEY) via the `x-admin-key` header.
 
 The admin key is read from the environment only; never committed. If public mode
 is on and no admin key is set, one is generated at startup and printed by the
@@ -32,10 +34,9 @@ def public_mode() -> bool:
 def open_uploads() -> bool:
     """Allow job creation/import from any phone, even over a public tunnel.
 
-    Set TD_MOBILE_OPEN_CREATE=1 to let the crew upload their own Excel + .EST
-    from the phone on a public URL (no admin key, no share-link required). The
-    tunnel URL is random and unguessable; use this for a single-operator field
-    deploy, not a widely-shared address.
+    Set TD_MOBILE_OPEN_CREATE=1 to let coworkers upload their own Excel + .EST
+    from the phone on the public URL (no admin key required for import). Jobs
+    remain isolated by their generated secret share-link tokens.
     """
     return os.environ.get("TD_MOBILE_OPEN_CREATE", "") == "1"
 
@@ -92,6 +93,21 @@ def creation_allowed(admin_header: str | None) -> bool:
     key = admin_key()
     if not public_mode() and not key:
         # Local mode, no key configured: open creation (same as before).
+        return True
+    if not key:
+        return False
+    return bool(admin_header) and secrets.compare_digest(str(admin_header), key)
+
+
+def admin_allowed(admin_header: str | None) -> bool:
+    """Whether an admin-only action is allowed.
+
+    Open uploads affects job creation only; it must not make revoke/extend/status
+    public on the hosted Render app.
+    """
+    key = admin_key()
+    if not public_mode() and not key:
+        # Local mode, no key configured: trusted dev/LAN actions stay open.
         return True
     if not key:
         return False

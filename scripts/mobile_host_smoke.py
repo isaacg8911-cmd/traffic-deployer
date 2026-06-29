@@ -2,15 +2,15 @@
 
 Verifies the always-on deploy behaves like the proven in-process server:
   - /api/healthz is up
-  - public/share-only mode is on (start page can't create jobs)
-  - job creation is blocked without the admin key (403), works with it
+  - public mode is on
+  - job creation posture matches the deployment (share-only or open-create)
   - the create response carries an absolute https share_url
   - a crew member can open the job from job_id + token
   - admin can revoke the link; the token then 404s; extend re-activates it
 
 Use it against a local container OR your live Render/Fly URL:
   python scripts/mobile_host_smoke.py --url http://127.0.0.1:8099 --admin-key secret-admin
-  python scripts/mobile_host_smoke.py --url https://td.onrender.com --admin-key <key>
+  python scripts/mobile_host_smoke.py --url https://td.onrender.com --admin-key <key> --open-create
 
 Exit 0 = all checks passed.
 """
@@ -26,6 +26,11 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Smoke a deployed mobile host.")
     p.add_argument("--url", default=os.environ.get("TD_MOBILE_PUBLIC_URL", "http://127.0.0.1:8099"))
     p.add_argument("--admin-key", default=os.environ.get("TD_MOBILE_ADMIN_KEY", "secret-admin"))
+    p.add_argument(
+        "--open-create",
+        action="store_true",
+        help="Expect TD_MOBILE_OPEN_CREATE=1 (public start screen can import jobs)",
+    )
     p.add_argument("--wait", type=float, default=30.0, help="seconds to wait for healthz")
     args = p.parse_args(argv)
 
@@ -58,13 +63,21 @@ def main(argv: list[str] | None = None) -> int:
     check("healthz_up", healthy)
     if not healthy:
         return _finish(checks)
+    health = r.json()
 
     r = httpx.get(f"{base}/api/config", timeout=10.0)
     cfg = r.json()
-    check("public_mode_on", cfg.get("public_mode") is True and cfg.get("can_create") is False, str(cfg))
+    check("public_mode_on", cfg.get("public_mode") is True, str(cfg))
+    if args.open_create:
+        check("open_create_on", health.get("open_create") is True and cfg.get("can_create") is True, str(cfg))
+    else:
+        check("share_only_create_gated", cfg.get("can_create") is False, str(cfg))
 
     r = httpx.post(f"{base}/api/jobs/demo", timeout=180.0)
-    check("create_blocked_no_key", r.status_code == 403, str(r.status_code))
+    if args.open_create:
+        check("create_no_key_allowed", r.status_code == 200, str(r.status_code))
+    else:
+        check("create_blocked_no_key", r.status_code == 403, str(r.status_code))
 
     # Simulate the platform TLS edge (Render/Fly) so we can prove --proxy-headers
     # yields an https share link even when this smoke hits the box over http.
@@ -82,14 +95,20 @@ def main(argv: list[str] | None = None) -> int:
         r = httpx.get(f"{base}/api/jobs/{job_id}", headers=token_h, timeout=30.0)
         check("crew_open_from_link", r.status_code == 200, str(r.status_code))
 
-        r = httpx.post(f"{base}/api/jobs/{job_id}/revoke", headers=admin_h, timeout=30.0)
-        check("admin_revoke", r.status_code == 200 and r.json().get("link_status") == "revoked")
+        # Link management needs the job's own token or the admin key (no anonymous management).
+        r = httpx.post(f"{base}/api/jobs/{job_id}/revoke", timeout=30.0)
+        check("manage_requires_auth", r.status_code == 404, str(r.status_code))
+
+        # Equal use: the coworker self-revokes their own job with its link token.
+        r = httpx.post(f"{base}/api/jobs/{job_id}/revoke", headers=token_h, timeout=30.0)
+        check("self_revoke_with_token", r.status_code == 200 and r.json().get("link_status") == "revoked")
 
         r = httpx.get(f"{base}/api/jobs/{job_id}", headers=token_h, timeout=30.0)
         check("revoked_token_blocked", r.status_code == 404, str(r.status_code))
 
+        # Admin key still works as a fallback (e.g. a lost phone).
         r = httpx.post(f"{base}/api/jobs/{job_id}/extend", headers=admin_h, json={"hours": 4}, timeout=30.0)
-        check("extend_reactivates", r.status_code == 200 and r.json().get("link_status") == "active")
+        check("admin_extend_reactivates", r.status_code == 200 and r.json().get("link_status") == "active")
 
         r = httpx.get(f"{base}/api/jobs/{job_id}", headers=token_h, timeout=30.0)
         check("reactivated_token_works", r.status_code == 200, str(r.status_code))

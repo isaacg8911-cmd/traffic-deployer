@@ -11,6 +11,7 @@ No USB GPS, no PicoCount, no Qt. Location comes from the phone browser.
 from __future__ import annotations
 
 import os
+import secrets
 import tempfile
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
@@ -51,14 +52,34 @@ def _authorize(request: Request, job_id: str) -> dict:
     return job
 
 
-def _require_admin(request: Request) -> None:
-    """Gate job creation. In public/share-only mode this needs the admin key."""
+def _require_create_allowed(request: Request) -> None:
+    """Gate job creation/import unless open uploads are explicitly enabled."""
     admin = request.headers.get("x-admin-key") or request.query_params.get("admin_key", "")
     if not settings.creation_allowed(admin):
         raise HTTPException(
             status_code=403,
             detail="Job creation is admin-only on this server. Open a job from its share link.",
         )
+
+
+def _authorize_manage(request: Request, job_id: str) -> dict:
+    """Authorize link self-management (status / revoke / extend).
+
+    Equal-use field model: whoever holds a job's own share-link token fully
+    controls that job — no privileged operator tier. The admin key still works
+    as an optional fallback (e.g. revoking a lost phone without its token). A
+    different job's token cannot manage this job.
+    """
+    admin = request.headers.get("x-admin-key") or request.query_params.get("admin_key", "")
+    job = store.load(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if settings.admin_allowed(admin):
+        return job
+    token = request.headers.get("x-job-token") or request.query_params.get("token", "")
+    if not token or not secrets.compare_digest(str(job.get("token", "")), str(token)):
+        raise HTTPException(status_code=404, detail="Job not found or token invalid")
+    return job
 
 
 def _resolve_ttl(request: Request, form_value: float | None = None) -> float | None:
@@ -114,8 +135,8 @@ def config() -> dict:
     return {
         "tile_url": TILE_URL,
         "tile_attribution": TILE_ATTRIB,
-        # Public/share-only mode hides job creation on the phone start screen,
-        # UNLESS the operator turned on open uploads (TD_MOBILE_OPEN_CREATE=1).
+        # Public mode hides creation unless open uploads are enabled
+        # (TD_MOBILE_OPEN_CREATE=1).
         "public_mode": settings.public_mode(),
         "can_create": settings.creation_allowed(None),
         "persistent_storage": persist,
@@ -158,7 +179,7 @@ async def import_job(
     excel: list[UploadFile] = None,  # type: ignore[assignment]
     est: list[UploadFile] = None,  # type: ignore[assignment]
 ) -> JSONResponse:
-    _require_admin(request)
+    _require_create_allowed(request)
     ttl = _resolve_ttl(request, None if expires_in_hours < 0 else expires_in_hours)
     excel = excel or []
     est = est or []
@@ -227,7 +248,7 @@ def import_demo(request: Request) -> JSONResponse:
     Used by the mobile proof/smoke scripts to create a job without uploads. The
     field-runner UI has no demo button — drivers open jobs via share link or import.
     """
-    _require_admin(request)
+    _require_create_allowed(request)
     from scripts.field_job_fixtures import resolve_field_job
 
     fx = resolve_field_job()
@@ -260,15 +281,12 @@ def job_share(job_id: str, request: Request) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-#  Share-link management (admin) — revoke / extend / status
+#  Share-link management (self-service) — revoke / extend / status
 # --------------------------------------------------------------------------- #
 @app.get("/api/jobs/{job_id}/status")
 def link_status_admin(job_id: str, request: Request) -> dict:
-    """Admin: report a link's state without needing the job token."""
-    _require_admin(request)
-    job = store.load(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found.")
+    """Report a link's state. Authorized by the job's own token or admin key."""
+    job = _authorize_manage(request, job_id)
     return {
         "job_id": job_id,
         "link_status": link_status(job),
@@ -279,8 +297,8 @@ def link_status_admin(job_id: str, request: Request) -> dict:
 
 @app.post("/api/jobs/{job_id}/revoke")
 def revoke_link(job_id: str, request: Request) -> dict:
-    """Admin: cut off a share link (lost phone). The token stops working."""
-    _require_admin(request)
+    """Cut off a share link (lost phone). Authorized by the job's own token or admin key."""
+    _authorize_manage(request, job_id)
     job = store.revoke(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -289,12 +307,12 @@ def revoke_link(job_id: str, request: Request) -> dict:
 
 @app.post("/api/jobs/{job_id}/extend")
 async def extend_link(job_id: str, request: Request) -> dict:
-    """Admin: re-activate / (re)set a link's expiry.
+    """Re-activate / (re)set a link's expiry. Authorized by the job's own token or admin key.
 
     Body or query `hours`: <= 0 or omitted = no expiry (never times out). Clears
     the revoked flag, so this also un-revokes a link.
     """
-    _require_admin(request)
+    _authorize_manage(request, job_id)
     hours = None
     try:
         body = await request.json()

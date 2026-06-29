@@ -32,7 +32,7 @@ STEPS = [
 # Known improvement backlog — surfaced every run so they are not forgotten.
 KNOWN_IMPROVEMENTS = [
     "Render is the only hosted surface — Dockerfile + render.yaml; prove with "
-    "scripts/mobile_host_smoke.py (share-only) and mobile_live_host_prove.py",
+    "scripts/mobile_host_smoke.py --open-create and mobile_live_host_prove.py --open-create",
     "Share links support revoke + self-expiry (TD_MOBILE_LINK_TTL_HOURS, "
     "scripts/manage_share_link.py); full multi-user auth still phase 2",
     "Hosted deploy means job data lives on Render — not for data that must never leave your machine",
@@ -94,9 +94,9 @@ def _audit(results: list[dict]) -> dict:
     if by.get("share_prove", {}).get("ok") and sp:
         strengths.append(
             f"Public share mode: {sp['passed']}/{sp['total']} checks pass "
-            "(share links open jobs anywhere; public start page can't create/browse; "
-            "creation is admin-key gated; QR generated; wrong token/key rejected; "
-            "links can be revoked and self-expire)"
+            "(share-only and open-create modes; jobs stay token-isolated; "
+            "each coworker self-manages their own link by token, admin key is fallback; "
+            "QR generated; wrong token/key rejected; links can be revoked and self-expire)"
         )
     elif sp and sp.get("failed"):
         weaknesses.append("Share test failures: " + ", ".join(sp["failed"]))

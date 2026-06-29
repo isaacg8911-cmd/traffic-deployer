@@ -1,5 +1,6 @@
-# Render Blueprint — share-only hosted mobile PWA.
-# Crew opens jobs via share link; job creation requires TD_MOBILE_ADMIN_KEY.
+# Render Blueprint — self-serve hosted mobile PWA.
+# Coworkers can import their own Excel/.EST files; each import creates a
+# separate tokenized job/share link.
 services:
   - type: web
     name: traffic-deployer-mobile
@@ -16,6 +17,7 @@ services:
         value: "1"
       - key: TD_MOBILE_LINK_TTL_HOURS
         value: "16"
+      - key: TD_MOBILE_OPEN_CREATE
+        value: "1"
       - key: TD_MOBILE_ADMIN_KEY
         generateValue: true
-      # Do NOT set TD_MOBILE_OPEN_CREATE here — hosted default is share-only.

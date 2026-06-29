@@ -18,10 +18,11 @@ Against a live deploy:
 
 ## How sharing works
 
-- Crew opens jobs via **share link** only (`/join/<job_id>?token=…`).
-- Public start page cannot create or browse jobs.
-- Job creation (demo/import) requires **admin key** (`x-admin-key` header). Render generates `TD_MOBILE_ADMIN_KEY`.
-- Share links can be revoked and expire (`TD_MOBILE_LINK_TTL_HOURS`). Manage with `scripts/manage_share_link.py`.
+- Coworkers can open the public Render URL and import their own Excel/CSV + `.EST` files when `TD_MOBILE_OPEN_CREATE=1`.
+- Each import creates a separate tokenized job (`/join/<job_id>?token=…`), so coworkers do not see or edit each other's files.
+- Public start page cannot browse existing jobs.
+- Each coworker manages their **own** job (revoke / extend / status) using its link token — equal use, no operator tier. The **admin key** (`x-admin-key`, generated `TD_MOBILE_ADMIN_KEY`) is an optional fallback (e.g. a lost phone).
+- Share links can be revoked and expire (`TD_MOBILE_LINK_TTL_HOURS`). Manage with `scripts/manage_share_link.py` (admin) or from the phone (own token).
 
 ## Tabs (phone)
 
@@ -36,7 +37,7 @@ Build and run the same Docker image locally — not a separate product:
 
 ```powershell
 docker build -t td-mobile .
-docker run -p 8800:8800 -e TD_MOBILE_PUBLIC=1 td-mobile
+docker run -p 8800:8800 -e TD_MOBILE_PUBLIC=1 -e TD_MOBILE_OPEN_CREATE=1 td-mobile
 ```
 
 Open `http://127.0.0.1:8800` (no TLS locally; Render terminates HTTPS in production).

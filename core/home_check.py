@@ -38,8 +38,9 @@ def check_home_vs_stops(
     dh = default_home or DEFAULT_HOME
     if abs(home[0] - dh[0]) < 1e-4 and abs(home[1] - dh[1]) < 1e-4 and median_mi > 8.0:
         warnings.append(
-            "Start point is still the factory default (demo coords) but your sites are "
-            f"~{median_mi:.0f} mi away. Set your real home: GPS, address search, or manual lat/lon."
+            "Start point has not been set yet (still the unset default) but your sites are "
+            f"~{median_mi:.0f} mi away. Set your home on Setup: USB GPS, address search, or "
+            "manual lat/lon."
         )
     elif median_mi > 25.0:
         warnings.append(

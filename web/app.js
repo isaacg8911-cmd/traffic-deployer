@@ -200,51 +200,69 @@
     window.location.href = 'tdstop://' + encodeURIComponent(payload);
   }
 
+  // Empty-map clicks must reach Python even when QWebChannel never connected
+  // (work-laptop case): fall back to the tdmap:// scheme the page intercepts.
+  function fireMapClick(lat, lon) {
+    if (bridge && typeof bridge.onMapClick === 'function') {
+      try {
+        bridge.onMapClick(lat, lon);
+        return;
+      } catch (e) { /* fall through to tdmap:// */ }
+    }
+    window.location.href = 'tdmap://point?lat=' +
+      encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon);
+  }
+
   var PICK_CLICK_LAYERS = [
     'pick-target-circle', 'pick-target-label',
     'stop-circle', 'stop-label',
     'site-begin', 'site-end', 'site-begin-label', 'site-end-label'
   ];
+  // Hit tolerance (px) so small begin/end dots are easy to tap on a touch /
+  // high-DPI work laptop. A bare 1px hit test made the dots feel un-clickable.
+  var PICK_HIT_PAD = 14;
 
   function pickLayerAtPoint(point) {
     var layers = PICK_CLICK_LAYERS.filter(function (id) { return map.getLayer(id); });
     if (!layers.length) return null;
-    var features = map.queryRenderedFeatures(point, { layers: layers });
+    var box = [
+      [point.x - PICK_HIT_PAD, point.y - PICK_HIT_PAD],
+      [point.x + PICK_HIT_PAD, point.y + PICK_HIT_PAD]
+    ];
+    var features;
+    try {
+      features = map.queryRenderedFeatures(box, { layers: layers });
+    } catch (e) {
+      features = map.queryRenderedFeatures(point, { layers: layers });
+    }
+    if (!features || !features.length) return null;
+    // Among everything under the padded box, take the dot closest to the click.
+    var best = null, bestD = Infinity;
     for (var i = 0; i < features.length; i++) {
       var props = features[i].properties || {};
-      var uid = props.uid;
-      if (!uid) continue;
-      var kind = props.kind;
-      if (kind === 'begin' || kind === 'end') {
-        return String(uid) + '|' + kind;
+      if (!props.uid) continue;
+      var d = 0;
+      var g = features[i].geometry;
+      if (g && g.type === 'Point' && g.coordinates) {
+        var sp = map.project([g.coordinates[0], g.coordinates[1]]);
+        var dx = sp.x - point.x, dy = sp.y - point.y;
+        d = dx * dx + dy * dy;
       }
-      return String(uid);
+      if (d < bestD) { bestD = d; best = props; }
     }
-    return null;
+    if (!best) return null;
+    var kind = best.kind;
+    if (kind === 'begin' || kind === 'end') {
+      return String(best.uid) + '|' + kind;
+    }
+    return String(best.uid);
   }
 
   function bindStopClicks() {
     if (map._stopClickBound) return;
     map._stopClickBound = true;
-    function onPick(e) {
-      var f = e.features && e.features[0];
-      if (f && f.properties && f.properties.uid) {
-        e.preventDefault();
-        var kind = f.properties.kind;
-        var payload = f.properties.uid;
-        if (kind === 'begin' || kind === 'end') {
-          payload = payload + '|' + kind;
-        }
-        fireStopClick(payload);
-      }
-    }
-    map.on('click', 'stop-circle', onPick);
-    map.on('click', 'site-begin', onPick);
-    map.on('click', 'site-end', onPick);
-    map.on('click', 'site-begin-label', onPick);
-    map.on('click', 'site-end-label', onPick);
-    map.on('click', 'pick-target-circle', onPick);
-    map.on('click', 'pick-target-label', onPick);
+    // Clicks are routed through the single map-level handler (pickLayerAtPoint),
+    // which uses a padded hit box. Here we only set the hover cursor.
     ['stop-circle', 'site-begin', 'site-end', 'site-begin-label', 'site-end-label',
       'pick-target-circle', 'pick-target-label'].forEach(function (id) {
       map.on('mouseenter', id, function () { map.getCanvas().style.cursor = 'pointer'; });
@@ -681,7 +699,7 @@
       fireStopClick(payload);
       return;
     }
-    if (bridge) bridge.onMapClick(e.lngLat.lat, e.lngLat.lng);
+    fireMapClick(e.lngLat.lat, e.lngLat.lng);
   });
 
   function safe(fn, tag) {

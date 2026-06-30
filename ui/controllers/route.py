@@ -417,11 +417,23 @@ class RouteControllerMixin:
             self._refresh_field_ready()
             self._push_state(fit=True)
             miles = res["route"].get("miles", 0.0)
+            route_res = res["route"]
+            if route_res.get("graph_uncovered"):
+                trace_note = "(straight-line — road map does not cover this job area)"
+            elif route_res.get("graph"):
+                trace_note = "(street-traced sites)"
+            else:
+                trace_note = "(straight-line — download road map on Setup)"
             self.statusBar().showMessage(
-                f"Route applied: {len(self.state.stops)} stops, {miles:.1f} mi "
-                "(street-traced sites).",
+                f"Route applied: {len(self.state.stops)} stops, {miles:.1f} mi {trace_note}",
                 10000,
             )
+            if route_res.get("graph_uncovered"):
+                self._warn(
+                    "These sites are outside the saved road map area, so the route is a "
+                    "straight-line estimate.\n\n"
+                    "On Wi‑Fi: Setup → Download road map with this job loaded, then BUILD again "
+                    "for real-street order and miles.")
             if hasattr(self, "btn_build"):
                 self.btn_build.setEnabled(True)
                 self.btn_build.setText(BUILD_LABEL)
@@ -518,16 +530,26 @@ class RouteControllerMixin:
             self._push_state(fit=True)
             miles = res["route"].get("miles", 0.0)
             r = res["route"]
+            uncovered = bool(r.get("graph_uncovered"))
             if r.get("graph"):
                 kind = "traced on real streets"
                 failed = int(r.get("failed_legs") or 0)
                 if failed:
                     kind += f" ({failed} leg(s) need road map refresh)"
+            elif uncovered:
+                kind = "straight-line — road map does not cover this job area"
             else:
                 kind = "straight-line only — download road map on Setup"
             self.statusBar().showMessage(
                 f"Route ready: {len(res['order'])} stops, {miles:.1f} mi — {kind}", 12000)
-            if not r.get("graph"):
+            if uncovered:
+                self._warn(
+                    "The downloaded road map does not cover these sites — they are well "
+                    "outside the saved map area, so the order and miles are straight-line "
+                    "estimates (not real streets).\n\n"
+                    "On Wi‑Fi: Setup → Download road map while these files are loaded "
+                    "(it fetches the area around this job), then BUILD again.")
+            elif not r.get("graph"):
                 self._warn(
                     "Route line is straight (chord) because no road graph is loaded.\n\n"
                     "Setup → Download road map (or import road_graph.graphml), then BUILD again.")

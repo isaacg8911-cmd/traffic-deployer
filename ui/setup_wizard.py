@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (
 )
 
 
+from ui.simple_mode import BUILD_LABEL
+
+
 class SetupWizard(QDialog):
     """Guides through origin, uploads, and first route build."""
 
@@ -81,9 +84,6 @@ class SetupWizard(QDialog):
         b_est = QPushButton("Add .EST map(s)")
         b_est.clicked.connect(self._win._pick_est)
         v.addWidget(b_est)
-        b_demo = QPushButton("Load demo files")
-        b_demo.clicked.connect(self._win._load_demo_files)
-        v.addWidget(b_demo)
         v.addStretch(1)
         return w
 
@@ -105,7 +105,7 @@ class SetupWizard(QDialog):
         b_imp = QPushButton("Import road map (.graphml)")
         b_imp.clicked.connect(self._win._import_roads)
         v.addWidget(b_imp)
-        b_build = QPushButton("BUILD OPTIMIZED ROUTE")
+        b_build = QPushButton(BUILD_LABEL)
         b_build.setObjectName("primary")
         b_build.clicked.connect(self._finish_build)
         v.addWidget(b_build)

@@ -24,7 +24,7 @@ from core.setup_checklist import evaluate as setup_checklist_eval
 from core.setup_checklist import route_summary as build_route_summary
 from core.state import RouteState
 from ui.counter_ui import apply_counter_panel_connected, apply_volt_check, battery_cell_text
-from ui.paths import APP_DIR, DATA_DIR, DEMO_CSV, DEMO_EST, LAUNCH_HINT
+from ui.paths import APP_DIR, DATA_DIR, LAUNCH_HINT
 from ui.setup_wizard import SetupWizard
 from ui.simple_mode import BUILD_LABEL, COMPACT_UI
 from ui.threads import DownloadRoadsThread, GeocodeThread, MapSetupThread
@@ -671,7 +671,7 @@ class SetupControllerMixin:
         lat, lon = geo.normalize_ca_coords(lat, lon)
         if RouteState.is_factory_home(lat, lon):
             self._warn(
-                "Those coordinates are still the factory demo location.\n\n"
+                "Your start point has not been set yet (still the unset default).\n\n"
                 "Type your address and tap Search, use USB GPS, or enter your real lat/lon.")
             return False
         ok = self.state.set_start_point(lat, lon, label)
@@ -885,24 +885,6 @@ class SetupControllerMixin:
         self._apply_shift_clear(wipe_upload_paths=True)
         self._go_page(0)
 
-    def _load_demo_files(self):
-        if not os.path.isfile(DEMO_CSV) or not os.path.isfile(DEMO_EST):
-            self._warn("Demo files missing from demo_data/ folder.")
-            return
-        added = False
-        if DEMO_CSV not in self.excel_paths:
-            self.excel_paths.append(DEMO_CSV)
-            added = True
-        if DEMO_EST not in self.est_paths:
-            self.est_paths.append(DEMO_EST)
-            added = True
-        self._refresh_file_lists()
-        self._sync_upload_paths()
-        self._refresh_map_preview()
-        msg = "Demo files loaded (5 sites)." if added else "Demo files already in the list."
-        self.statusBar().showMessage(
-            f"{msg} Blue/red dots = begin/end of each line. BUILD ROUTE when ready.", 8000)
-
     @staticmethod
     def _est_label_from_path(path: str) -> str:
         """Use upload filename (no extension) so Day# matches the file."""
@@ -1051,9 +1033,7 @@ class SetupControllerMixin:
                     f"Road map download failed:\n\n{err}\n\n"
                     "On work Wi‑Fi: use phone hotspot and try again, OR\n"
                     "copy tds_data\\road_graph.graphml from your home PC and tap\n"
-                    "Import road map from file.\n\n"
-                    "Cmd download:\n"
-                    "  .venv\\Scripts\\python.exe scripts\\download_road_map.py --demo"
+                    "Import road map from file."
                 )
 
         def canceled():

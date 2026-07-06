@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -176,12 +175,12 @@ class ShellLayoutMixin:
         pages_lay = QVBoxLayout(pages_col)
         pages_lay.setContentsMargins(0, 0, 0, 0)
         self.pages = QStackedWidget()
-        self.pages.addWidget(self._wrap_scroll(setup_page.build_setup_page(self)))   # 0
-        self.pages.addWidget(self._wrap_scroll(route_page.build_route_page(self)))   # 1
-        self.pages.addWidget(self._wrap_scroll(install_page.build_install_page(self)))  # 2
-        self.pages.addWidget(self._wrap_scroll(pickup_page.build_pickup_page(self)))     # 3
-        self.pages.addWidget(self._wrap_scroll(audit_page.build_audit_page(self)))      # 4
-        self.pages.addWidget(self._wrap_scroll(inventory_page.build_inventory_page(self)))  # 5
+        self.pages.addWidget(self._page_shell(setup_page.build_setup_page(self)))   # 0
+        self.pages.addWidget(self._page_shell(route_page.build_route_page(self)))   # 1
+        self.pages.addWidget(self._page_shell(install_page.build_install_page(self)))  # 2
+        self.pages.addWidget(self._page_shell(pickup_page.build_pickup_page(self)))     # 3
+        self.pages.addWidget(self._page_shell(audit_page.build_audit_page(self)))      # 4
+        self.pages.addWidget(self._page_shell(inventory_page.build_inventory_page(self)))  # 5
         pages_lay.addWidget(self.pages)
         side_lay.addWidget(pages_col, 1)
 
@@ -233,15 +232,11 @@ class ShellLayoutMixin:
         """No voice/theme prefs on route page after voice removal."""
         return
 
-    def _wrap_scroll(self, w: QWidget) -> QWidget:
-        sc = QScrollArea()
-        sc.setObjectName("pageScroll")
-        sc.setWidgetResizable(True)
-        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        sc.setFrameShape(QFrame.NoFrame)
+    def _page_shell(self, w: QWidget) -> QWidget:
+        """One-view tab: no scroll — content stretches to panel height."""
+        w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         w.setMinimumWidth(300)
-        sc.setWidget(w)
-        return sc
+        return w
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

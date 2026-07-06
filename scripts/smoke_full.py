@@ -278,7 +278,7 @@ def test_web_assets():
     check("hardware env flag", hw.detect_hardware().work_laptop)
     os.environ.pop("TDS_WORK_LAPTOP", None)
     check("lean gps render", "jumpTo" in appjs and "_gpsAnimId" not in appjs)
-    check("lean drive path", "lean_drive" in appjs and "focusUid" in appjs)
+    check("lean drive path", "lean_drive" in appjs and "highlight_uid" in appjs)
     check("soft lean keeps roads", "LEAN_BASE_LAYERS" in appjs and "landuse" in appjs)
     check("follow zoom not locked", "zoom: map.getZoom()" in appjs)
     check("next site frame button", "next-site-btn" in idx and "__tdFrameNextSite" in appjs)
@@ -287,6 +287,9 @@ def test_web_assets():
     check("numbered site begin/end dots", "site-begin-label" in appjs and "site-end-label" in appjs)
     check("pick route map banner", "pick-banner" in idx and "pick_prompt" in appjs)
     check("pick letter labels", "siteDotLabel" in appjs and "pick_letters" in appjs)
+    check("map seq not excel id", "route sequence" in appjs and "Excel site #" in appjs)
+    check("site click toast", "site-toast" in idx and "showSiteInfoToast" in appjs)
+    check("readable map labels", "MAP_LABEL_PAINT" in appjs)
     check("pick target dots", "pick-target-circle" in appjs and "pick-targets" in appjs)
     def _shell_src() -> str:
         chunks = [open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()]
@@ -329,6 +332,13 @@ def test_web_assets():
         text=True,
     )
     check("ui wiring audit", proc.returncode == 0, (proc.stdout or proc.stderr or "")[-400:])
+    proc_btn = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "scripts", "test_ui_buttons.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    check("ui button layout", proc_btn.returncode == 0, (proc_btn.stdout or proc_btn.stderr or "")[-400:])
     from core.picocount import (
         build_unit_id, counter_ports_labeled, facing_n_or_e, preferred_counter_port,
         protocol_doc_present,
@@ -413,7 +423,7 @@ def test_web_assets():
     check("grab gps no blocking scan", "get_fix" not in grab_src and "fix_from_snapshot" in grab_src)
     check("manual grab map mode", "_manual_grab_mode" in main_src and "manual_grab" in appjs)
     check("manual grab save helper", "_save_field_position" in main_src)
-    check("install persist on commit", "_persist_shift(quiet=True)" in commit_src and "saved locally" in commit_src)
+    check("install persist on commit", "_persist_shift(quiet=True)" in commit_src and "Tap Next" in commit_src)
     check("route on map plan", "_route_for_map(preview" in main_src)
     from ui.simple_mode import BUILD_LABEL, SIMPLE_MODE
     check("simple mode default", SIMPLE_MODE)
@@ -563,6 +573,11 @@ def test_offline_gate():
     check("offline gate blocks no route", not g["ok"] and g["blockers"])
     g2 = offline_gate_eval(r, has_stops=True, route_miles=12.5, graph_loaded=True)
     check("offline gate ok with route", g2["ok"])
+    g3 = offline_gate_eval(
+        r, has_stops=True, route_miles=12.5, graph_loaded=True, route_graph_uncovered=True)
+    check("offline gate blocks wrong-area graph", not g3["ok"] and g3["blockers"])
+    from core.setup_checklist import road_map_covers_job
+    check("road_map_covers_job helper", callable(road_map_covers_job))
     check("no voice module", not os.path.isfile(os.path.join(ROOT, "voice_nav.py")))
 
 

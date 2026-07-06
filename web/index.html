@@ -59,12 +59,22 @@
       font: 700 15px/1.35 system-ui, sans-serif; text-align: center;
       box-shadow: 0 4px 16px rgba(0,0,0,.35); pointer-events: none;
     }
+    #site-toast {
+      display: none; position: absolute; left: 50%; bottom: 88px; z-index: 8;
+      transform: translateX(-50%); max-width: min(92%, 480px);
+      padding: 10px 16px; border-radius: 10px;
+      background: rgba(255, 255, 255, 0.97); color: #0f2744;
+      font: 800 14px/1.35 system-ui, sans-serif; text-align: center;
+      box-shadow: 0 3px 14px rgba(0,0,0,.28); pointer-events: none;
+      border: 2px solid #1565c0;
+    }
     body.td-manual-grab #map { cursor: crosshair; }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <div id="pick-banner" aria-live="polite"></div>
+  <div id="site-toast" aria-live="polite"></div>
   <div id="mapHud" aria-label="Map controls">
     <div id="compass" title="Heading when stopped (for install direction)">
       <div id="compass-dial">
@@ -84,6 +94,6 @@
   <script src="./vendor/pmtiles.js"></script>
   <script src="./vendor/qwebchannel.js"></script>
   <script src="./style.js?v=19"></script>
-  <script src="./app.js?v=22"></script>
+  <script src="./app.js?v=24"></script>
 </body>
 </html>

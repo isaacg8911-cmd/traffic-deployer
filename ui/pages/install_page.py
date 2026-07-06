@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -101,6 +102,11 @@ def build_install_page(win) -> QWidget:
     win.btn_counter_refresh.setObjectName("secondary")
     win.btn_counter_refresh.clicked.connect(win._counter_refresh_and_connect)
     row_cp.addWidget(win.btn_counter_refresh)
+    win.btn_counter_read = QPushButton("Read serial")
+    win.btn_counter_read.setObjectName("secondary")
+    win.btn_counter_read.setToolTip("Read serial number from counter (USB must be connected)")
+    win.btn_counter_read.clicked.connect(lambda: win._counter_read_serial(auto=False))
+    row_cp.addWidget(win.btn_counter_read)
     sec_counter.addLayout(row_cp)
     win.lbl_counter_status = QLabel("Plug USB cable → Refresh")
     win.lbl_counter_status.setObjectName(
@@ -158,34 +164,58 @@ def build_install_page(win) -> QWidget:
     sec_form.addLayout(row)
     win.txt_notes = QPlainTextEdit()
     win.txt_notes.setPlaceholderText("Field notes (optional)")
-    win.txt_notes.setMaximumHeight(48 if COMPACT_UI else 72)
+    win.txt_notes.setMaximumHeight(36 if COMPACT_UI else 72)
     win.txt_notes.textChanged.connect(win._schedule_autosave)
     sec_form.addWidget(win.txt_notes)
-    row_grab = QHBoxLayout()
+    # GPS / pin actions — 2-column grid so labels never truncate in the
+    # narrow field panel (was a single cramped row: "ab G", "op p", "save").
+    grid_grab = QGridLayout()
+    grid_grab.setHorizontalSpacing(6)
+    grid_grab.setVerticalSpacing(6)
+    grid_grab.setColumnStretch(0, 1)
+    grid_grab.setColumnStretch(1, 1)
+
     b_grab = QPushButton("Grab GPS")
     b_grab.setObjectName("secondary")
     b_grab.setToolTip("Use USB GPS receiver at your current location")
     b_grab.clicked.connect(win._grab_gps_here)
-    row_grab.addWidget(b_grab)
-    win.btn_manual_grab = QPushButton("Manual Grab")
+    grid_grab.addWidget(b_grab, 0, 0)
+
+    win.btn_manual_grab = QPushButton("Drop pin")
     win.btn_manual_grab.setObjectName("secondary")
     win.btn_manual_grab.setCheckable(True)
     win.btn_manual_grab.setToolTip(
-        "Zoom to this site, then click the street on the map for install position")
+        "Click the map to drop a pin for this site — GPS saves immediately (drag pin to adjust).")
     win.btn_manual_grab.clicked.connect(win._toggle_manual_grab)
-    row_grab.addWidget(win.btn_manual_grab)
+    grid_grab.addWidget(win.btn_manual_grab, 0, 1)
+
+    win.btn_confirm_pin = QPushButton("Re-save pin")
+    win.btn_confirm_pin.setObjectName("secondary")
+    win.btn_confirm_pin.setToolTip("Re-save orange pin position after dragging")
+    win.btn_confirm_pin.clicked.connect(win._confirm_manual_grab_pin)
     if COMPACT_UI:
-        b_comp_dir = QPushButton("Dir ○")
+        grid_grab.addWidget(win.btn_confirm_pin, 1, 0)
+        b_comp_dir = QPushButton("Set direction")
         b_comp_dir.setObjectName("secondary")
         b_comp_dir.setToolTip("Set direction from compass heading")
         b_comp_dir.clicked.connect(win._set_dir_from_compass)
-        row_grab.addWidget(b_comp_dir)
+        grid_grab.addWidget(b_comp_dir, 1, 1)
+    else:
+        grid_grab.addWidget(win.btn_confirm_pin, 1, 0, 1, 2)
+    sec_form.addLayout(grid_grab)
+
     win.lbl_grab = QLabel("")
     win.lbl_grab.setObjectName("hint")
-    row_grab.addWidget(win.lbl_grab, 1)
-    sec_form.addLayout(row_grab)
+    win.lbl_grab.setWordWrap(True)
+    sec_form.addWidget(win.lbl_grab)
 
-    win.lbl_install_checklist = QLabel("○ GPS   ○ Cleared   ○ Serial")
+    win.btn_clear_gps = QPushButton("Clear GPS / pin")
+    win.btn_clear_gps.setObjectName("secondary")
+    win.btn_clear_gps.setToolTip("Remove saved GPS or manual pin for this site (fix accidental double grab)")
+    win.btn_clear_gps.clicked.connect(win._clear_field_gps)
+    sec_form.addWidget(win.btn_clear_gps)
+
+    win.lbl_install_checklist = QLabel("○ GPS/pin   ○ Cleared   ○ Serial  (advisory)")
     win.lbl_install_checklist.setObjectName("installChecklist")
     win.lbl_install_checklist.setWordWrap(True)
     v.addWidget(win.lbl_install_checklist)
@@ -217,7 +247,7 @@ def build_install_page(win) -> QWidget:
     row3.addWidget(b_next, 1)
     v.addLayout(row3)
     if not COMPACT_UI:
-        lbl_keys = QLabel("I install · S skip · G grab GPS · M manual map grab · N/P prev/next")
+        lbl_keys = QLabel("I install · S skip · G grab GPS · M drop pin · N/P prev/next")
         lbl_keys.setObjectName("hint")
         lbl_keys.setWordWrap(True)
         v.addWidget(lbl_keys)

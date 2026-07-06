@@ -344,6 +344,31 @@ class MapSyncControllerMixin:
                 return uid, side
         return raw, None
 
+    def _stop_by_uid(self, uid: str) -> tuple[int, dict] | tuple[None, None]:
+        idx = self.state.index_of(uid)
+        if idx >= 0:
+            return idx, self.state.stops[idx]
+        preview = getattr(self, "_map_preview_stops", []) or []
+        for i, s in enumerate(preview):
+            if str(s.get("uid") or "") == uid:
+                d = dict(s)
+                d.setdefault("seq", i + 1)
+                return i, d
+        return None, None
+
+    def _stop_click_status(self, stop: dict, idx: int, side: str | None) -> str:
+        seq = stop.get("seq") or (idx + 1)
+        site_id = stop.get("id", "?")
+        street = str(stop.get("street", "") or "").strip()
+        if street.lower() in ("nan", "none", "nat", ""):
+            street = self._street_label(stop)
+        msg = f"Stop {seq} · Excel site {site_id}"
+        if street:
+            msg += f" — {street}"
+        if side in ("begin", "end"):
+            msg += f" ({'Begin' if side == 'begin' else 'End'} point)"
+        return msg
+
     @staticmethod
     def _apply_pick_side(stop: dict, side: str) -> None:
         if side == "begin":
@@ -558,28 +583,17 @@ class MapSyncControllerMixin:
         if self._route_pick_mode:
             self._route_pick_add(uid, side=side)
             return
-        idx = self.state.index_of(uid)
-        if idx >= 0:
-            stop = self.state.stops[idx]
-            street = str(stop.get("street", "") or "").strip()
-            site_id = stop.get("id", "?")
-            if side in ("begin", "end"):
-                side_label = "Begin" if side == "begin" else "End"
-                self.statusBar().showMessage(
-                    f"Site {site_id} — {street} ({side_label})", 8000,
-                )
-                if self.pages.currentIndex() == 2:
-                    self.current_index = idx
-                    self._refresh_install()
-                    return
-            else:
-                side_note = f" ({side} point)" if side in ("begin", "end") else ""
-                self.statusBar().showMessage(
-                    f"Site {site_id} — {street}{side_note}", 8000,
-                )
-            self.current_index = idx
-            self._go_page(2)
-            self._center_current()
+        idx, stop = self._stop_by_uid(uid)
+        if stop is None:
+            return
+        self.statusBar().showMessage(self._stop_click_status(stop, idx, side), 10000)
+        if self.pages.currentIndex() == 2:
+            if idx < len(self.state.stops):
+                self.current_index = idx
+                self._refresh_install()
+                self._center_current()
+            return
+        # Setup / Route / other tabs: show Excel site # only — stay on current tab.
 
     def _should_push_gps_bridge(
         self, lat: float, lon: float, heading: float | None,

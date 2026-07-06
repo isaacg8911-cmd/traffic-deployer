@@ -5,7 +5,7 @@ from __future__ import annotations
 SIMPLE_MODE = True
 # Tighter panels — one screen per tab, less hint noise.
 COMPACT_UI = SIMPLE_MODE
-COMPACT_PAD = 12
+COMPACT_PAD = 8
 
 BUILD_LABEL = "BUILD ROUTE" if SIMPLE_MODE else "PLAN ROUTE — pick stop order"
 

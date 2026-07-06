@@ -96,12 +96,15 @@
     }
   }
 
-  function setFollow(on) {
-    follow = on;
-    followBtn.textContent = on ? 'Following' : 'Follow Me';
-    followBtn.className = 'hudBtn primary' + (on ? '' : ' off');
+  function setFollow(on, fromPython) {
+    follow = !!on;
+    followBtn.textContent = follow ? 'Following' : 'Follow Me';
+    followBtn.className = 'hudBtn primary' + (follow ? '' : ' off');
+    if (!fromPython && bridge && typeof bridge.onFollowToggled === 'function') {
+      try { bridge.onFollowToggled(follow); } catch (e) { /* QWebChannel optional */ }
+    }
   }
-  followBtn.addEventListener('click', function () { setFollow(!follow); });
+  followBtn.addEventListener('click', function () { setFollow(!follow, false); });
   if (zoomInBtn) {
     zoomInBtn.addEventListener('click', function () {
       map.zoomTo(Math.min(map.getZoom() + 1, MAX_ZOOM), { duration: 200 });
@@ -188,6 +191,13 @@
     ['==', ['get', 'status'], 'picked_up'], '#0d47a1',
     '#c45f14'
   ];
+
+  // Dark numerals + light halo — readable on blue/red/orange map dots (not white-on-white).
+  var MAP_LABEL_PAINT = {
+    'text-color': '#0f2744',
+    'text-halo-color': '#ffffff',
+    'text-halo-width': 2
+  };
 
   function fireStopClick(payload) {
     if (!payload) return;
@@ -330,11 +340,7 @@
         'text-allow-overlap': true,
         'text-ignore-placement': true
       };
-      var siteLabelPaint = {
-        'text-color': '#ffffff',
-        'text-halo-color': 'rgba(15,39,68,0.45)',
-        'text-halo-width': 1.2
-      };
+      var siteLabelPaint = MAP_LABEL_PAINT;
       map.addLayer({ id: 'site-begin-label', type: 'symbol', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'begin'],
         layout: siteLabelLayout,
@@ -370,11 +376,7 @@
           'text-allow-overlap': true,
           'text-ignore-placement': true
         },
-        paint: {
-          'text-color': '#ffffff',
-          'text-halo-color': 'rgba(15,39,68,0.35)',
-          'text-halo-width': 1.2
-        } });
+        paint: MAP_LABEL_PAINT });
       bindStopClicks();
     }
     if (!map.getSource('pick-targets')) {
@@ -395,11 +397,7 @@
           'text-allow-overlap': true,
           'text-ignore-placement': true
         },
-        paint: {
-          'text-color': '#ffffff',
-          'text-halo-color': 'rgba(15,39,68,0.45)',
-          'text-halo-width': 1.2
-        } });
+        paint: MAP_LABEL_PAINT });
       bindStopClicks();
     }
     if (!map.getSource('install-pts')) {
@@ -476,7 +474,38 @@
     if (picking) {
       return (pickLetters && pickLetters[s.uid]) || siteLetterFromIndex(i);
     }
+    // Map dots: route sequence (1, 2, 3…). Excel site # appears on click / Install tab.
     return stopSeqLabel(s, i, false, {});
+  }
+
+  var _siteToastTimer = null;
+  function showSiteInfoToast(payload) {
+    var el = document.getElementById('site-toast');
+    if (!el || !lastState || !lastState.stops) return;
+    var uid = payload, side = null;
+    if (String(payload).indexOf('|') >= 0) {
+      var parts = String(payload).split('|');
+      uid = parts[0];
+      side = parts[1];
+    }
+    var stop = null, idx = -1;
+    for (var i = 0; i < lastState.stops.length; i++) {
+      if (lastState.stops[i].uid === uid) { stop = lastState.stops[i]; idx = i; break; }
+    }
+    if (!stop) return;
+    var seq = stop.seq != null ? stop.seq : (idx + 1);
+    var siteId = stop.id != null && String(stop.id).trim() !== '' ? String(stop.id) : '?';
+    var street = String(stop.street || '').trim();
+    if (!street || street.toLowerCase() === 'nan') street = '';
+    var txt = 'Stop ' + seq + ' · Excel site ' + siteId;
+    if (street) txt += ' — ' + street;
+    if (side === 'begin' || side === 'end') {
+      txt += ' (' + (side === 'begin' ? 'Begin' : 'End') + ')';
+    }
+    el.textContent = txt;
+    el.style.display = 'block';
+    if (_siteToastTimer) clearTimeout(_siteToastTimer);
+    _siteToastTimer = setTimeout(function () { el.style.display = 'none'; }, 6000);
   }
 
   function updatePickBanner(state) {
@@ -584,8 +613,9 @@
       segs.push({ type: 'Feature', properties: { seq: picking ? dotLabel : (s.seq || (i + 1)) },
                   geometry: { type: 'LineString', coordinates: coords } });
       if (!alreadyPicked) {
-        pts.push(pt(bLat, bLon, { kind: 'begin', uid: s.uid, seq: dotLabel }));
-        pts.push(pt(eLat, eLon, { kind: 'end', uid: s.uid, seq: dotLabel }));
+        var ptProps = { kind: 'begin', uid: s.uid, seq: dotLabel, site_id: s.id };
+        pts.push(pt(bLat, bLon, ptProps));
+        pts.push(pt(eLat, eLon, Object.assign({}, ptProps, { kind: 'end' })));
       }
       if (!driving && s.field_lat != null && s.field_lon != null) {
         installs.push(pt(s.field_lat, s.field_lon, { uid: s.uid }));
@@ -696,6 +726,7 @@
   map.on('click', function (e) {
     var payload = pickLayerAtPoint(e.point);
     if (payload) {
+      showSiteInfoToast(payload);
       fireStopClick(payload);
       return;
     }
@@ -724,7 +755,7 @@
         bridge.flyTo.connect(function (lat, lon, zoom) {
           map.flyTo({ center: [lon, lat], zoom: zoom || map.getZoom(), duration: 800 });
         });
-        bridge.setFollowSignal.connect(function (on) { setFollow(!!on); });
+        bridge.setFollowSignal.connect(function (on) { setFollow(!!on, true); });
         window.__bridgeReady = true;
         bridge.onReady();
       });
@@ -741,7 +772,7 @@
     var z = zoom != null ? Math.min(MAX_ZOOM, zoom) : map.getZoom();
     map.flyTo({ center: [lon, lat], zoom: z, duration: 600 });
   };
-  window.__tdSetFollow = setFollow;
+  window.__tdSetFollow = function (on) { setFollow(!!on, true); };
   window.__tdFrameNextSite = frameNextSite;
   window.__tdSetDriveLeg = function (coords, active) {
     ensureSources();

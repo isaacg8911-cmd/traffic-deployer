@@ -133,7 +133,7 @@ ORPHAN_HANDLER_ALLOW = frozenset({
     "_push_undo",
     "_go_page",
     "_build_ui",
-    "_wrap_scroll",
+    "_page_shell",
     "_placeholder",
     "_build_topbar",
     "_setup_shortcuts",

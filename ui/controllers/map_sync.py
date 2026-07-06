@@ -15,7 +15,8 @@ from ui.map_helpers import (
     should_push_gps_bridge,
 )
 from ui.paths import DATA_DIR
-from ui.simple_mode import FIELD_NAV_INDICES, FIELD_SHELL
+from ui.page_indices import NAV_PAGE_COUNT
+from ui.simple_mode import FIELD_NAV_INDICES, FIELD_SHELL, SIMPLE_MODE
 from version import APP_VERSION
 
 DAY_FILTER_ALL = "All days"
@@ -41,9 +42,31 @@ class MapSyncControllerMixin:
         self.view.page().runJavaScript("!!window.__mapLoaded", cb)
 
     def _on_map_ready(self):
-        self.bridge.set_follow(False)
+        self._hide_map_load_overlay()
+        self.bridge.set_follow(bool(self._gps_follow or self._map_follow))
         if self.state.stops:
             self._apply_map_startup_view()
+
+    def _on_map_follow_toggled(self, on: bool) -> None:
+        """Map HUD Follow Me — must work in field/offline mode (no Wi‑Fi)."""
+        if not on and self._gps_follow:
+            self._stop_drive()
+            return
+        self._map_follow = bool(on)
+        if on:
+            self._last_gps_bridge = None
+            g = self.gps.latest()
+            if g.get("fix") and g.get("lat") is not None:
+                hdg = g.get("heading_display") or g.get("heading_locked") or g.get("heading")
+                self.bridge.send_gps({
+                    "lat": g["lat"], "lon": g["lon"], "heading": hdg,
+                    "heading_mode": g.get("heading_mode"), "speed_mps": g.get("speed_mps"),
+                })
+            self.statusBar().showMessage(
+                "Following GPS on map — works offline, no Wi‑Fi needed.", 8000)
+        else:
+            self.statusBar().showMessage("Map follow off.", 4000)
+        self._apply_power_profile(force=True)
 
     def _shift_has_field_progress(self) -> bool:
         return shift_has_field_progress(self.state.stops)
@@ -177,7 +200,7 @@ class MapSyncControllerMixin:
             for box in getattr(self, "_route_fold_boxes", []):
                 if box is not None:
                     box.hide()
-            for i in range(5):
+            for i in range(NAV_PAGE_COUNT):
                 btn = getattr(self, f"_navbtn_{i}", None)
                 if btn is not None:
                     btn.setEnabled(i in (1, 2))
@@ -190,7 +213,7 @@ class MapSyncControllerMixin:
                 if box is not None:
                     box.show()
             self._apply_field_nav_shell()
-            for i in range(5):
+            for i in range(NAV_PAGE_COUNT):
                 btn = getattr(self, f"_navbtn_{i}", None)
                 if btn is not None:
                     if FIELD_SHELL and self.state.offline_mode:
@@ -333,6 +356,9 @@ class MapSyncControllerMixin:
         stop["pick_cross_locked"] = True
 
     def _ask_route_build_mode(self) -> str | None:
+        """Simple mode: auto-optimize (no blocking dialog). Pick via Route → Pick on map."""
+        if SIMPLE_MODE:
+            return "optimize"
         box = QMessageBox(self)
         box.setWindowTitle("Build route")
         box.setText("How should stop order be chosen?")
@@ -409,7 +435,7 @@ class MapSyncControllerMixin:
             crash_log.log_error(exc, context="push_state")
 
     def _push_state_body(self, fit: bool = False):
-        following = bool(self._gps_follow)
+        following = bool(self._gps_follow or self._map_follow)
         preview = bool(self._map_preview_stops) and not self.state.stops
         picking = bool(self._route_pick_mode)
         manual_grab = bool(self._manual_grab_mode)
@@ -446,7 +472,8 @@ class MapSyncControllerMixin:
             "show_badges": not picking,
             # Blue leg to next stop while following GPS; soft lean on work laptop keeps streets + next pin.
             "show_guide": bool(following),
-            "lean_drive": bool(self.state.offline_mode) and following and self._work_laptop,
+            # Lean map stripped streets/sites and broke field GPS follow — keep full map offline.
+            "lean_drive": False,
             "current_uid": (
                 self.state.stops[self.current_index]["uid"]
                 if self.state.stops and self.current_index < len(self.state.stops)
@@ -535,16 +562,21 @@ class MapSyncControllerMixin:
         if idx >= 0:
             stop = self.state.stops[idx]
             street = str(stop.get("street", "") or "").strip()
-            if side in ("begin", "end") and self.pages.currentIndex() == 2:
+            site_id = stop.get("id", "?")
+            if side in ("begin", "end"):
                 side_label = "Begin" if side == "begin" else "End"
                 self.statusBar().showMessage(
-                    f"Site {stop.get('id')} — {street} ({side_label})", 5000,
+                    f"Site {site_id} — {street} ({side_label})", 8000,
                 )
-                return
-            side_note = f" ({side} point)" if side in ("begin", "end") else ""
-            self.statusBar().showMessage(
-                f"Site {stop.get('id')} — {street}{side_note}", 8000,
-            )
+                if self.pages.currentIndex() == 2:
+                    self.current_index = idx
+                    self._refresh_install()
+                    return
+            else:
+                side_note = f" ({side} point)" if side in ("begin", "end") else ""
+                self.statusBar().showMessage(
+                    f"Site {site_id} — {street}{side_note}", 8000,
+                )
             self.current_index = idx
             self._go_page(2)
             self._center_current()
@@ -585,7 +617,7 @@ class MapSyncControllerMixin:
                 self._last_gps_bridge_t = _time.time()
             self._update_compass_labels(g)
             self.status_gps.setText(f"GPS: FIX  {g.get('satellites', 0)} sats   {lat:.5f}, {lon:.5f}")
-            if self._gps_follow:
+            if self._gps_follow or self._map_follow:
                 self._update_follow_banner()
             if hasattr(self, "lbl_field_score") and not hasattr(self, "_gps_ready_refreshed"):
                 self._gps_ready_refreshed = True

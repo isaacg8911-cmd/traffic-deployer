@@ -5,20 +5,16 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from ui.simple_mode import BUILD_LABEL, COMPACT_UI, SIMPLE_MODE
 from ui.widgets import WorkflowStrip, section_group
-from ui.counter_ui import apply_volt_check, battery_cell_text
 
 
 def build_setup_page(win) -> QWidget:
@@ -61,11 +57,13 @@ def build_setup_page(win) -> QWidget:
         "Remove sites, route, and install/pickup progress for this profile. "
         "Excel/.EST file lists stay unless you clear them below.")
     b_clear_shift.clicked.connect(win._reset_route)
+    win.btn_clear_shift = b_clear_shift
     row_data.addWidget(b_clear_shift)
     b_start_fresh = QPushButton("Start fresh…")
     b_start_fresh.setObjectName("secondary")
     b_start_fresh.setToolTip("Clear shift data and Excel/.EST file lists — empty map on next launch.")
     b_start_fresh.clicked.connect(win._start_fresh_profile)
+    win.btn_start_fresh = b_start_fresh
     row_data.addWidget(b_start_fresh)
     sec_profile.addLayout(row_data)
     win.lbl_profile_hint = QLabel(
@@ -85,9 +83,9 @@ def build_setup_page(win) -> QWidget:
     win.lbl_field_score.setObjectName("tabContextLine")
     sec_ready.addWidget(win.lbl_field_score)
     win.lbl_field_checks = QLabel("")
+    win.lbl_field_checks.setObjectName("fieldChecks")
     win.lbl_field_checks.setWordWrap(True)
-    win.lbl_field_checks.setMaximumHeight(44 if COMPACT_UI else 16777215)
-    win.lbl_field_checks.setStyleSheet("font-size:11px;line-height:1.35;color:#64748b;")
+    win.lbl_field_checks.setMaximumHeight(80 if COMPACT_UI else 16777215)
     sec_ready.addWidget(win.lbl_field_checks)
     row_ready = QHBoxLayout()
     b_refresh_ready = QPushButton("Refresh")
@@ -97,6 +95,7 @@ def build_setup_page(win) -> QWidget:
     b_net = QPushButton("Test Wi‑Fi")
     b_net.setObjectName("secondary")
     b_net.clicked.connect(win._run_setup_network_test)
+    win.btn_test_wifi = b_net
     row_ready.addWidget(b_net)
     row_ready.addStretch(1)
     if not SIMPLE_MODE:
@@ -113,28 +112,6 @@ def build_setup_page(win) -> QWidget:
         b_wiz.clicked.connect(win._show_setup_wizard)
         row_ready.addWidget(b_wiz)
     sec_ready.addLayout(row_ready)
-
-    sec_inv = section_group("Counter inventory", v, object_name="counterInventoryPanel")
-    win.lbl_inventory_summary = QLabel("Serials update when you connect on Install/Pickup.")
-    win.lbl_inventory_summary.setObjectName("hint")
-    win.lbl_inventory_summary.setWordWrap(True)
-    sec_inv.addWidget(win.lbl_inventory_summary)
-    win.lbl_inventory_live = QLabel("Last USB read shows here.")
-    win.lbl_inventory_live.setObjectName("counterVoltCheck")
-    win.lbl_inventory_live.setWordWrap(True)
-    apply_volt_check(win.lbl_inventory_live, None)
-    sec_inv.addWidget(win.lbl_inventory_live)
-    win.table_counter_inventory = QTableWidget(0, 6)
-    win.table_counter_inventory.setHorizontalHeaderLabels(
-        ["Serial", "Battery", "Unit ID", "Status", "Data", "Last check"])
-    win.table_counter_inventory.horizontalHeader().setSectionResizeMode(
-        QHeaderView.ResizeMode.Stretch)
-    win.table_counter_inventory.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-    win.table_counter_inventory.setSelectionBehavior(
-        QTableWidget.SelectionBehavior.SelectRows)
-    win.table_counter_inventory.setAlternatingRowColors(True)
-    win.table_counter_inventory.setMaximumHeight(110 if COMPACT_UI else 180)
-    sec_inv.addWidget(win.table_counter_inventory)
 
     sec_origin = section_group("Start point", v)
     win.lbl_origin = QLabel("")
@@ -253,7 +230,14 @@ def build_setup_page(win) -> QWidget:
         win.combo_port = QComboBox()
         win.combo_port.hide()
         win.lbl_offline = QLabel("")
-        win.lbl_offline.hide()
+        win.lbl_offline.setObjectName("offlineHint")
+        win.lbl_offline.setWordWrap(True)
+        sec_ready.addWidget(win.lbl_offline)
+        win.lbl_roads_hint = QLabel(
+            "Work Wi‑Fi may block road download — import road_graph.graphml from home PC.")
+        win.lbl_roads_hint.setObjectName("hint")
+        win.lbl_roads_hint.setWordWrap(True)
+        sec_build.addWidget(win.lbl_roads_hint)
         win._refresh_ports()
     else:
         sec_gps = section_group("Before you leave", v)

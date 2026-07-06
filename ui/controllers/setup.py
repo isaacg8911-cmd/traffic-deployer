@@ -24,6 +24,7 @@ from core.setup_checklist import evaluate as setup_checklist_eval
 from core.setup_checklist import route_summary as build_route_summary
 from core.state import RouteState
 from ui.counter_ui import apply_counter_panel_connected, apply_volt_check, battery_cell_text
+from ui.page_indices import PAGE_INVENTORY
 from ui.paths import APP_DIR, DATA_DIR, LAUNCH_HINT
 from ui.setup_wizard import SetupWizard
 from ui.simple_mode import BUILD_LABEL, COMPACT_UI
@@ -144,6 +145,9 @@ class SetupControllerMixin:
             has_graph=road_router.has_graph(DATA_DIR),
             route_miles=float(self.state.route.get("miles", 0) or 0),
             field_report=r,
+            stops=self.state.stops or None,
+            data_dir=DATA_DIR,
+            route_graph_uncovered=bool(self.state.route.get("graph_uncovered")),
         )
 
     def _show_setup_checklist(self):
@@ -198,15 +202,7 @@ class SetupControllerMixin:
             self.lbl_route_summary.setText("")
             return
         summ = build_route_summary(self.state.stops, self.state.route)
-        from ui.simple_mode import COMPACT_UI
-        if COMPACT_UI:
-            miles = float(self.state.route.get("miles", 0.0) or 0)
-            on_graph = bool(self.state.route.get("graph"))
-            kind = "roads" if on_graph else "segments"
-            self.lbl_route_summary.setText(
-                f"{len(self.state.stops)} stops · {miles:.1f} mi · {kind} · {summ['text']}")
-        else:
-            self.lbl_route_summary.setText(summ["text"])
+        self.lbl_route_summary.setText(summ["text"])
 
     def _next_stop_distance_mi(self) -> str:
         if not self.state.stops:
@@ -324,6 +320,7 @@ class SetupControllerMixin:
             has_stops=bool(self.state.stops),
             route_miles=float(self.state.route.get("miles", 0) or 0),
             graph_loaded=road_router.has_graph(DATA_DIR),
+            route_graph_uncovered=bool(self.state.route.get("graph_uncovered")),
         )
         if gate["blockers"]:
             body = "\n".join(f"• {b}" for b in gate["blockers"])
@@ -541,7 +538,7 @@ class SetupControllerMixin:
     def _refresh_counter_inventory(self) -> None:
         if not hasattr(self, "table_counter_inventory"):
             return
-        if self.pages.currentIndex() != 0:
+        if self.pages.currentIndex() != PAGE_INVENTORY:
             return
         rows = counter_inventory.build_rows(self.state.stops)
         summary = counter_inventory.inventory_summary(self.state.stops)
@@ -575,7 +572,7 @@ class SetupControllerMixin:
         if not rec:
             return
         counter_inventory.sync_from_shift(self.state.stops)
-        if self.pages.currentIndex() == 0 and hasattr(self, "lbl_inventory_live"):
+        if self.pages.currentIndex() == PAGE_INVENTORY and hasattr(self, "lbl_inventory_live"):
             apply_volt_check(
                 self.lbl_inventory_live,
                 rec.get("battery_volts"),
@@ -585,7 +582,7 @@ class SetupControllerMixin:
 
     def _counter_inventory_shift(self) -> None:
         counter_inventory.sync_from_shift(self.state.stops)
-        if self.pages.currentIndex() == 0:
+        if self.pages.currentIndex() == PAGE_INVENTORY:
             self._refresh_counter_inventory()
 
     def _update_counter_volts(self, res: dict | None) -> None:

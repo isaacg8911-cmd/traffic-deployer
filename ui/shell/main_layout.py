@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import os
+
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -17,18 +19,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.pages import audit_page, install_page, pickup_page, route_page, setup_page
+import road_router
+from ui.page_indices import NAV_PAGE_COUNT
+from ui.pages import audit_page, install_page, inventory_page, pickup_page, route_page, setup_page
+from ui.paths import DATA_DIR
 from ui.simple_mode import FIELD_NAV_INDICES, FIELD_SHELL
 from version import APP_NAME, APP_TAGLINE
 
 
 class ShellLayoutMixin:
     def _apply_field_nav_shell(self) -> None:
-        """Hide Setup/Audit in nav when offline field shell is active."""
+        """Hide Setup in nav when offline field shell is active."""
         if not FIELD_SHELL:
             return
         on_field = bool(self.state.offline_mode)
-        for i in range(5):
+        for i in range(NAV_PAGE_COUNT):
             btn = getattr(self, f"_navbtn_{i}", None)
             if btn is None:
                 continue
@@ -38,6 +43,92 @@ class ShellLayoutMixin:
                 btn.setVisible(True)
         if on_field and self.pages.currentIndex() not in FIELD_NAV_INDICES:
             self._go_page(1)
+        self._apply_field_desk_chrome()
+
+    def _apply_field_desk_chrome(self) -> None:
+        """Hide desk-only controls on the truck and trim home setup on work laptops."""
+        on_field = bool(self.state.offline_mode)
+        wl = bool(getattr(self, "_work_laptop", False))
+
+        about = getattr(self, "btn_about", None)
+        if about is not None:
+            about.setVisible(not on_field and not wl)
+
+        has_map = os.path.isfile(os.path.join(DATA_DIR, "california.pmtiles"))
+        has_graph = road_router.has_graph(DATA_DIR)
+
+        if hasattr(self, "btn_download_basemap"):
+            self.btn_download_basemap.setVisible(not has_map and not on_field)
+        if hasattr(self, "btn_download_roads"):
+            self.btn_download_roads.setVisible(not has_graph and not on_field)
+        if hasattr(self, "btn_test_wifi"):
+            self.btn_test_wifi.setVisible(not on_field and not wl)
+        for attr in ("btn_start_fresh", "btn_clear_shift"):
+            w = getattr(self, attr, None)
+            if w is not None:
+                w.setVisible(not on_field and not wl)
+
+    def _init_map_load_overlay(self) -> None:
+        mf = getattr(self, "_map_frame", None)
+        if mf is None:
+            return
+        self._map_load_overlay = QFrame(mf)
+        self._map_load_overlay.setObjectName("mapLoadOverlay")
+        lay = QVBoxLayout(self._map_load_overlay)
+        lay.setContentsMargins(24, 24, 24, 24)
+        self.lbl_map_load_title = QLabel("Loading offline map…")
+        self.lbl_map_load_title.setObjectName("mapLoadTitle")
+        self.lbl_map_load_title.setAlignment(Qt.AlignCenter)
+        self.lbl_map_load_detail = QLabel("")
+        self.lbl_map_load_detail.setObjectName("mapLoadDetail")
+        self.lbl_map_load_detail.setAlignment(Qt.AlignCenter)
+        self.lbl_map_load_detail.setWordWrap(True)
+        lay.addStretch(1)
+        lay.addWidget(self.lbl_map_load_title)
+        lay.addSpacing(8)
+        lay.addWidget(self.lbl_map_load_detail)
+        lay.addStretch(1)
+        self._map_load_seconds = 0
+        self._map_load_timer = QTimer(self)
+        self._map_load_timer.timeout.connect(self._tick_map_load_overlay)
+        self._sync_map_load_overlay_geometry()
+
+    def _sync_map_load_overlay_geometry(self) -> None:
+        if not hasattr(self, "_map_load_overlay"):
+            return
+        mf = getattr(self, "_map_frame", None)
+        if mf is not None:
+            self._map_load_overlay.setGeometry(mf.rect())
+
+    def _show_map_load_overlay(self) -> None:
+        if not hasattr(self, "_map_load_overlay"):
+            return
+        if getattr(self, "_map_js_ready", False):
+            return
+        self._map_load_seconds = 0
+        self._tick_map_load_overlay()
+        self._sync_map_load_overlay_geometry()
+        self._map_load_overlay.show()
+        self._map_load_overlay.raise_()
+        self._map_load_timer.start(1000)
+
+    def _tick_map_load_overlay(self) -> None:
+        if not hasattr(self, "lbl_map_load_detail"):
+            return
+        self._map_load_seconds += 1
+        if getattr(self, "_work_laptop", False):
+            self.lbl_map_load_detail.setText(
+                "First open on a 4 GB work laptop can take 3–5 minutes.\n"
+                "Stay plugged in and leave this window open.\n\n"
+                f"Elapsed: {self._map_load_seconds}s")
+        else:
+            self.lbl_map_load_detail.setText(f"Elapsed: {self._map_load_seconds}s")
+
+    def _hide_map_load_overlay(self) -> None:
+        if hasattr(self, "_map_load_timer"):
+            self._map_load_timer.stop()
+        if hasattr(self, "_map_load_overlay"):
+            self._map_load_overlay.hide()
 
     def _build_ui(self):
         central = QWidget()
@@ -67,7 +158,7 @@ class ShellLayoutMixin:
         nav_lay = QVBoxLayout(nav)
         nav_lay.setContentsMargins(6, 12, 6, 12)
         nav_lay.setSpacing(4)
-        self._nav_labels = ("Setup", "Route", "Install", "Pickup", "Audit")
+        self._nav_labels = ("Setup", "Route", "Install", "Pickup", "Audit", "Fleet")
         for idx, label in enumerate(self._nav_labels):
             b = QPushButton(label)
             b.setObjectName("navBtn")
@@ -90,6 +181,7 @@ class ShellLayoutMixin:
         self.pages.addWidget(self._wrap_scroll(install_page.build_install_page(self)))  # 2
         self.pages.addWidget(self._wrap_scroll(pickup_page.build_pickup_page(self)))     # 3
         self.pages.addWidget(self._wrap_scroll(audit_page.build_audit_page(self)))      # 4
+        self.pages.addWidget(self._wrap_scroll(inventory_page.build_inventory_page(self)))  # 5
         pages_lay.addWidget(self.pages)
         side_lay.addWidget(pages_col, 1)
 
@@ -155,6 +247,7 @@ class ShellLayoutMixin:
         super().resizeEvent(event)
         if hasattr(self, "_side_panel"):
             self._side_panel.raise_()
+        self._sync_map_load_overlay_geometry()
 
     def _placeholder(self) -> QWidget:
         w = QWidget()

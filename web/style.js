@@ -19,7 +19,7 @@ function buildStyle(pmtilesUrl, baseUrl) {
   };
 
   var namedRoad = ['all', ['has', 'name'], ['!=', ['get', 'name'], '']];
-  var MAX_Z = 15;
+  var MAX_Z = 16;
 
   var labelLayout = {
     'symbol-placement': 'line',
@@ -30,7 +30,7 @@ function buildStyle(pmtilesUrl, baseUrl) {
     'text-rotation-alignment': 'map',
     'text-pitch-alignment': 'viewport',
     'symbol-spacing': 160,
-    'text-optional': false
+    'text-optional': true
   };
 
   return {
@@ -65,28 +65,28 @@ function buildStyle(pmtilesUrl, baseUrl) {
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': c.road,
-          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 12, 1.4, 14, 3.0, 15, 4.5]
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 12, 1.4, 14, 3.0, 15, 4.5, 16, 5.5]
         } },
       { id: 'roads-major', type: 'line', source: 'ca', 'source-layer': 'roads',
         filter: ['in', ['get', 'kind'], ['literal', ['major_road', 'medium_road']]],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': c.major,
-          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.0, 12, 2.4, 14, 5.5, 15, 7.5]
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.0, 12, 2.4, 14, 5.5, 15, 7.5, 16, 9.0]
         } },
       { id: 'hwy-case', type: 'line', source: 'ca', 'source-layer': 'roads',
         filter: ['==', ['get', 'kind'], 'highway'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': c.hwyCase,
-          'line-width': ['interpolate', ['linear'], ['zoom'], 6, 1.5, 12, 5.0, 14, 9.0, 15, 12]
+          'line-width': ['interpolate', ['linear'], ['zoom'], 6, 1.5, 12, 5.0, 14, 9.0, 15, 12, 16, 14]
         } },
       { id: 'hwy', type: 'line', source: 'ca', 'source-layer': 'roads',
         filter: ['==', ['get', 'kind'], 'highway'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': c.hwy,
-          'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.8, 12, 3.0, 14, 6.5, 15, 9]
+          'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.8, 12, 3.0, 14, 6.5, 15, 9, 16, 10.5]
         } },
 
       { id: 'road-label-hwy', type: 'symbol', source: 'ca', 'source-layer': 'roads',
@@ -115,12 +115,12 @@ function buildStyle(pmtilesUrl, baseUrl) {
           'text-halo-width': 2
         } },
       { id: 'road-label-local', type: 'symbol', source: 'ca', 'source-layer': 'roads',
-        minzoom: 11, maxzoom: 14,
+        minzoom: 11, maxzoom: MAX_Z + 1,
         filter: ['all', namedRoad,
           ['!', ['in', ['get', 'kind'], ['literal', ['highway', 'major_road', 'medium_road']]]]],
         layout: Object.assign({}, labelLayout, {
-          'text-size': ['interpolate', ['linear'], ['zoom'], 11, 10, 12, 11, 13, 12, 14, 13],
-          'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 11, 180, 13, 110, 14, 90]
+          'text-size': ['interpolate', ['linear'], ['zoom'], 11, 10, 12, 11, 13, 12, 14, 13, 16, 14],
+          'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 11, 180, 13, 110, 14, 90, 16, 70]
         }),
         paint: {
           'text-color': c.label,

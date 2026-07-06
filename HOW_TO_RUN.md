@@ -67,7 +67,7 @@ Audit tab: **shift summary** + export (includes **PicoCount** columns in Excel).
    Click a numbered stop to open it.
 3. **Map** — standard **Protomaps light** colors (not tied to Sunny/Cloudy/Night panel
    themes). Zoom to neighborhood level for street names. If labels are still sparse,
-   re-run `python setup_maps.py` once (wifi) to refresh tiles at zoom 15 + fonts.
+   re-run `python setup_maps.py` once (wifi) to refresh tiles at zoom 16 + fonts.
 4. **START DRIVING** - turn-by-turn banner + offline voice (female Windows guide). Light blue line to the next stop only.
 5. **Install tab** - per stop: **PicoCount 2500 (USB)** — **Connect**, **Read serial**
    (auto-fills Serial # when empty), **Clear & set ID** (clears counter + sets Unit ID
@@ -139,6 +139,28 @@ label fonts.
 Double-click **`SMOKE.bat`** at the project root (uses the project `.venv`).
 
 Full proof chain (smoke + demo + preflight + golden routes + benchmark):
+
+## Cursor / Forge (building this app)
+
+MindLink has two ways to open Cursor for code work:
+
+| How you open Cursor | What it is | When to use |
+|---------------------|------------|-------------|
+| **This folder only** — `C:\MindLink AI\projects\traffic-deployer` | **App workspace** | Normal daily Forge work on Traffic Deployer |
+| **MindLink OS** — `mindlink-os.code-workspace` or `director\02_forge\Open Forge.bat` | **OS workspace** (platform only) | Rules, `mindlink/`, scripts, memory — **not** this app |
+
+**Recommended:** open **this app folder** in Cursor (or `-Lane App -Slug traffic-deployer`), then new Agent chat → `DEMAND: …`. Never multi-root OS + app in one workspace.
+
+On workspace open, `.cursor/hooks.json` writes a ground packet to  
+`C:\MindLink AI\logs\system\forge_ground_latest.md` (PRIOR CONTEXT + KEY FILES).  
+Read that file first in new chats, or run from OS repo:
+
+```powershell
+cd "C:\MindLink AI"
+python scripts\forge_ground.py --project traffic-deployer --goal "DEMAND: your task"
+```
+
+Ship logs go to **`logs/cursor/forge/YYYY-MM-DD.md`** in this folder (Mind ingests them overnight).
 
 ```powershell
 PROVE.bat

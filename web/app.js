@@ -15,7 +15,7 @@
 
   var origin = window.location.origin;
   var pmtilesUrl = origin + '/data/california.pmtiles';
-  var MAX_ZOOM = 15;
+  var MAX_ZOOM = 16;
   var FOLLOW_ZOOM = 13;
   var FOLLOW_ZOOM_MIN = 8;
 

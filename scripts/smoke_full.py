@@ -255,7 +255,7 @@ def test_web_assets():
     check("local street labels to max zoom", "road-label-local" in style and "maxzoom: MAX_Z + 1" in style)
     check("lean labels optional", "text-optional': true" in style)
     check("no address clutter", "address-labels" not in style)
-    check("follow street zoom", "FOLLOW_ZOOM = 13" in appjs)
+    check("max map zoom 16", "MAX_ZOOM = 16" in appjs and "MAX_Z = 16" in style)
     check("gps bridge throttle", "GPS_TICK_MS" in open(
         os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read())
     sm_src = open(os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read()

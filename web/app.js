@@ -10,7 +10,9 @@
 (function () {
   'use strict';
 
-  var protocol = new pmtiles.Protocol();
+  // errorOnMissingTile: missing z>N tiles must error so MapLibre overzooms z15
+  // instead of painting an empty MVT (map whitens at max zoom).
+  var protocol = new pmtiles.Protocol({ errorOnMissingTile: true });
   maplibregl.addProtocol('pmtiles', protocol.tile);
 
   var origin = window.location.origin;

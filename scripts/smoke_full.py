@@ -256,6 +256,8 @@ def test_web_assets():
     check("lean labels optional", "text-optional': true" in style)
     check("no address clutter", "address-labels" not in style)
     check("max map zoom 16", "MAX_ZOOM = 16" in appjs and "MAX_Z = 16" in style)
+    check("tile source max matches pmtiles", "TILE_MAX_Z = 15" in style)
+    check("pmtiles missing-tile overzoom", "errorOnMissingTile" in appjs)
     check("gps bridge throttle", "GPS_TICK_MS" in open(
         os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read())
     sm_src = open(os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read()

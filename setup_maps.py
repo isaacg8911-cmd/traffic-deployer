@@ -37,7 +37,7 @@ CA_MAXZOOM = 16  # building footprints + house numbers; each extra zoom ~doubles
 VENDOR_FILES = {
     "maplibre-gl.js": "https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js",
     "maplibre-gl.css": "https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css",
-    "pmtiles.js": "https://unpkg.com/pmtiles@3/dist/pmtiles.js",
+    "pmtiles.js": "https://unpkg.com/pmtiles@4.1.0/dist/pmtiles.js",
 }
 
 # Offline street labels (OSM names in tiles need local glyph PBFs).

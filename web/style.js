@@ -19,6 +19,9 @@ function buildStyle(pmtilesUrl, baseUrl) {
   };
 
   var namedRoad = ['all', ['has', 'name'], ['!=', ['get', 'name'], '']];
+  // Tile pyramid max (PMTiles header). Display can go to MAX_Z via overzoom.
+  // Re-run setup_maps.py (CA_MAXZOOM=16) then set TILE_MAX_Z = 16 for native z16.
+  var TILE_MAX_Z = 15;
   var MAX_Z = 16;
 
   var labelLayout = {
@@ -40,7 +43,7 @@ function buildStyle(pmtilesUrl, baseUrl) {
       ca: {
         type: 'vector',
         url: 'pmtiles://' + pmtilesUrl,
-        maxzoom: MAX_Z,
+        maxzoom: TILE_MAX_Z,
         attribution: '(c) OpenStreetMap contributors, Protomaps'
       }
     },

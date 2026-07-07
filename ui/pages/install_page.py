@@ -17,23 +17,19 @@ from PySide6.QtWidgets import (
 
 from ui.counter_ui import apply_counter_status
 from ui.paths import DIRECTIONS
-from ui.simple_mode import COMPACT_UI, COMPACT_PAD
-from ui.widgets import section_group
+from ui.simple_mode import COMPACT_UI
+from ui.spacing import apply_card_layout, apply_grid
+from ui.widgets import button_row, numbered_section, page_column, section_group, section_heading
 
 
 def build_install_page(win) -> QWidget:
-    w = QWidget()
+    w, v = page_column()
     w.setObjectName("installPage")
-    v = QVBoxLayout(w)
-    pad = COMPACT_PAD if COMPACT_UI else 12
-    v.setContentsMargins(pad, pad, pad, pad)
-    v.setSpacing(6 if COMPACT_UI else 10)
 
     header = QFrame()
     header.setObjectName("installHeaderCompact" if COMPACT_UI else "installHeader")
     hv = QVBoxLayout(header)
-    hv.setContentsMargins(10, 8, 10, 8 if COMPACT_UI else 12)
-    hv.setSpacing(2)
+    apply_card_layout(hv)
     win.lbl_install_title = QLabel("No stop selected.")
     win.lbl_install_title.setObjectName("installTitle")
     win.lbl_install_title.setWordWrap(True)
@@ -61,19 +57,21 @@ def build_install_page(win) -> QWidget:
     hv.addWidget(win.lbl_street_warn)
     v.addWidget(header)
 
-    sec_compass = section_group("Compass", v)
-    if not COMPACT_UI:
+    if COMPACT_UI:
+        win.sec_compass = None
+        win.lbl_compass_sub = QLabel("")
+        win.lbl_direction_hint = QLabel("")
+    else:
+        sec_compass = section_group("Compass", v)
         win.lbl_compass = QLabel("Waiting for GPS heading…")
         win.lbl_compass.setObjectName("installCompass")
         sec_compass.addWidget(win.lbl_compass)
-    win.lbl_compass_sub = QLabel("")
-    win.lbl_compass_sub.setObjectName("hint")
-    if not COMPACT_UI:
+        win.lbl_compass_sub = QLabel("")
+        win.lbl_compass_sub.setObjectName("hint")
         win.lbl_compass_sub.setWordWrap(True)
         sec_compass.addWidget(win.lbl_compass_sub)
-    win.lbl_direction_hint = QLabel("")
-    win.lbl_direction_hint.setObjectName("hint")
-    if not COMPACT_UI:
+        win.lbl_direction_hint = QLabel("")
+        win.lbl_direction_hint.setObjectName("hint")
         win.lbl_direction_hint.setWordWrap(True)
         sec_compass.addWidget(win.lbl_direction_hint)
         row_comp = QHBoxLayout()
@@ -82,12 +80,13 @@ def build_install_page(win) -> QWidget:
         b_comp_dir.clicked.connect(win._set_dir_from_compass)
         row_comp.addWidget(b_comp_dir, 1)
         sec_compass.addLayout(row_comp)
-    elif COMPACT_UI:
-        win.sec_compass = sec_compass.parentWidget()
-        win.sec_compass.hide()
 
-    sec_counter = section_group("PicoCount", v, object_name="counterPanel")
-    win.counter_panel = sec_counter.parentWidget()
+    if COMPACT_UI:
+        sec_counter, _ = numbered_section(1, "PicoCount", v)
+        win.counter_panel = None
+    else:
+        sec_counter = section_group("PicoCount", v, object_name="counterPanel")
+        win.counter_panel = sec_counter.parentWidget()
     win.lbl_counter_connected = QLabel("● CONNECTED")
     win.lbl_counter_connected.setObjectName("counterConnectedPill")
     win.lbl_counter_connected.hide()
@@ -122,24 +121,26 @@ def build_install_page(win) -> QWidget:
     win.lbl_counter_data.setObjectName("counterData")
     win.lbl_counter_data.setWordWrap(True)
     sec_counter.addWidget(win.lbl_counter_data)
-    row_cnt = QHBoxLayout()
     win.btn_counter_autoname = QPushButton("Auto-name")
     win.btn_counter_autoname.setObjectName("secondary")
     win.btn_counter_autoname.setToolTip("Unit ID only (Site# + n/e + c1b)")
     win.btn_counter_autoname.clicked.connect(win._counter_autoname)
-    if not COMPACT_UI:
-        row_cnt.addWidget(win.btn_counter_autoname)
     win.btn_counter_clear = QPushButton("Clear counter")
     win.btn_counter_clear.setObjectName("primary")
     win.btn_counter_clear.setToolTip("Zero memory + set Unit ID for this site")
     win.btn_counter_clear.clicked.connect(win._counter_clear_configure)
-    row_cnt.addWidget(win.btn_counter_clear)
-    sec_counter.addLayout(row_cnt)
+    if not COMPACT_UI:
+        button_row(sec_counter, win.btn_counter_autoname, win.btn_counter_clear)
+    else:
+        button_row(sec_counter, win.btn_counter_clear)
     win._counter_list_ports()
     apply_counter_status(
         win.lbl_counter_status, "idle", "Plug USB cable → Refresh")
 
-    sec_form = section_group("Site data", v)
+    if COMPACT_UI:
+        sec_form, _ = numbered_section(2, "Site data", v)
+    else:
+        sec_form = section_group("Site data", v)
     win.txt_street = QLineEdit()
     win.txt_street.setPlaceholderText("Street name")
     win.txt_street.textChanged.connect(win._schedule_autosave)
@@ -170,8 +171,7 @@ def build_install_page(win) -> QWidget:
     # GPS / pin actions — 2-column grid so labels never truncate in the
     # narrow field panel (was a single cramped row: "ab G", "op p", "save").
     grid_grab = QGridLayout()
-    grid_grab.setHorizontalSpacing(6)
-    grid_grab.setVerticalSpacing(6)
+    apply_grid(grid_grab)
     grid_grab.setColumnStretch(0, 1)
     grid_grab.setColumnStretch(1, 1)
 

@@ -31,6 +31,23 @@ QGroupBox#sectionCard, QGroupBox#sectionCardCompact {
     border: 1px solid #c5d0de; border-radius: 10px;
     margin-top: 10px; padding-top: 16px; background: #ffffff;
 }
+QGroupBox#sectionFlat {
+    font-size: 12px; font-weight: 700; color: #334155;
+    border: none; border-top: 1px solid #cbd5e1;
+    border-radius: 0; margin-top: 4px; padding-top: 8px;
+    background: transparent;
+}
+QGroupBox#sectionFlat::title {
+    subcontrol-origin: margin; left: 0; padding: 0 4px 0 0;
+    color: #334155;
+}
+#sectionHeading, QLabel#stepHeader {
+    font-size: 12px; font-weight: 800; color: #0f2744;
+    padding: 6px 0 2px 0;
+}
+QLabel#stepHeaderDone { color: #15803d; }
+QLabel#stepHeaderCurrent { color: #c45f14; }
+QLabel#stepHeaderPending { color: #64748b; font-weight: 700; }
 QGroupBox#sectionCardCompact {
     border-color: #94a3b8; border-radius: 8px;
     margin-top: 8px; padding-top: 14px;
@@ -43,10 +60,12 @@ QGroupBox#sectionCard::title, QGroupBox#sectionCardCompact::title {
     background: #ffffff; border: 1px solid #c5d0de; border-radius: 10px;
 }
 #statCardCompact { border-radius: 8px; }
-#installHeader, #installHeaderCompact {
+#installHeader {
     background: #ffffff; border: 1px solid #c5d0de; border-radius: 12px;
 }
-#installHeaderCompact { border-radius: 10px; }
+#installHeaderCompact {
+    background: transparent; border: none; border-radius: 0;
+}
 #tabContextLine {
     font-size: 13px; font-weight: 700; color: #0f2744;
     padding: 2px 0;
@@ -175,8 +194,8 @@ QLabel#counterStatus[statusLevel="busy"] {
 }
 QLabel#shiftSummary {
     font-size: 13px; font-weight: 700; color: #0f2744;
-    background: #ffffff; border: 1px solid #c5d0de; border-radius: 10px;
-    padding: 12px 14px;
+    background: transparent; border: none; border-radius: 0;
+    padding: 4px 0;
 }
 #pickupCounterCard {
     background: #f8fbff; border: 1px solid #c5d0de; border-radius: 10px;
@@ -257,26 +276,26 @@ QLabel[role="h"] {
 }
 QLabel[role="title"] { font-size: 17px; font-weight: 800; color: #0f2744; }
 QPushButton {
-    background: #ffffff; border: 1px solid #94a3b8; border-radius: 6px;
-    padding: 6px 10px; font-weight: 600; color: #0f2744; font-size: 12px;
-    min-height: 30px;
+    background: #ffffff; border: 1px solid #94a3b8; border-radius: 4px;
+    padding: 4px 8px; font-weight: 600; color: #0f2744; font-size: 12px;
+    min-height: 26px;
 }
 QPushButton:hover { background: #f1f5f9; border-color: #64748b; }
 QPushButton:pressed { background: #e2e8f0; }
 QPushButton:disabled { background: #e8edf3; color: #94a3b8; }
 QPushButton#primary {
     background: #c45f14; color: #fff; border: none;
-    font-weight: 800; padding: 8px 10px; font-size: 13px;
+    font-weight: 700; padding: 4px 10px; font-size: 12px;
 }
 QPushButton#primary:hover { background: #a04f10; }
 QPushButton#go {
     background: #0d5c4b; color: #fff; border: none;
-    font-weight: 800; padding: 8px 10px; font-size: 13px;
+    font-weight: 700; padding: 4px 10px; font-size: 12px;
 }
 QPushButton#go:hover { background: #0a4a3d; }
 QPushButton#stop {
     background: #b42318; color: #fff; border: none;
-    font-weight: 800; padding: 14px; font-size: 15px;
+    font-weight: 700; padding: 6px 10px; font-size: 13px;
 }
 QPushButton#stop:hover { background: #912018; }
 QPushButton#fieldPrimary {

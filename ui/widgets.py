@@ -82,6 +82,39 @@ def button_stack(parent_layout: QVBoxLayout, *widgets: QWidget) -> None:
         parent_layout.addWidget(widget)
 
 
+def section_heading(
+    title: str,
+    parent_layout: QVBoxLayout,
+    *,
+    step: int | None = None,
+    object_name: str = "sectionHeading",
+) -> QLabel:
+    """Bold flat section title — no card chrome."""
+    text = f"{step}. {title}" if step is not None else title
+    lbl = QLabel(text)
+    lbl.setObjectName(object_name)
+    parent_layout.addWidget(lbl)
+    return lbl
+
+
+def numbered_section(
+    step: int,
+    title: str,
+    parent_layout: QVBoxLayout,
+    *,
+    step_id: str | None = None,
+) -> tuple[QVBoxLayout, QLabel]:
+    """Numbered workflow step — flat header + content column."""
+    header = section_heading(title, parent_layout, step=step, object_name="stepHeader")
+    if step_id:
+        header.setProperty("stepId", step_id)
+    body = QVBoxLayout()
+    body.setContentsMargins(0, 0, 0, 0)
+    body.setSpacing(ROW_GAP)
+    parent_layout.addLayout(body)
+    return body, header
+
+
 def section_group(
     title: str,
     parent_layout: QVBoxLayout,
@@ -90,10 +123,15 @@ def section_group(
     object_name: str | None = None,
     compact: bool | None = None,
 ) -> QVBoxLayout:
-    """Card-style group; returns inner layout for section contents."""
+    """Section group; compact mode uses flat divider style."""
     tight = COMPACT_UI if compact is None else compact
     box = QGroupBox(title)
-    box.setObjectName(object_name or ("sectionCardCompact" if tight else "sectionCard"))
+    if object_name:
+        box.setObjectName(object_name)
+    elif tight:
+        box.setObjectName("sectionFlat")
+    else:
+        box.setObjectName("sectionCard")
     box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
     inner = QVBoxLayout(box)
     apply_section_layout(inner)

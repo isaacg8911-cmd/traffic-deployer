@@ -7,7 +7,7 @@ SIMPLE_MODE = True
 COMPACT_UI = SIMPLE_MODE
 COMPACT_PAD = 8
 
-BUILD_LABEL = "BUILD ROUTE" if SIMPLE_MODE else "PLAN ROUTE — pick stop order"
+BUILD_LABEL = "Build" if SIMPLE_MODE else "PLAN ROUTE — pick stop order"
 
 # Field shell: after READY FOR OFFLINE, hide Setup (home-only tools).
 FIELD_SHELL = SIMPLE_MODE

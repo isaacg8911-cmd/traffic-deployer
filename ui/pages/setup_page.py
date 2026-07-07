@@ -15,7 +15,14 @@ from PySide6.QtWidgets import (
 
 from core.hardware_profile import is_work_laptop
 from ui.simple_mode import BUILD_LABEL, COMPACT_UI, SIMPLE_MODE
-from ui.widgets import WorkflowStrip, button_row, button_stack, page_column, section_group
+from ui.widgets import (
+    WorkflowStrip,
+    button_row,
+    numbered_section,
+    page_column,
+    section_group,
+    section_heading,
+)
 
 
 def build_setup_page(win) -> QWidget:
@@ -26,12 +33,14 @@ def build_setup_page(win) -> QWidget:
         v.addWidget(win.workflow_strip)
     else:
         win.workflow_strip = None
+        win._setup_step_headers: dict[str, QLabel] = {}
 
-    sec_profile = section_group("Profile", v)
+    # --- Profile (desk tools, no step number) ---
+    section_heading("Profile", v)
     win.txt_profile = QLineEdit(win.state.profile)
     win.txt_profile.setPlaceholderText("DEFAULT, WEEK9…")
     win.txt_profile.returnPressed.connect(lambda: win._switch_profile())
-    sec_profile.addWidget(win.txt_profile)
+    v.addWidget(win.txt_profile)
     b_prof = QPushButton("Load")
     b_prof.setObjectName("secondary")
     b_prof.clicked.connect(lambda: win._switch_profile())
@@ -39,44 +48,48 @@ def build_setup_page(win) -> QWidget:
     b_save_as.setObjectName("secondary")
     b_save_as.setToolTip("Save current shift under a new profile name")
     b_save_as.clicked.connect(win._save_profile_as)
-    button_row(sec_profile, b_prof, b_save_as)
-    b_save_now = QPushButton("Save progress")
+    b_save_now = QPushButton("Save")
     b_save_now.setObjectName("secondary")
+    b_save_now.setToolTip("Save progress now")
     b_save_now.clicked.connect(win._save_shift_now)
-    sec_profile.addWidget(b_save_now)
-    b_clear_shift = QPushButton("Clear shift data…")
+    button_row(v, b_prof, b_save_as, b_save_now)
+    b_clear_shift = QPushButton("Clear shift")
     b_clear_shift.setObjectName("secondary")
     b_clear_shift.setToolTip(
         "Remove sites, route, and install/pickup progress for this profile. "
         "Excel/.EST file lists stay unless you clear them below.")
     b_clear_shift.clicked.connect(win._reset_route)
     win.btn_clear_shift = b_clear_shift
-    b_start_fresh = QPushButton("Start fresh…")
+    b_start_fresh = QPushButton("Start fresh")
     b_start_fresh.setObjectName("secondary")
     b_start_fresh.setToolTip("Clear shift data and Excel/.EST file lists — empty map on next launch.")
     b_start_fresh.clicked.connect(win._start_fresh_profile)
     win.btn_start_fresh = b_start_fresh
-    button_row(sec_profile, b_clear_shift, b_start_fresh)
-    win.lbl_profile_hint = QLabel(
-        "Sites on the map at launch = saved shift for this profile (e.g. DEFAULT). "
-        "Use Clear shift data to wipe pins and route.")
-    win.lbl_profile_hint.setObjectName("hint")
-    win.lbl_profile_hint.setWordWrap(True)
-    sec_profile.addWidget(win.lbl_profile_hint)
+    button_row(v, b_clear_shift, b_start_fresh)
     if not COMPACT_UI:
+        win.lbl_profile_hint = QLabel(
+            "Sites on the map at launch = saved shift for this profile (e.g. DEFAULT). "
+            "Use Clear shift data to wipe pins and route.")
+        win.lbl_profile_hint.setObjectName("hint")
+        win.lbl_profile_hint.setWordWrap(True)
+        v.addWidget(win.lbl_profile_hint)
         win.lbl_save_hint = QLabel("Auto-saves every ~45s. Re-build keeps install data.")
         win.lbl_save_hint.setObjectName("hint")
         win.lbl_save_hint.setWordWrap(True)
-        sec_profile.addWidget(win.lbl_save_hint)
+        v.addWidget(win.lbl_save_hint)
+    else:
+        win.lbl_profile_hint = QLabel("")
+        win.lbl_save_hint = QLabel("")
 
-    sec_ready = section_group("Ready", v)
+    # --- Ready status ---
+    section_heading("Ready", v)
     win.lbl_field_score = QLabel("")
     win.lbl_field_score.setObjectName("tabContextLine")
-    sec_ready.addWidget(win.lbl_field_score)
+    v.addWidget(win.lbl_field_score)
     win.lbl_field_checks = QLabel("")
     win.lbl_field_checks.setObjectName("fieldChecks")
     win.lbl_field_checks.setWordWrap(True)
-    sec_ready.addWidget(win.lbl_field_checks)
+    v.addWidget(win.lbl_field_checks)
     b_refresh_ready = QPushButton("Refresh")
     b_refresh_ready.setObjectName("secondary")
     b_refresh_ready.clicked.connect(win._refresh_field_ready)
@@ -96,24 +109,29 @@ def build_setup_page(win) -> QWidget:
         b_wiz.setObjectName("secondary")
         b_wiz.clicked.connect(win._show_setup_wizard)
         row_ready_btns.extend([b_smoke, b_checklist, b_wiz])
-    button_row(sec_ready, *row_ready_btns)
+    button_row(v, *row_ready_btns)
 
-    sec_origin = section_group("Start point", v)
+    # --- 1. Start point ---
+    if SIMPLE_MODE:
+        sec_origin, hdr_start = numbered_section(1, "Start", v, step_id="start")
+        win._setup_step_headers["start"] = hdr_start
+    else:
+        sec_origin = section_group("Start point", v)
     win.lbl_origin = QLabel("")
     win.lbl_origin.setWordWrap(True)
     sec_origin.addWidget(win.lbl_origin)
     b_usb = QPushButton("USB GPS")
     b_usb.clicked.connect(win._origin_from_gps)
-    b_default = QPushButton("Save as my start")
+    b_default = QPushButton("Save start")
     b_default.setObjectName("primary")
     b_default.setToolTip(
         "Save the lat/lon below as your start (use Search first to fill coordinates).")
     b_default.clicked.connect(win._save_default_home)
-    win.btn_use_default = QPushButton("Use saved start")
+    win.btn_use_default = QPushButton("Use saved")
     win.btn_use_default.setObjectName("secondary")
     win.btn_use_default.setToolTip("Restore your last saved home / start coordinates")
     win.btn_use_default.clicked.connect(win._load_default_home)
-    button_stack(sec_origin, b_usb, b_default, win.btn_use_default)
+    button_row(sec_origin, b_usb, b_default, win.btn_use_default)
     win.txt_address = QLineEdit()
     win.txt_address.setPlaceholderText("Address (online search)")
     win.txt_address.returnPressed.connect(win._origin_from_address)
@@ -121,11 +139,11 @@ def build_setup_page(win) -> QWidget:
     b_addr = QPushButton("Search")
     b_addr.clicked.connect(win._origin_from_address)
     win.btn_address = b_addr
-    win.btn_saved_home = QPushButton("Use last address")
+    win.btn_saved_home = QPushButton("Last address")
     win.btn_saved_home.setObjectName("secondary")
     win.btn_saved_home.setToolTip("Restore the last address you searched and saved")
     win.btn_saved_home.clicked.connect(win._use_saved_home)
-    button_row(sec_origin, b_addr, win.btn_saved_home, stretch_last=True)
+    button_row(sec_origin, b_addr, win.btn_saved_home)
     if not COMPACT_UI:
         win.lbl_address_hint = QLabel("")
         win.lbl_address_hint.setObjectName("hint")
@@ -143,16 +161,25 @@ def build_setup_page(win) -> QWidget:
     win.spin_lon.setValue(win.state.home[1])
     b_coords = QPushButton("Save coords")
     b_coords.setObjectName("secondary")
-    b_coords.setToolTip("Save the lat/lon boxes as your start (same as Save as my start)")
+    b_coords.setToolTip("Save the lat/lon boxes as your start (same as Save start)")
     b_coords.clicked.connect(win._origin_from_coords)
     button_row(sec_origin, win.spin_lat, win.spin_lon, b_coords)
 
-    sec_files = section_group("Files", v)
+    # --- 2. Files ---
+    if SIMPLE_MODE:
+        sec_files, hdr_files = numbered_section(2, "Files", v, step_id="files")
+        win._setup_step_headers["files"] = hdr_files
+    else:
+        sec_files = section_group("Files", v)
     b_excel = QPushButton("Excel/CSV")
     b_excel.clicked.connect(win._pick_excel)
     b_est = QPushButton(".EST maps")
     b_est.clicked.connect(win._pick_est)
-    button_row(sec_files, b_excel, b_est)
+    b_clear = QPushButton("Clear lists")
+    b_clear.setObjectName("secondary")
+    b_clear.setToolTip("Remove Excel/.EST paths only — route and install data stay.")
+    b_clear.clicked.connect(win._clear_files)
+    button_row(sec_files, b_excel, b_est, b_clear)
     _list_h = 52 if is_work_laptop() else (40 if COMPACT_UI else 56)
     win.list_excel = QListWidget()
     win.list_excel.setMaximumHeight(_list_h)
@@ -160,17 +187,16 @@ def build_setup_page(win) -> QWidget:
     win.list_est = QListWidget()
     win.list_est.setMaximumHeight(_list_h + 4)
     sec_files.addWidget(win.list_est)
-    b_clear = QPushButton("Clear file lists")
-    b_clear.setObjectName("secondary")
-    b_clear.setToolTip("Remove Excel/.EST paths only — route and install data stay.")
-    b_clear.clicked.connect(win._clear_files)
-    sec_files.addWidget(b_clear)
 
-    sec_build = section_group("Road map & route", v)
-    b_basemap = QPushButton("Download California map")
+    # --- 3. Road map ---
+    if SIMPLE_MODE:
+        sec_build, hdr_roads = numbered_section(3, "Road map", v, step_id="roads")
+        win._setup_step_headers["roads"] = hdr_roads
+    else:
+        sec_build = section_group("Road map & route", v)
+    b_basemap = QPushButton("CA map")
     b_basemap.clicked.connect(win._download_basemap)
     win.btn_download_basemap = b_basemap
-    sec_build.addWidget(b_basemap)
     b_roads = QPushButton("Download roads")
     b_roads.clicked.connect(win._download_roads)
     win.btn_download_roads = b_roads
@@ -178,7 +204,7 @@ def build_setup_page(win) -> QWidget:
     b_import_roads.setObjectName("secondary")
     b_import_roads.clicked.connect(win._import_roads)
     win.btn_import_roads = b_import_roads
-    button_row(sec_build, b_roads, b_import_roads, stretch_last=True)
+    button_row(sec_build, b_basemap, b_roads, b_import_roads)
     if not COMPACT_UI:
         win.lbl_roads_hint = QLabel(
             "Work Wi‑Fi may block download — import road_graph.graphml from home PC.")
@@ -186,11 +212,22 @@ def build_setup_page(win) -> QWidget:
         win.lbl_roads_hint.setWordWrap(True)
         sec_build.addWidget(win.lbl_roads_hint)
     else:
-        win.lbl_roads_hint = QLabel("")
+        win.lbl_roads_hint = QLabel(
+            "Work Wi‑Fi may block road download — import road_graph.graphml from home PC.")
+        win.lbl_roads_hint.setObjectName("hint")
+        win.lbl_roads_hint.setWordWrap(True)
+        sec_build.addWidget(win.lbl_roads_hint)
+
+    # --- 4. Build route ---
+    if SIMPLE_MODE:
+        sec_route, hdr_build = numbered_section(4, "Build route", v, step_id="build")
+        win._setup_step_headers["build"] = hdr_build
+    else:
+        sec_route = sec_build
     win.btn_build = QPushButton(BUILD_LABEL)
     win.btn_build.setObjectName("primary")
     win.btn_build.clicked.connect(win._build_route_from_uploads)
-    sec_build.addWidget(win.btn_build)
+    button_row(sec_route, win.btn_build)
 
     if COMPACT_UI:
         win.combo_port = QComboBox()
@@ -198,12 +235,7 @@ def build_setup_page(win) -> QWidget:
         win.lbl_offline = QLabel("")
         win.lbl_offline.setObjectName("offlineHint")
         win.lbl_offline.setWordWrap(True)
-        sec_ready.addWidget(win.lbl_offline)
-        win.lbl_roads_hint = QLabel(
-            "Work Wi‑Fi may block road download — import road_graph.graphml from home PC.")
-        win.lbl_roads_hint.setObjectName("hint")
-        win.lbl_roads_hint.setWordWrap(True)
-        sec_build.addWidget(win.lbl_roads_hint)
+        v.addWidget(win.lbl_offline)
         win._refresh_ports()
     else:
         sec_gps = section_group("Before you leave", v)

@@ -23,6 +23,8 @@ from ui import workflow as setup_workflow
 from ui.page_indices import NAV_PAGE_COUNT, PAGE_INVENTORY
 from ui.paths import APP_DIR, DATA_DIR, IS_PORTABLE
 from ui.simple_mode import COMPACT_UI, FIELD_NAV_INDICES, FIELD_SHELL, HIDE_PANEL_THEMES, SIMPLE_MODE
+from ui.status_style import apply_status
+from ui.spacing import TOPBAR_CLUSTER_GAP, TOPBAR_PAD_H, TOPBAR_PAD_V
 from ui.threads import SmokeTestThread
 from version import APP_NAME, APP_VERSION, APP_TAGLINE
 
@@ -32,7 +34,7 @@ class ShellTopbarMixin:
         bar = QFrame()
         bar.setObjectName("topbar")
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(12, 6, 12, 6)
+        lay.setContentsMargins(TOPBAR_PAD_H, TOPBAR_PAD_V, TOPBAR_PAD_H, TOPBAR_PAD_V)
         brand_col = QVBoxLayout()
         brand_col.setSpacing(0)
         brand = QLabel(APP_NAME)
@@ -48,7 +50,7 @@ class ShellTopbarMixin:
         mode_wrap.setObjectName("modeBar")
         mode_lay = QHBoxLayout(mode_wrap)
         mode_lay.setContentsMargins(0, 0, 0, 0)
-        mode_lay.setSpacing(6)
+        mode_lay.setSpacing(TOPBAR_CLUSTER_GAP)
         self.lbl_mode_pill = QLabel("ONLINE")
         self.lbl_mode_pill.setObjectName("modePill")
         self.btn_mode_online = QPushButton("I'm online")
@@ -67,7 +69,7 @@ class ShellTopbarMixin:
         self._day_filter_wrap.setObjectName("dayFilterBar")
         day_lay = QHBoxLayout(self._day_filter_wrap)
         day_lay.setContentsMargins(0, 0, 0, 0)
-        day_lay.setSpacing(6)
+        day_lay.setSpacing(TOPBAR_CLUSTER_GAP)
         day_lbl = QLabel("Sites")
         day_lbl.setObjectName("dayFilterLabel")
         self.combo_day = QComboBox()
@@ -78,7 +80,7 @@ class ShellTopbarMixin:
         day_lay.addWidget(self.combo_day)
         self._day_filter_wrap.hide()
         lay.addWidget(self._day_filter_wrap)
-        lay.addSpacing(8)
+        lay.addSpacing(TOPBAR_CLUSTER_GAP)
         self.btn_drive_arrived = QPushButton("ARRIVED → Install")
         self.btn_drive_arrived.setObjectName("driveArrived")
         self.btn_drive_arrived.clicked.connect(self._drive_arrived_install)
@@ -89,7 +91,7 @@ class ShellTopbarMixin:
         self.btn_drive_end.clicked.connect(self._stop_drive)
         self.btn_drive_end.hide()
         lay.addWidget(self.btn_drive_end)
-        lay.addSpacing(8)
+        lay.addSpacing(TOPBAR_CLUSTER_GAP)
 
         b_about = QPushButton("About")
         b_about.setObjectName("aboutBtn")
@@ -117,7 +119,6 @@ class ShellTopbarMixin:
         from ui.simple_mode import COMPACT_UI
         if COMPACT_UI:
             self.brand_sub.show()
-            self.brand_sub.setStyleSheet("font-size:10px;font-weight:600;color:#94b8d9;")
         return bar
 
     def _show_about(self):
@@ -185,10 +186,8 @@ class ShellTopbarMixin:
             QTimer.singleShot(250, self._refresh_map_view)
 
     def _refresh_workflow_strip(self):
-        if SIMPLE_MODE or not getattr(self, "workflow_strip", None):
-            return
         miles = float(self.state.route.get("miles", 0) or 0)
-        self.workflow_strip.set_steps(setup_workflow.compute_workflow(
+        steps = setup_workflow.compute_workflow(
             home=tuple(self.state.home),
             default_home=self.state.default_home,
             excel_paths=self.excel_paths,
@@ -196,7 +195,26 @@ class ShellTopbarMixin:
             has_graph=road_router.has_graph(DATA_DIR),
             route_miles=miles,
             offline_mode=bool(self.state.offline_mode),
-        ))
+        )
+        if getattr(self, "workflow_strip", None):
+            self.workflow_strip.set_steps(steps)
+        headers = getattr(self, "_setup_step_headers", None)
+        if not headers:
+            return
+        step_nums = {"start": 1, "files": 2, "roads": 3, "build": 4}
+        labels = {"start": "Start", "files": "Files", "roads": "Road map", "build": "Build route"}
+        for step in steps:
+            sid = step["id"]
+            lbl = headers.get(sid)
+            if lbl is None:
+                continue
+            n = step_nums.get(sid, "")
+            title = labels.get(sid, step["label"])
+            mark = " ✓" if step["status"] == "done" else ""
+            lbl.setText(f"{n}. {title}{mark}")
+            lbl.setObjectName(f"stepHeader{step['status'].title()}")
+            lbl.style().unpolish(lbl)
+            lbl.style().polish(lbl)
 
     def _refresh_field_ready(self):
         if not hasattr(self, "lbl_field_score"):
@@ -210,17 +228,15 @@ class ShellTopbarMixin:
             stop_server_after=False,
         )
         score = r["score"]
-        from ui.simple_mode import COMPACT_UI
         if score >= 88:
-            color, tag = "#15803d", "READY FOR FIELD"
+            level, tag = "ok", "READY FOR FIELD"
         elif score >= 70:
-            color, tag = "#b45309", "READY WITH WARNINGS"
+            level, tag = "warn", "READY WITH WARNINGS"
         else:
-            color, tag = "#b91c1c", "FIX BEFORE FIELD"
+            level, tag = "fail", "FIX BEFORE FIELD"
+        sep = " · " if COMPACT_UI else " — "
+        apply_status(self.lbl_field_score, level, f"{tag}{sep}{score}/100")
         if COMPACT_UI:
-            self.lbl_field_score.setText(f"{tag} · {score}/100")
-            self.lbl_field_score.setStyleSheet(
-                f"font-weight:800;font-size:13px;color:{color};")
             bad = [it for it in r["items"] if it["level"] != "ok"]
             if bad:
                 lines = [
@@ -230,9 +246,6 @@ class ShellTopbarMixin:
             else:
                 lines = ["✓ All checks passed"]
         else:
-            self.lbl_field_score.setText(f"{tag} — {score}/100")
-            self.lbl_field_score.setStyleSheet(
-                f"font-weight:800;font-size:15px;color:{color};")
             lines = []
             for it in r["items"]:
                 if it["level"] == "ok":

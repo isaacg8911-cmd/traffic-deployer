@@ -17,12 +17,12 @@ XL = 16
 _WL = is_work_laptop()
 
 # Page column (all nav tabs)
-PAGE_PAD = LG if _WL else (MD if COMPACT_UI else LG)
-PAGE_GAP = MD if _WL else (SM if COMPACT_UI else MD)
+PAGE_PAD = MD if COMPACT_UI else LG
+PAGE_GAP = XS if COMPACT_UI else MD
 
 # Section cards (section_group inner)
-SECTION_PAD = LG if _WL else (MD if COMPACT_UI else LG)
-SECTION_GAP = MD if _WL else (XS if COMPACT_UI else MD)
+SECTION_PAD = MD if COMPACT_UI else LG
+SECTION_GAP = XS if COMPACT_UI else MD
 
 # Install header / stat tiles
 CARD_PAD_H = LG if _WL else (MD if COMPACT_UI else LG)

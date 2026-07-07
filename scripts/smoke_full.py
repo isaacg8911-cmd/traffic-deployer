@@ -429,7 +429,7 @@ def test_web_assets():
     check("route on map plan", "_route_for_map(preview" in main_src)
     from ui.simple_mode import BUILD_LABEL, SIMPLE_MODE
     check("simple mode default", SIMPLE_MODE)
-    check("simple build label", BUILD_LABEL == "BUILD ROUTE")
+    check("simple build label", BUILD_LABEL == "Build")
     check("no turn-by-turn banner", "navbar" not in idx)
     for rel in ("vendor/maplibre-gl.js", "vendor/pmtiles.js", "style.js", "app.js"):
         check(f"file {rel}", os.path.isfile(os.path.join(WEB_DIR, rel)))

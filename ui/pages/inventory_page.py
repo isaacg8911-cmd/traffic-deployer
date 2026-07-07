@@ -14,17 +14,15 @@ from PySide6.QtWidgets import (
 
 from ui.counter_ui import apply_volt_check
 from ui.simple_mode import COMPACT_UI
-from ui.widgets import section_group
+from ui.widgets import page_column, section_heading
 
 
 def build_inventory_page(win) -> QWidget:
-    w = QWidget()
-    v = QVBoxLayout(w)
-    pad = 8 if COMPACT_UI else 14
-    v.setContentsMargins(pad, pad, pad, pad)
-    v.setSpacing(6 if COMPACT_UI else 10)
+    w, v = page_column()
 
-    sec_inv = section_group("Counter inventory", v, object_name="counterInventoryPanel")
+    section_heading("Counter inventory", v)
+    sec_inv = QVBoxLayout()
+    v.addLayout(sec_inv)
     win.lbl_inventory_summary = QLabel(
         "Serials update in the background when you connect on Install/Pickup.")
     win.lbl_inventory_summary.setObjectName("hint")

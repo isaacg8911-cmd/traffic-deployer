@@ -577,6 +577,11 @@ class MapSyncControllerMixin:
         uid, side = self._nearest_unpicked_stop(lat, lon)
         if uid:
             self._route_pick_add(uid, side=side)
+            return
+        self.statusBar().showMessage(
+            "No site near that click — tap the blue or red dot (or lettered orange ring).",
+            5000,
+        )
 
     def _on_stop_clicked(self, uid: str):
         if self._manual_grab_mode:
@@ -593,8 +598,15 @@ class MapSyncControllerMixin:
                         10000,
                     )
             return
-        uid, side = self._parse_stop_click(uid)
+        uid, side = self._parse_stop_click(str(uid).strip())
         if self._route_pick_mode:
+            by_uid = {str(s.get("uid") or ""): s for s in self.state.stops}
+            if uid not in by_uid:
+                self.statusBar().showMessage(
+                    "That site is not in this job — pick a blue or red dot on the map.",
+                    5000,
+                )
+                return
             self._route_pick_add(uid, side=side)
             return
         idx, stop = self._stop_by_uid(uid)

@@ -232,14 +232,56 @@
   ];
   // Hit tolerance (px) so small begin/end dots are easy to tap on a touch /
   // high-DPI work laptop. A bare 1px hit test made the dots feel un-clickable.
-  var PICK_HIT_PAD = 14;
+  function pickHitPad() {
+    var dpr = (window.devicePixelRatio && window.devicePixelRatio > 1) ? window.devicePixelRatio : 1;
+    return Math.round(14 + (dpr - 1) * 8);
+  }
+
+  function haversineM(lat1, lon1, lat2, lon2) {
+    var R = 6371000;
+    var p = Math.PI / 180;
+    var a = 0.5 - Math.cos((lat2 - lat1) * p) / 2 +
+      Math.cos(lat1 * p) * Math.cos(lat2 * p) * (1 - Math.cos((lon2 - lon1) * p)) / 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  /** When layer hit-test misses, snap to nearest unpicked begin/end (mirrors Python). */
+  function nearestPickAt(lat, lon, maxM) {
+    if (!lastState || lastState.map_mode !== 'pick') return null;
+    maxM = maxM || 750;
+    var stops = lastState.stops || [];
+    var pickOrder = lastState.pick_order || [];
+    var picked = {};
+    pickOrder.forEach(function (u) { picked[u] = true; });
+    var bestUid = null, bestSide = null, bestD = maxM;
+    stops.forEach(function (s) {
+      var uid = s.uid != null ? String(s.uid) : '';
+      if (!uid || picked[uid]) return;
+      [
+        ['begin_lat', 'begin_lon', 'begin'],
+        ['end_lat', 'end_lon', 'end']
+      ].forEach(function (row) {
+        var la = s[row[0]], lo = s[row[1]];
+        if (la == null || lo == null) return;
+        var d = haversineM(lat, lon, la, lo);
+        if (d < bestD) {
+          bestD = d;
+          bestUid = uid;
+          bestSide = row[2];
+        }
+      });
+    });
+    if (!bestUid) return null;
+    return bestSide ? (bestUid + '|' + bestSide) : bestUid;
+  }
 
   function pickLayerAtPoint(point) {
     var layers = PICK_CLICK_LAYERS.filter(function (id) { return map.getLayer(id); });
     if (!layers.length) return null;
+    var pad = pickHitPad();
     var box = [
-      [point.x - PICK_HIT_PAD, point.y - PICK_HIT_PAD],
-      [point.x + PICK_HIT_PAD, point.y + PICK_HIT_PAD]
+      [point.x - pad, point.y - pad],
+      [point.x + pad, point.y + pad]
     ];
     var features;
     try {
@@ -656,6 +698,10 @@
         var ptProps = { kind: 'begin', uid: s.uid, seq: dotLabel, site_id: s.id };
         pts.push(pt(bLat, bLon, ptProps));
         pts.push(pt(eLat, eLon, Object.assign({}, ptProps, { kind: 'end' })));
+        if (picking) {
+          pickTargets.push(pt(bLat, bLon, { kind: 'begin', uid: s.uid, label: dotLabel }));
+          pickTargets.push(pt(eLat, eLon, { kind: 'end', uid: s.uid, label: dotLabel }));
+        }
       }
       if (!driving && s.field_lat != null && s.field_lon != null) {
         installs.push(pt(s.field_lat, s.field_lon, { uid: s.uid }));
@@ -694,8 +740,9 @@
     setLayerVis('site-end', hasSites);
     setLayerVis('site-begin-label', hasSites);
     setLayerVis('site-end-label', hasSites);
-    setLayerVis('pick-target-circle', false);
-    setLayerVis('pick-target-label', false);
+    var showPickTargets = picking && pickTargets.length > 0;
+    setLayerVis('pick-target-circle', showPickTargets);
+    setLayerVis('pick-target-label', showPickTargets);
     setLayerVis('stop-circle', (showStops || picking) && stops.length > 0);
     setLayerVis('stop-label', (showStops || picking) && stops.length > 0);
     setLayerVis('install-pts', installs.length > 0);
@@ -758,6 +805,9 @@
 
   map.on('click', function (e) {
     var payload = pickLayerAtPoint(e.point);
+    if (!payload && lastState && lastState.map_mode === 'pick') {
+      payload = nearestPickAt(e.lngLat.lat, e.lngLat.lng);
+    }
     if (payload) {
       showSiteInfoToast(payload);
       fireStopClick(payload);

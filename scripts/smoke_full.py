@@ -302,6 +302,8 @@ def test_web_assets():
     check("site click toast", "site-toast" in idx and "showSiteInfoToast" in appjs)
     check("readable map labels", "MAP_LABEL_PAINT" in appjs)
     check("pick target dots", "pick-target-circle" in appjs and "pick-targets" in appjs)
+    check("pick target populate", "pickTargets.push" in appjs and "showPickTargets" in appjs)
+    check("pick nearest fallback", "nearestPickAt" in appjs and "pickHitPad" in appjs)
     def _shell_src() -> str:
         chunks = [open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()]
         app_entry = os.path.join(ROOT, "ui", "app_entry.py")

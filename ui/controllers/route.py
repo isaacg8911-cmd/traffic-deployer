@@ -306,11 +306,18 @@ class RouteControllerMixin:
     def _route_pick_add(self, uid: str, *, side: str | None = None) -> None:
         if not self._route_pick_mode:
             return
+        uid = str(uid).strip()
+        if not uid:
+            return
         if uid in self._route_pick_uids:
             self.statusBar().showMessage("Already in your route — pick the next site.", 4000)
             return
-        by_uid = {s["uid"]: s for s in self.state.stops}
+        by_uid = {str(s.get("uid") or ""): s for s in self.state.stops}
         stop = by_uid.get(uid)
+        if stop is None:
+            self.statusBar().showMessage(
+                "Unknown site — pick a blue or red dot on the map.", 5000)
+            return
         if stop and side in ("begin", "end"):
             self._route_pick_sides[uid] = side
             self._apply_pick_side(stop, side)

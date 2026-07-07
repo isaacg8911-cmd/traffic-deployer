@@ -13,16 +13,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.hardware_profile import is_work_laptop
 from ui.simple_mode import BUILD_LABEL, COMPACT_UI, SIMPLE_MODE
-from ui.widgets import WorkflowStrip, section_group
+from ui.widgets import WorkflowStrip, button_row, button_stack, page_column, section_group
 
 
 def build_setup_page(win) -> QWidget:
-    w = QWidget()
-    v = QVBoxLayout(w)
-    pad = 8 if COMPACT_UI else 14
-    v.setContentsMargins(pad, pad, pad, pad)
-    v.setSpacing(6 if COMPACT_UI else 10)
+    w, v = page_column()
 
     if not SIMPLE_MODE:
         win.workflow_strip = WorkflowStrip()
@@ -31,26 +28,22 @@ def build_setup_page(win) -> QWidget:
         win.workflow_strip = None
 
     sec_profile = section_group("Profile", v)
-    row_prof = QHBoxLayout()
     win.txt_profile = QLineEdit(win.state.profile)
     win.txt_profile.setPlaceholderText("DEFAULT, WEEK9…")
     win.txt_profile.returnPressed.connect(lambda: win._switch_profile())
-    row_prof.addWidget(win.txt_profile, 1)
+    sec_profile.addWidget(win.txt_profile)
     b_prof = QPushButton("Load")
     b_prof.setObjectName("secondary")
     b_prof.clicked.connect(lambda: win._switch_profile())
-    row_prof.addWidget(b_prof, 0)
     b_save_as = QPushButton("Save as…")
     b_save_as.setObjectName("secondary")
     b_save_as.setToolTip("Save current shift under a new profile name")
     b_save_as.clicked.connect(win._save_profile_as)
-    row_prof.addWidget(b_save_as, 0)
-    sec_profile.addLayout(row_prof)
+    button_row(sec_profile, b_prof, b_save_as)
     b_save_now = QPushButton("Save progress")
     b_save_now.setObjectName("secondary")
     b_save_now.clicked.connect(win._save_shift_now)
     sec_profile.addWidget(b_save_now)
-    row_data = QHBoxLayout()
     b_clear_shift = QPushButton("Clear shift data…")
     b_clear_shift.setObjectName("secondary")
     b_clear_shift.setToolTip(
@@ -58,14 +51,12 @@ def build_setup_page(win) -> QWidget:
         "Excel/.EST file lists stay unless you clear them below.")
     b_clear_shift.clicked.connect(win._reset_route)
     win.btn_clear_shift = b_clear_shift
-    row_data.addWidget(b_clear_shift)
     b_start_fresh = QPushButton("Start fresh…")
     b_start_fresh.setObjectName("secondary")
     b_start_fresh.setToolTip("Clear shift data and Excel/.EST file lists — empty map on next launch.")
     b_start_fresh.clicked.connect(win._start_fresh_profile)
     win.btn_start_fresh = b_start_fresh
-    row_data.addWidget(b_start_fresh)
-    sec_profile.addLayout(row_data)
+    button_row(sec_profile, b_clear_shift, b_start_fresh)
     win.lbl_profile_hint = QLabel(
         "Sites on the map at launch = saved shift for this profile (e.g. DEFAULT). "
         "Use Clear shift data to wipe pins and route.")
@@ -85,41 +76,34 @@ def build_setup_page(win) -> QWidget:
     win.lbl_field_checks = QLabel("")
     win.lbl_field_checks.setObjectName("fieldChecks")
     win.lbl_field_checks.setWordWrap(True)
-    win.lbl_field_checks.setMaximumHeight(80 if COMPACT_UI else 16777215)
     sec_ready.addWidget(win.lbl_field_checks)
-    row_ready = QHBoxLayout()
     b_refresh_ready = QPushButton("Refresh")
     b_refresh_ready.setObjectName("secondary")
     b_refresh_ready.clicked.connect(win._refresh_field_ready)
-    row_ready.addWidget(b_refresh_ready)
     b_net = QPushButton("Test Wi‑Fi")
     b_net.setObjectName("secondary")
     b_net.clicked.connect(win._run_setup_network_test)
     win.btn_test_wifi = b_net
-    row_ready.addWidget(b_net)
-    row_ready.addStretch(1)
+    row_ready_btns: list[QPushButton] = [b_refresh_ready, b_net]
     if not SIMPLE_MODE:
         b_smoke = QPushButton("Smoke test")
         b_smoke.setObjectName("secondary")
         b_smoke.clicked.connect(win._run_smoke_test)
-        row_ready.addWidget(b_smoke)
         b_checklist = QPushButton("Checklist")
         b_checklist.setObjectName("secondary")
         b_checklist.clicked.connect(win._show_setup_checklist)
-        row_ready.addWidget(b_checklist)
         b_wiz = QPushButton("Wizard")
         b_wiz.setObjectName("secondary")
         b_wiz.clicked.connect(win._show_setup_wizard)
-        row_ready.addWidget(b_wiz)
-    sec_ready.addLayout(row_ready)
+        row_ready_btns.extend([b_smoke, b_checklist, b_wiz])
+    button_row(sec_ready, *row_ready_btns)
 
     sec_origin = section_group("Start point", v)
     win.lbl_origin = QLabel("")
+    win.lbl_origin.setWordWrap(True)
     sec_origin.addWidget(win.lbl_origin)
-    row_origin = QHBoxLayout()
     b_usb = QPushButton("USB GPS")
     b_usb.clicked.connect(win._origin_from_gps)
-    row_origin.addWidget(b_usb)
     b_default = QPushButton("Save as my start")
     b_default.setObjectName("primary")
     b_default.setToolTip(
@@ -129,14 +113,11 @@ def build_setup_page(win) -> QWidget:
     win.btn_use_default.setObjectName("secondary")
     win.btn_use_default.setToolTip("Restore your last saved home / start coordinates")
     win.btn_use_default.clicked.connect(win._load_default_home)
-    row_origin.addWidget(b_default)
-    row_origin.addWidget(win.btn_use_default)
-    sec_origin.addLayout(row_origin)
+    button_stack(sec_origin, b_usb, b_default, win.btn_use_default)
     win.txt_address = QLineEdit()
     win.txt_address.setPlaceholderText("Address (online search)")
     win.txt_address.returnPressed.connect(win._origin_from_address)
     sec_origin.addWidget(win.txt_address)
-    row_addr = QHBoxLayout()
     b_addr = QPushButton("Search")
     b_addr.clicked.connect(win._origin_from_address)
     win.btn_address = b_addr
@@ -144,9 +125,7 @@ def build_setup_page(win) -> QWidget:
     win.btn_saved_home.setObjectName("secondary")
     win.btn_saved_home.setToolTip("Restore the last address you searched and saved")
     win.btn_saved_home.clicked.connect(win._use_saved_home)
-    row_addr.addWidget(b_addr)
-    row_addr.addWidget(win.btn_saved_home, 1)
-    sec_origin.addLayout(row_addr)
+    button_row(sec_origin, b_addr, win.btn_saved_home, stretch_last=True)
     if not COMPACT_UI:
         win.lbl_address_hint = QLabel("")
         win.lbl_address_hint.setObjectName("hint")
@@ -154,7 +133,6 @@ def build_setup_page(win) -> QWidget:
         sec_origin.addWidget(win.lbl_address_hint)
     else:
         win.lbl_address_hint = QLabel("")
-    row = QHBoxLayout()
     win.spin_lat = QDoubleSpinBox()
     win.spin_lat.setDecimals(5)
     win.spin_lat.setRange(-90, 90)
@@ -163,56 +141,44 @@ def build_setup_page(win) -> QWidget:
     win.spin_lon.setDecimals(5)
     win.spin_lon.setRange(-180, 180)
     win.spin_lon.setValue(win.state.home[1])
-    row.addWidget(win.spin_lat)
-    row.addWidget(win.spin_lon)
     b_coords = QPushButton("Save coords")
     b_coords.setObjectName("secondary")
     b_coords.setToolTip("Save the lat/lon boxes as your start (same as Save as my start)")
     b_coords.clicked.connect(win._origin_from_coords)
-    row.addWidget(b_coords)
-    sec_origin.addLayout(row)
+    button_row(sec_origin, win.spin_lat, win.spin_lon, b_coords)
 
     sec_files = section_group("Files", v)
-    row_files_btn = QHBoxLayout()
     b_excel = QPushButton("Excel/CSV")
     b_excel.clicked.connect(win._pick_excel)
     b_est = QPushButton(".EST maps")
     b_est.clicked.connect(win._pick_est)
-    row_files_btn.addWidget(b_excel)
-    row_files_btn.addWidget(b_est)
-    sec_files.addLayout(row_files_btn)
+    button_row(sec_files, b_excel, b_est)
+    _list_h = 52 if is_work_laptop() else (40 if COMPACT_UI else 56)
     win.list_excel = QListWidget()
-    win.list_excel.setMaximumHeight(40 if COMPACT_UI else 56)
+    win.list_excel.setMaximumHeight(_list_h)
     sec_files.addWidget(win.list_excel)
     win.list_est = QListWidget()
-    win.list_est.setMaximumHeight(44 if COMPACT_UI else 64)
+    win.list_est.setMaximumHeight(_list_h + 4)
     sec_files.addWidget(win.list_est)
-    row_files = QHBoxLayout()
     b_clear = QPushButton("Clear file lists")
     b_clear.setObjectName("secondary")
     b_clear.setToolTip("Remove Excel/.EST paths only — route and install data stay.")
     b_clear.clicked.connect(win._clear_files)
-    row_files.addWidget(b_clear)
-    sec_files.addLayout(row_files)
+    sec_files.addWidget(b_clear)
 
     sec_build = section_group("Road map & route", v)
-    row_map_dl = QHBoxLayout()
     b_basemap = QPushButton("Download California map")
     b_basemap.clicked.connect(win._download_basemap)
     win.btn_download_basemap = b_basemap
-    row_map_dl.addWidget(b_basemap, 1)
-    sec_build.addLayout(row_map_dl)
-    row_roads = QHBoxLayout()
-    b_roads = QPushButton("Download")
+    sec_build.addWidget(b_basemap)
+    b_roads = QPushButton("Download roads")
     b_roads.clicked.connect(win._download_roads)
     win.btn_download_roads = b_roads
     b_import_roads = QPushButton("Import .graphml")
     b_import_roads.setObjectName("secondary")
     b_import_roads.clicked.connect(win._import_roads)
     win.btn_import_roads = b_import_roads
-    row_roads.addWidget(b_roads)
-    row_roads.addWidget(b_import_roads, 1)
-    sec_build.addLayout(row_roads)
+    button_row(sec_build, b_roads, b_import_roads, stretch_last=True)
     if not COMPACT_UI:
         win.lbl_roads_hint = QLabel(
             "Work Wi‑Fi may block download — import road_graph.graphml from home PC.")

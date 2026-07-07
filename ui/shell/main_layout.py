@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -23,6 +24,7 @@ from ui.page_indices import NAV_PAGE_COUNT
 from ui.pages import audit_page, install_page, inventory_page, pickup_page, route_page, setup_page
 from ui.paths import DATA_DIR
 from ui.simple_mode import FIELD_NAV_INDICES, FIELD_SHELL
+from ui.spacing import NAV_GAP, NAV_PAD_H, NAV_PAD_V, NAV_WIDTH, SIDE_MAX, SIDE_MIN, SPLIT_DEFAULT
 from version import APP_NAME, APP_TAGLINE
 
 
@@ -142,8 +144,8 @@ class ShellLayoutMixin:
 
         side = QWidget()
         side.setObjectName("sidepanel")
-        side.setMinimumWidth(360)
-        side.setMaximumWidth(440)
+        side.setMinimumWidth(SIDE_MIN)
+        side.setMaximumWidth(SIDE_MAX)
         side.setAutoFillBackground(True)
         side.setAttribute(Qt.WA_StyledBackground, True)
         self._side_panel = side
@@ -153,10 +155,10 @@ class ShellLayoutMixin:
 
         nav = QWidget()
         nav.setObjectName("navRail")
-        nav.setFixedWidth(64)
+        nav.setFixedWidth(NAV_WIDTH)
         nav_lay = QVBoxLayout(nav)
-        nav_lay.setContentsMargins(6, 12, 6, 12)
-        nav_lay.setSpacing(4)
+        nav_lay.setContentsMargins(NAV_PAD_H, NAV_PAD_V, NAV_PAD_H, NAV_PAD_V)
+        nav_lay.setSpacing(NAV_GAP)
         self._nav_labels = ("Setup", "Route", "Install", "Pickup", "Audit", "Fleet")
         for idx, label in enumerate(self._nav_labels):
             b = QPushButton(label)
@@ -171,7 +173,7 @@ class ShellLayoutMixin:
 
         pages_col = QWidget()
         pages_col.setObjectName("pagesColumn")
-        pages_col.setMinimumWidth(320)
+        pages_col.setMinimumWidth(340 if getattr(self, "_work_laptop", False) else 300)
         pages_lay = QVBoxLayout(pages_col)
         pages_lay.setContentsMargins(0, 0, 0, 0)
         self.pages = QStackedWidget()
@@ -207,7 +209,7 @@ class ShellLayoutMixin:
         self._splitter.addWidget(map_frame)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
-        self._splitter.setSizes([400, 920])
+        self._splitter.setSizes(list(SPLIT_DEFAULT))
         body.addWidget(self._splitter, 1)
 
         wrap = QWidget()
@@ -233,10 +235,16 @@ class ShellLayoutMixin:
         return
 
     def _page_shell(self, w: QWidget) -> QWidget:
-        """One-view tab: no scroll — content stretches to panel height."""
-        w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        """Scrollable tab body — prevents overlap when panel height is tight."""
+        scroll = QScrollArea()
+        scroll.setObjectName("pageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         w.setMinimumWidth(300)
-        return w
+        scroll.setWidget(w)
+        return scroll
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

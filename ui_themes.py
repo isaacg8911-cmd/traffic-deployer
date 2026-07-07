@@ -29,11 +29,11 @@ _COMMON = """
 QGroupBox#sectionCard, QGroupBox#sectionCardCompact {
     font-size: 12px; font-weight: 800; color: #475569;
     border: 1px solid #c5d0de; border-radius: 10px;
-    margin-top: 12px; padding-top: 18px; background: #ffffff;
+    margin-top: 10px; padding-top: 16px; background: #ffffff;
 }
 QGroupBox#sectionCardCompact {
     border-color: #94a3b8; border-radius: 8px;
-    margin-top: 6px; padding-top: 12px;
+    margin-top: 8px; padding-top: 14px;
 }
 QGroupBox#sectionCard::title, QGroupBox#sectionCardCompact::title {
     subcontrol-origin: margin; left: 12px; padding: 0 6px;
@@ -49,8 +49,21 @@ QGroupBox#sectionCard::title, QGroupBox#sectionCardCompact::title {
 #installHeaderCompact { border-radius: 10px; }
 #tabContextLine {
     font-size: 13px; font-weight: 700; color: #0f2744;
-    padding: 2px 0 4px 0;
+    padding: 2px 0;
 }
+#tabContextLine[statusLevel="ok"] { color: #15803d; }
+#tabContextLine[statusLevel="warn"] { color: #b45309; }
+#tabContextLine[statusLevel="fail"] { color: #b91c1c; }
+#pickStatus {
+    font-size: 12px; font-weight: 600; color: #64748b; padding: 2px 0;
+}
+#pickStatus[active="true"] {
+    font-size: 13px; font-weight: 700; color: #0d47a1; padding: 4px 0;
+}
+#hint[statusLevel="warn"] { color: #b45309; font-weight: 700; }
+#hint[statusLevel="fail"] { color: #b91c1c; font-weight: 700; }
+#offlineHint[statusLevel="field"] { color: #138a3e; font-weight: 700; }
+#offlineHint[statusLevel="home"] { color: #475569; font-size: 12px; font-weight: 600; }
 #installChecklist {
     font-size: 12px; font-weight: 600; color: #475569;
     background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
@@ -105,19 +118,19 @@ QLabel#counterStatusCompact[statusLevel="busy"] {
     background: #1a3a5c; color: #f8fafc; border: 1px solid #3d5a80;
 }
 #workflowStrip {
-    background: #f0f4f9; border: 1px solid #c5d0de; border-radius: 10px;
+    background: #f0f4f9; border: 1px solid #c5d0de; border-radius: 8px;
 }
 #workflowStepDone {
-    background: #0d5c4b; color: #fff; border-radius: 8px;
-    padding: 6px 4px; font-size: 11px; font-weight: 800;
+    background: #0d5c4b; color: #fff; border-radius: 6px;
+    padding: 4px 2px; font-size: 10px; font-weight: 800;
 }
 #workflowStepCurrent {
-    background: #c45f14; color: #fff; border-radius: 8px;
-    padding: 6px 4px; font-size: 11px; font-weight: 800;
+    background: #c45f14; color: #fff; border-radius: 6px;
+    padding: 4px 2px; font-size: 10px; font-weight: 800;
 }
 #workflowStepPending {
-    background: #e8edf3; color: #64748b; border-radius: 8px;
-    padding: 6px 4px; font-size: 11px; font-weight: 700;
+    background: #e8edf3; color: #64748b; border-radius: 6px;
+    padding: 4px 2px; font-size: 10px; font-weight: 700;
 }
 #workflowArrow { color: #94a3b8; font-size: 14px; font-weight: 700; }
 #navRail {
@@ -125,8 +138,8 @@ QLabel#counterStatusCompact[statusLevel="busy"] {
 }
 QPushButton#navBtn {
     background: transparent; color: #94b8d9; border: none;
-    border-radius: 8px; padding: 8px 4px; font-size: 11px; font-weight: 700;
-    min-height: 38px;
+    border-radius: 6px; padding: 6px 2px; font-size: 10px; font-weight: 700;
+    min-height: 34px;
 }
 QPushButton#navBtn:hover { background: #1a3a5c; color: #fff; }
 QPushButton#navBtn:checked {
@@ -142,7 +155,7 @@ QPushButton#secondary {
 }
 QPushButton#secondary:hover { background: #e2e8f0; }
 #hint { color: #64748b; font-size: 12px; }
-#fieldChecks { color: #475569; font-size: 11px; line-height: 1.35; }
+#fieldChecks { color: #475569; font-size: 11px; line-height: 1.4; padding: 2px 0; }
 #offlineHint { color: #475569; font-size: 12px; font-weight: 600; }
 QLabel#counterStatus {
     border-radius: 8px; padding: 10px 12px; font-weight: 600; font-size: 13px;
@@ -186,7 +199,7 @@ QMainWindow, QWidget { background: #eef2f7; color: #0f2744; font-size: 14px; }
     background: #0f2744; border-bottom: none; min-height: 48px;
 }
 #brand { font-size: 15px; font-weight: 800; color: #f8fafc; letter-spacing: 0.3px; }
-#brandSub { font-size: 11px; font-weight: 600; color: #94b8d9; }
+#brandSub { font-size: 10px; font-weight: 600; color: #94b8d9; }
 QPushButton#aboutBtn {
     background: transparent; color: #94b8d9; border: 1px solid #3d5a80;
     padding: 6px 12px; font-weight: 600;
@@ -230,7 +243,7 @@ QSplitter#mainSplit::handle {
     background: #c5d0de; width: 3px;
 }
 QSplitter#mainSplit::handle:hover { background: #c45f14; }
-#pageScroll { background: #f8fafc; }
+#pageScroll { background: #f8fafc; border: none; }
 #installHeader {
     background: #ffffff; border: 1px solid #c5d0de; border-radius: 12px;
 }
@@ -244,9 +257,9 @@ QLabel[role="h"] {
 }
 QLabel[role="title"] { font-size: 17px; font-weight: 800; color: #0f2744; }
 QPushButton {
-    background: #ffffff; border: 1px solid #94a3b8; border-radius: 8px;
+    background: #ffffff; border: 1px solid #94a3b8; border-radius: 6px;
     padding: 6px 10px; font-weight: 600; color: #0f2744; font-size: 12px;
-    min-height: 28px;
+    min-height: 30px;
 }
 QPushButton:hover { background: #f1f5f9; border-color: #64748b; }
 QPushButton:pressed { background: #e2e8f0; }
@@ -280,8 +293,9 @@ QPushButton#themeBtn {
 }
 QPushButton#themeBtn:checked { background: #c45f14; color: #fff; border: none; }
 QLineEdit, QPlainTextEdit, QComboBox, QDoubleSpinBox, QSpinBox {
-    background: #ffffff; border: 1px solid #94a3b8; border-radius: 8px;
-    padding: 8px; color: #0f2744; font-size: 14px;
+    background: #ffffff; border: 1px solid #94a3b8; border-radius: 6px;
+    padding: 6px 8px; color: #0f2744; font-size: 13px;
+    min-height: 30px;
 }
 QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus { border: 2px solid #c45f14; }
 QListWidget {

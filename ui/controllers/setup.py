@@ -28,6 +28,7 @@ from ui.page_indices import PAGE_INVENTORY
 from ui.paths import APP_DIR, DATA_DIR, LAUNCH_HINT
 from ui.setup_wizard import SetupWizard
 from ui.simple_mode import BUILD_LABEL, COMPACT_UI
+from ui.status_style import apply_status
 from ui.threads import DownloadRoadsThread, GeocodeThread, MapSetupThread
 from version import APP_VERSION
 
@@ -200,9 +201,18 @@ class SetupControllerMixin:
             return
         if not self.state.stops:
             self.lbl_route_summary.setText("")
+            apply_status(self.lbl_route_summary, "")
             return
         summ = build_route_summary(self.state.stops, self.state.route)
         self.lbl_route_summary.setText(summ["text"])
+        if summ.get("on_graph"):
+            apply_status(self.lbl_route_summary, "ok")
+        elif self.state.route.get("graph_uncovered"):
+            apply_status(self.lbl_route_summary, "warn")
+        elif float(summ.get("miles") or 0) > 0:
+            apply_status(self.lbl_route_summary, "warn")
+        else:
+            apply_status(self.lbl_route_summary, "")
 
     def _next_stop_distance_mi(self) -> str:
         if not self.state.stops:
@@ -444,13 +454,17 @@ class SetupControllerMixin:
         on = self.state.offline_mode
         self._refresh_mode_bar()
         if on:
-            self.lbl_offline.setText(
-                "On the road — field mode. GPS, map, route, and installs use only local data.")
-            self.lbl_offline.setStyleSheet("color:#138a3e;font-weight:700;")
+            apply_status(
+                self.lbl_offline,
+                "field",
+                "On the road — field mode. GPS, map, route, and installs use only local data.",
+            )
         else:
-            self.lbl_offline.setText(
-                "At home: search address, download road map, BUILD ROUTE, then Go offline before you leave.")
-            self.lbl_offline.setStyleSheet("color:#475569;font-size:12px;")
+            apply_status(
+                self.lbl_offline,
+                "home",
+                "At home: search address, download road map, BUILD ROUTE, then Go offline before you leave.",
+            )
         allow = self._internet_allowed()
         self.txt_address.setEnabled(allow)
         if hasattr(self, "btn_address"):
@@ -471,28 +485,36 @@ class SetupControllerMixin:
         self._retry_pending_field_geocode()
         reachable = connectivity.geocode_hosts_reachable()
         if reachable is False and hasattr(self, "lbl_address_hint"):
-            self.lbl_address_hint.setText(
+            apply_status(
+                self.lbl_address_hint,
+                "warn",
                 "Wi‑Fi connected but geocoding sites look blocked — try hotspot, "
-                "or use USB GPS / lat·lon.")
-            self.lbl_address_hint.setStyleSheet("color:#b45309;font-weight:700;font-size:12px;")
+                "or use USB GPS / lat·lon.",
+            )
 
     def _refresh_address_hint(self):
         if not hasattr(self, "lbl_address_hint"):
             return
         if self.state.offline_mode:
-            self.lbl_address_hint.setText(
+            apply_status(
+                self.lbl_address_hint,
+                "warn",
                 "Field mode — address search off on the road. USB GPS or coordinates; "
-                "tap I'm online when back home.")
-            self.lbl_address_hint.setStyleSheet("color:#b45309;font-weight:700;font-size:12px;")
+                "tap I'm online when back home.",
+            )
             return
         if not geo.geocode_available():
-            self.lbl_address_hint.setText(
-                f"Address search unavailable — {LAUNCH_HINT} (needs requests package).")
-            self.lbl_address_hint.setStyleSheet("color:#b91c1c;font-weight:700;font-size:12px;")
+            apply_status(
+                self.lbl_address_hint,
+                "fail",
+                f"Address search unavailable — {LAUNCH_HINT} (needs requests package).",
+            )
             return
-        self.lbl_address_hint.setText(
-            "At home: type address + Search (5–20 sec). Internet used until you tap Go offline.")
-        self.lbl_address_hint.setStyleSheet("")
+        apply_status(
+            self.lbl_address_hint,
+            "",
+            "At home: type address + Search (5–20 sec). Internet used until you tap Go offline.",
+        )
         self._refresh_online_status()
 
     def _field_notice(self, msg: str, *, status_ms: int = 10000):

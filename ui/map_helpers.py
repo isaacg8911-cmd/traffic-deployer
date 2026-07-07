@@ -52,13 +52,31 @@ def should_push_gps_bridge(
     return False
 
 
+def decimate_polyline(poly: list, *, max_pts: int = 400) -> list[list[float]]:
+    """Thin dense road traces for map bridge (SwiftShader / work laptops)."""
+    if not poly:
+        return []
+    pts = [[float(p[0]), float(p[1])] for p in poly]
+    if len(pts) <= max_pts:
+        return pts
+    step = max(1, math.ceil(len(pts) / max_pts))
+    out = [pts[i] for i in range(0, len(pts), step)]
+    if out[-1] != pts[-1]:
+        if len(out) >= max_pts:
+            out[-1] = pts[-1]
+        else:
+            out.append(pts[-1])
+    return out[:max_pts]
+
+
 def display_route_for_map(route: dict | None) -> dict:
-    """Map shows precomputed next leg only — not the full tour polyline."""
+    """Decimated tour polyline for plan-mode map; drive mode uses next_leg in JS."""
     r = route or {}
     return {
-        "polyline": [],
+        "polyline": decimate_polyline(r.get("polyline") or []),
         "miles": r.get("miles", 0.0),
         "graph": r.get("graph", False),
+        "graph_uncovered": bool(r.get("graph_uncovered")),
     }
 
 

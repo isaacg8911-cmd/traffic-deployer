@@ -18,7 +18,7 @@ class ShellLifecycleMixin:
     def closeEvent(self, event):
         try:
             self._hide_route_pick_dialog()
-            for attr in ("_picocount_thread", "_route_thread", "_dl_thread", "_geocode_thread", "_field_street_thread"):
+            for attr in ("_picocount_thread", "_route_thread", "_retrace_thread", "_dl_thread", "_geocode_thread", "_field_street_thread"):
                 self._stop_worker(getattr(self, attr, None))
             if self.pages.currentIndex() == 2:
                 self._flush_install_form()

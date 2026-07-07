@@ -528,6 +528,51 @@
     }
   }
 
+  function updateDriveBanner(state) {
+    var el = document.getElementById('drive-banner');
+    if (!el) return;
+    var txt = state.drive_banner || '';
+    if (state.driving && txt) {
+      el.textContent = txt;
+      el.style.display = 'block';
+    } else {
+      el.style.display = 'none';
+      el.textContent = '';
+    }
+  }
+
+  function resolveRouteLine(state) {
+    var mode = state.map_mode || (state.driving ? 'drive' : 'plan');
+    if (mode === 'pick' || mode === 'preview' || mode === 'manual_grab') {
+      return null;
+    }
+    var nextLeg = state.next_leg || null;
+    var legPoly = (nextLeg && nextLeg.polyline) || [];
+    var tourPoly = (state.route && state.route.polyline) || [];
+    var onRoads = !!(state.route && state.route.graph);
+    if (state.show_guide && legPoly.length >= 2) {
+      return { coords: legPoly, onRoads: true };
+    }
+    if (tourPoly.length >= 2) {
+      return { coords: tourPoly, onRoads: onRoads };
+    }
+    if (legPoly.length >= 2) {
+      return { coords: legPoly, onRoads: onRoads };
+    }
+    return null;
+  }
+
+  function paintRouteLayer(state) {
+    var route = resolveRouteLine(state);
+    var showRoute = route && route.coords.length >= 2;
+    if (map.getSource('route')) {
+      map.getSource('route').setData(
+        showRoute ? routeLineFC(route.coords, route.onRoads) : emptyFC());
+      setLayerVis('route-casing', showRoute);
+      setLayerVis('route-line', showRoute);
+    }
+  }
+
   function renderState(state) {
     lastState = state;
     window.__dbg.pushes++;
@@ -540,15 +585,7 @@
   function applyLeanDriveData(state) {
     if (homeMarker) { homeMarker.remove(); homeMarker = null; }
     applyMapMode('drive', true);
-    var nextLeg = state.next_leg || null;
-    var legPoly = (nextLeg && nextLeg.polyline) || [];
-    var showNextLeg = !!state.show_guide && legPoly.length >= 2;
-    if (map.getSource('route')) {
-      map.getSource('route').setData(
-        showNextLeg ? routeLineFC(legPoly, true) : emptyFC());
-      setLayerVis('route-casing', false);
-      setLayerVis('route-line', showNextLeg);
-    }
+    paintRouteLayer(state);
     var empty = emptyFC();
     if (map.getSource('segments')) map.getSource('segments').setData(empty);
     if (map.getSource('site-pts')) map.getSource('site-pts').setData(empty);
@@ -566,6 +603,7 @@
     setLayerVis('stop-label', false);
     setLayerVis('install-pts', false);
     updatePickBanner(state);
+    updateDriveBanner(state);
     window.__dbg.applied++;
   }
 
@@ -650,15 +688,7 @@
     var showGuide = !!state.show_guide;
     var showSegs = state.show_segments !== false && !driving;
     var hasSites = (state.stops || []).length > 0;
-    var nextLeg = state.next_leg || null;
-    var legPoly = (nextLeg && nextLeg.polyline) || [];
-    var showNextLeg = showGuide && legPoly.length >= 2;
-    if (map.getSource('route')) {
-      map.getSource('route').setData(
-        showNextLeg ? routeLineFC(legPoly, true) : emptyFC());
-      setLayerVis('route-casing', showNextLeg);
-      setLayerVis('route-line', showNextLeg);
-    }
+    paintRouteLayer(state);
     setLayerVis('segments-line', showSegs);
     setLayerVis('site-begin', hasSites);
     setLayerVis('site-end', hasSites);
@@ -670,6 +700,7 @@
     setLayerVis('stop-label', (showStops || picking) && stops.length > 0);
     setLayerVis('install-pts', installs.length > 0);
     updatePickBanner(state);
+    updateDriveBanner(state);
 
     window.__dbg.applied++;
     window.__dbg.segCount = segs.length;

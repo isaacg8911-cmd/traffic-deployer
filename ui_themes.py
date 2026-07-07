@@ -340,6 +340,11 @@ QCheckBox { font-weight: 600; spacing: 8px; }
     background: #e8f4fc; border: 1px solid #7eb8e8; border-radius: 8px;
     padding: 10px; font-weight: 700; font-size: 13px; color: #0c4a6e;
 }
+#driveNextChip {
+    font-size: 12px; font-weight: 700; color: #e8f4fc;
+    background: rgba(255, 255, 255, 0.14); border-radius: 6px;
+    padding: 4px 10px;
+}
 """
 
 _CLOUDY = """

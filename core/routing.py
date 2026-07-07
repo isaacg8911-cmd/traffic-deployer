@@ -532,9 +532,15 @@ def _ortools_matrix_route(matrix, n_stops: int) -> list[int] | None:
         return None
 
 
-def retrace_only(ordered_stops: list[dict], home: tuple[float, float], data_dir: str) -> dict:
+def retrace_only(
+    ordered_stops: list[dict],
+    home: tuple[float, float],
+    data_dir: str,
+    *,
+    abort=None,
+) -> dict:
     """Rebuild polylines/miles for a manual stop order (no re-optimize)."""
-    route = build_route(ordered_stops, home, data_dir)
+    route = build_route(ordered_stops, home, data_dir, abort=abort)
     return {"order": ordered_stops, "route": route, "graph": route.get("graph", False)}
 
 
@@ -1107,7 +1113,13 @@ def build_site_legs(
     return out
 
 
-def build_route(ordered_stops: list[dict], home: tuple[float, float], data_dir: str) -> dict:
+def build_route(
+    ordered_stops: list[dict],
+    home: tuple[float, float],
+    data_dir: str,
+    *,
+    abort=None,
+) -> dict:
     """Real road polyline tracing site 1 -> site 2 -> ... -> site N (no home legs)."""
     del home
     if not ordered_stops:
@@ -1131,6 +1143,15 @@ def build_route(ordered_stops: list[dict], home: tuple[float, float], data_dir: 
         polyline, miles = [], 0.0
         failed = 0
         for i in range(len(ordered) - 1):
+            if abort and abort():
+                return {
+                    "polyline": polyline,
+                    "miles": miles,
+                    "legs": legs,
+                    "graph": True,
+                    "graph_uncovered": False,
+                    "aborted": True,
+                }
             a = _stop_pt(ordered[i])
             b = _stop_pt(ordered[i + 1])
             leg = road_router.route_between(graph, a, b, include_turns=False)

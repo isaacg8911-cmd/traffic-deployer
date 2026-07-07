@@ -51,6 +51,7 @@ def test_imports():
     ok(f"version {APP_VERSION}")
     from ui.map_helpers import (
         coords_moved,
+        decimate_polyline,
         display_route_for_map,
         heading_cardinal,
         should_push_gps_bridge,
@@ -59,6 +60,12 @@ def test_imports():
     check("map_helpers dist moved", coords_moved((0.0, 0.0), (0.0, 0.001), min_m=4.0) is True)
     check("map_helpers cardinal", heading_cardinal(0.0) == "N")
     check("map_helpers route", display_route_for_map({"miles": 1.2, "graph": True})["miles"] == 1.2)
+    dense = [[33.0 + i * 0.001, -118.0] for i in range(800)]
+    check("map_helpers decimate", len(decimate_polyline(dense)) <= 400)
+    check(
+        "map_helpers route polyline",
+        len(display_route_for_map({"polyline": dense, "graph": True})["polyline"]) <= 400,
+    )
     check(
         "map_helpers gps throttle",
         should_push_gps_bridge(
@@ -288,6 +295,8 @@ def test_web_assets():
     check("numbered stop layers", "stop-label" in appjs and "stop-circle" in appjs)
     check("numbered site begin/end dots", "site-begin-label" in appjs and "site-end-label" in appjs)
     check("pick route map banner", "pick-banner" in idx and "pick_prompt" in appjs)
+    check("drive route map banner", "drive-banner" in idx and "resolveRouteLine" in appjs)
+    check("plan mode tour polyline", "paintRouteLayer" in appjs)
     check("pick letter labels", "siteDotLabel" in appjs and "pick_letters" in appjs)
     check("map seq not excel id", "route sequence" in appjs and "Excel site #" in appjs)
     check("site click toast", "site-toast" in idx and "showSiteInfoToast" in appjs)
@@ -326,6 +335,7 @@ def test_web_assets():
     dlg_src = open(os.path.join(ROOT, "ui", "route_pick_dialog.py"), encoding="utf-8").read()
     check("pick dialog apply button", "apply_requested" in dlg_src and "btn_apply" in dlg_src)
     check("apply pick thread", "RouteApplyPickThread" in open(os.path.join(ROOT, "ui", "threads.py"), encoding="utf-8").read())
+    check("retrace background thread", "RouteRetraceThread" in open(os.path.join(ROOT, "ui", "threads.py"), encoding="utf-8").read())
     import subprocess
     proc = subprocess.run(
         [sys.executable, os.path.join(ROOT, "scripts", "test_ui_wiring.py")],
@@ -657,6 +667,7 @@ def test_gps_only():
     check("gps timer starts", "gps_timer.start" in main_src)
     from ui.map_helpers import (
         coords_moved,
+        decimate_polyline,
         display_route_for_map,
         heading_cardinal,
         should_push_gps_bridge,
@@ -665,6 +676,12 @@ def test_gps_only():
     check("map_helpers dist moved", coords_moved((0.0, 0.0), (0.0, 0.001), min_m=4.0) is True)
     check("map_helpers cardinal", heading_cardinal(0.0) == "N")
     check("map_helpers route", display_route_for_map({"miles": 1.2, "graph": True})["miles"] == 1.2)
+    dense = [[33.0 + i * 0.001, -118.0] for i in range(800)]
+    check("map_helpers decimate", len(decimate_polyline(dense)) <= 400)
+    check(
+        "map_helpers route polyline",
+        len(display_route_for_map({"polyline": dense, "graph": True})["polyline"]) <= 400,
+    )
     check(
         "map_helpers gps throttle",
         should_push_gps_bridge(

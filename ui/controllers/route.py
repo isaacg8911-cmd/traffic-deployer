@@ -13,7 +13,8 @@ from ui.paths import DATA_DIR
 from ui.route_pick_dialog import RoutePickOrderDialog
 from ui.setup_wizard import SetupWizard
 from ui.simple_mode import BUILD_LABEL, SIMPLE_MODE
-from ui.threads import RouteApplyPickThread, RouteOptimizeThread
+from ui.status_style import apply_active
+from ui.threads import RouteApplyPickThread, RouteOptimizeThread, RouteRetraceThread
 
 
 class RouteControllerMixin:
@@ -25,25 +26,42 @@ class RouteControllerMixin:
 
 
 
+    def _restore_build_button_if_idle(self) -> None:
+        if not hasattr(self, "btn_build"):
+            return
+        rt = getattr(self, "_route_thread", None)
+        if rt is not None and rt.isRunning():
+            return
+        self.btn_build.setEnabled(True)
+        self.btn_build.setText(BUILD_LABEL)
+
     def _build_route_from_uploads(self):
         if not self.excel_paths or not self.est_paths:
             self._warn("Add at least one Excel/CSV and one .EST map first.")
             return
+        self.statusBar().showMessage("BUILD ROUTE — reading Excel and .EST files…", 15000)
+        if hasattr(self, "btn_build"):
+            self.btn_build.setEnabled(False)
+            self.btn_build.setText("BUILDING ROUTE…")
         try:
             sites = ingest.parse_excel_sites(self.excel_paths)
         except ingest.ExcelEngineMissing as exc:
             self._warn(str(exc))
+            self._restore_build_button_if_idle()
             return
         except Exception as exc:  # noqa: BLE001
             self._warn(f"Could not read Excel/CSV: {exc}")
+            self._restore_build_button_if_idle()
             return
         if not sites:
             self._warn("No site coordinates found in the Excel/CSV (need begin lat/lon columns).")
+            self._restore_build_button_if_idle()
             return
         cfgs = self._est_configs()
         stops = ingest.match_est_files(cfgs, sites, self.state.home)
         if not stops:
             self._warn("0 sites matched. Check that site IDs appear in the .EST files.")
+            self._restore_build_button_if_idle()
             return
 
         report = validate.validate_build(
@@ -53,15 +71,18 @@ class RouteControllerMixin:
         )
         if not report["ok"]:
             self._warn("Cannot build route:\n\n" + "\n".join(report["errors"]))
+            self._restore_build_button_if_idle()
             return
         if report["warnings"]:
-            body = "\n".join(report["warnings"])
-            if QMessageBox.question(
+            body = "; ".join(report["warnings"][:4])
+            self.statusBar().showMessage(f"Build note: {body}", 12000)
+            if not SIMPLE_MODE and QMessageBox.question(
                 self, "Review before build",
-                f"{body}\n\nBuild route anyway?",
+                "\n".join(report["warnings"]) + "\n\nBuild route anyway?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             ) != QMessageBox.Yes:
+                self._restore_build_button_if_idle()
                 return
 
         self.state.active_files = [c["label"] for c in cfgs]
@@ -91,6 +112,15 @@ class RouteControllerMixin:
             self._optimize_and_route(merged)
         else:
             self.statusBar().showMessage("Route build cancelled.", 4000)
+            self._restore_build_button_if_idle()
+
+    def _start_pick_route_from_route_tab(self) -> None:
+        """Manual pick order — alternative to auto-optimize BUILD ROUTE."""
+        stops = self._stops_from_uploads_merged() or list(self.state.stops)
+        if not stops:
+            self._warn("Load Excel + .EST on Setup first (or resume a saved shift).")
+            return
+        self._begin_route_pick(stops)
 
     @staticmethod
     def _street_label(s: dict) -> str:
@@ -187,12 +217,13 @@ class RouteControllerMixin:
             self.sec_pick.setVisible(on)
         self.btn_pick_apply.setEnabled(on and n > 0 and n >= total)
         if hasattr(self, "btn_pick_auto"):
-            self.btn_pick_auto.setEnabled(False)
-            self.btn_pick_auto.hide()
+            partial = on and 0 < n < total
+            self.btn_pick_auto.setVisible(partial)
+            self.btn_pick_auto.setEnabled(partial)
         self.btn_pick_clear.setEnabled(on and n > 0)
         if hasattr(self, "btn_pick_order_win"):
             self.btn_pick_order_win.setEnabled(on)
-            self.btn_pick_order_win.setVisible(not on)
+            self.btn_pick_order_win.setVisible(on)
         if hasattr(self, "pick_combo_row"):
             self.pick_combo_row.setVisible(not on)
         if on:
@@ -201,23 +232,23 @@ class RouteControllerMixin:
             self._exit_pick_map_focus()
         self._refresh_pick_site_combo()
         if not on:
-            self.lbl_pick_status.setStyleSheet("")
-            self.lbl_pick_status.setText(
+            apply_active(
+                self.lbl_pick_status,
+                False,
                 "Route applied. Numbers on the map match drive order. "
-                f"Re-plan with {BUILD_LABEL} on Setup.")
+                f"Re-plan with {BUILD_LABEL} on Setup.",
+            )
             if sync_dialog:
                 self._hide_route_pick_dialog()
             return
         letters = self._pick_site_letters()
-        self.lbl_pick_status.setStyleSheet(
-            "font-size:14px;font-weight:700;color:#0d47a1;padding:8px 0;")
         if n >= total:
-            self.lbl_pick_status.setText(
-                f"All {total} stops picked on the map. Tap Apply route.")
+            pick_text = f"All {total} stops picked on the map. Tap Apply route."
         else:
-            self.lbl_pick_status.setText(
+            pick_text = (
                 f"{self._pick_prompt_text()} — blue begin or red end. "
                 f"Order updates in the popup.")
+        apply_active(self.lbl_pick_status, True, pick_text)
         if sync_dialog and on and self._route_pick_dialog is not None:
             by_uid = {s["uid"]: s for s in self.state.stops}
             self._route_pick_dialog.sync_from_parent(
@@ -581,10 +612,13 @@ class RouteControllerMixin:
     def _reoptimize(self):
         if not self.state.stops:
             return
+        stops = self._stops_from_uploads_merged() or list(self.state.stops)
+        if SIMPLE_MODE:
+            self._begin_route_pick(stops)
+            return
         mode = self._ask_route_build_mode()
         if mode is None:
             return
-        stops = self._stops_from_uploads_merged() or list(self.state.stops)
         if mode == "pick":
             self._begin_route_pick(stops)
         else:
@@ -594,6 +628,64 @@ class RouteControllerMixin:
             self._exit_pick_map_focus()
             self._hide_route_pick_dialog()
             self._optimize_and_route(stops)
+
+    def _schedule_retrace(self, *, select_row: int | None = None) -> None:
+        self._retrace_pending_row = select_row
+        self._retrace_timer.start(350)
+
+    def _run_retrace_debounced(self) -> None:
+        row = self._retrace_pending_row
+        self._retrace_pending_row = None
+        self._retrace_route_async(select_row=row)
+
+    def _retrace_route_only(self, *, select_row: int | None = None) -> None:
+        if not self.state.stops:
+            return
+        self._schedule_retrace(select_row=select_row)
+
+    def _retrace_route_async(self, *, select_row: int | None = None) -> None:
+        if not self.state.stops:
+            return
+        rt = getattr(self, "_route_thread", None)
+        if rt is not None and rt.isRunning():
+            self.statusBar().showMessage("Route build already running…", 4000)
+            return
+        rtr = getattr(self, "_retrace_thread", None)
+        if rtr is not None and rtr.isRunning():
+            self._retrace_pending_row = select_row
+            self._retrace_timer.start(350)
+            return
+        enrich = hasattr(self, "chk_show_segments") and self.chk_show_segments.isChecked()
+        thread = RouteRetraceThread(
+            list(self.state.stops),
+            tuple(self.state.home),
+            DATA_DIR,
+            enrich_segments=enrich,
+        )
+        self._retrace_thread = thread
+        self.statusBar().showMessage("Re-tracing route on streets…", 0)
+
+        def done(res: dict):
+            self._retrace_thread = None
+            if not res.get("ok"):
+                err = res.get("error", "re-trace failed")
+                if self.state.offline_mode:
+                    self._field_notice(err)
+                else:
+                    self._warn(err)
+                return
+            self.state.route = res["route"]
+            self._persist_shift(quiet=True)
+            self._refresh_route_list()
+            if select_row is not None:
+                self.list_route.setCurrentRow(select_row)
+            self._push_state()
+            miles = self.state.route.get("miles", 0.0)
+            self.statusBar().showMessage(
+                f"Route re-traced — {miles:.1f} mi (order unchanged).", 6000)
+
+        thread.finished_result.connect(done)
+        thread.start()
 
     def _stops_from_uploads_merged(self) -> list[dict] | None:
         """Fresh site list from current Excel/EST (keeps field progress), not saved route order."""
@@ -624,27 +716,6 @@ class RouteControllerMixin:
         self.state.stops = stops
         self.current_index = j
         self._retrace_route_only(select_row=j)
-
-    def _retrace_route_only(self, *, select_row: int | None = None):
-        if not self.state.stops:
-            return
-        from core import routing
-        res = routing.retrace_only(
-            list(self.state.stops), tuple(self.state.home), DATA_DIR)
-        from core.map_display import enrich_segment_paths
-
-        self.state.route = res["route"]
-        if self.chk_show_segments.isChecked():
-            enrich_segment_paths(self.state.stops, DATA_DIR)
-        self._persist_shift(quiet=True)
-        self._refresh_route_list()
-        if select_row is not None:
-            self.list_route.setCurrentRow(select_row)
-        self._push_state()
-        self.statusBar().showMessage(
-            f"Route re-traced — {self.state.route.get('miles', 0):.1f} mi (order unchanged).",
-            6000,
-        )
 
     def _reset_route(self):
         if QMessageBox.question(
@@ -797,6 +868,7 @@ class RouteControllerMixin:
                     "No offline road map for this area yet.\n\n"
                     "On WiFi: Setup → Download road map → BUILD ROUTE.")
         self._gps_follow = True
+        self._map_follow = True
         self.nav = {"active": True}
         self.bridge.set_follow(True)
         self._set_drive_mode(True)
@@ -815,6 +887,7 @@ class RouteControllerMixin:
 
     def _stop_drive(self):
         self._gps_follow = False
+        self._map_follow = False
         self.nav = {"active": False}
         self._set_drive_mode(False)
         self.bridge.set_follow(False)

@@ -171,22 +171,35 @@ class MapSyncControllerMixin:
             "index": idx,
         }
 
+    def _follow_banner_text(self) -> str:
+        if not self._gps_follow:
+            return ""
+        nxt = self._next_leg_payload()
+        if not nxt:
+            return "All stops done."
+        gi = nxt["index"]
+        target = self.state.stops[gi]
+        return (
+            f"Next: Site {nxt.get('to_id', '?')} — {nxt['miles']:.1f} mi  "
+            f"({self._street_label(target)})")
+
     def _update_follow_banner(self) -> None:
+        text = self._follow_banner_text()
+        if hasattr(self, "lbl_drive_next"):
+            if self._gps_follow and text:
+                self.lbl_drive_next.setText(text)
+                self.lbl_drive_next.show()
+            else:
+                self.lbl_drive_next.hide()
         if not hasattr(self, "lbl_drive_banner"):
             return
         if not self._gps_follow:
             self.lbl_drive_banner.hide()
             return
-        nxt = self._next_leg_payload()
-        if not nxt:
-            self.lbl_drive_banner.setText("All stops done.")
-            self.lbl_drive_banner.show()
+        if not text:
+            self.lbl_drive_banner.hide()
             return
-        gi = nxt["index"]
-        target = self.state.stops[gi]
-        self.lbl_drive_banner.setText(
-            f"Next: Site {nxt.get('to_id', '?')} — {nxt['miles']:.1f} mi  "
-            f"({self._street_label(target)})")
+        self.lbl_drive_banner.setText(text)
         self.lbl_drive_banner.show()
 
     def _set_drive_mode(self, on: bool) -> None:
@@ -506,6 +519,7 @@ class MapSyncControllerMixin:
                 else None
             ),
             "on_install": self.pages.currentIndex() == 2,
+            "drive_banner": self._follow_banner_text() if following else "",
         }
         self.bridge.send_state(st)
         miles = self.state.route.get("miles", 0.0)

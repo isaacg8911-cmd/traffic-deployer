@@ -164,10 +164,87 @@ def test_python_pick_flow() -> None:
     _ = app
 
 
+def test_drag_reorder_commit() -> None:
+    """Drag a picked stop to the top — the applied order must follow (start-from-top)."""
+    section("Drag reorder -> start from the top")
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from core import ingest
+    from core.map_display import apply_manual_order
+    from field_job_fixtures import resolve_field_job
+    from ui.paths import DATA_DIR
+    from ui.route_pick_dialog import RoutePickOrderDialog
+
+    job = resolve_field_job()
+    sites = ingest.parse_excel_sites([job.xls])
+    cfgs = [{"path": p, "label": label} for p, label in job.ests]
+    stops = ingest.match_est_files(cfgs, sites, job.home)
+    if len(stops) < 3:
+        fail("need >=3 stops for reorder", str(len(stops)))
+        return
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    uids = [str(s["uid"]) for s in stops]
+    by_uid = {str(s["uid"]): s for s in stops}
+
+    parent_order: list[str] = list(uids)
+
+    def on_order(new_uids: list[str]) -> None:
+        parent_order[:] = list(new_uids)
+
+    dlg = RoutePickOrderDialog()
+    dlg.order_changed.connect(on_order)
+    dlg.sync_from_parent(
+        uids=list(uids),
+        stops_by_uid=by_uid,
+        letters={u: chr(65 + i) for i, u in enumerate(uids)},
+        street_label=lambda s: str(s.get("street", "")),
+        total=len(uids),
+        prompt="",
+        pick_sides={},
+    )
+
+    last = dlg.list.count() - 1
+    moved_uid = dlg.list.item(last).data(Qt.ItemDataRole.UserRole)
+
+    # Simulate the *visible* result of a drag: source removed, item re-inserted
+    # at the top. QListWidget InternalMove does this without emitting rowsMoved,
+    # so at this point the parent order is still stale (this is the reported bug).
+    it = dlg.list.takeItem(last)
+    dlg.list.insertItem(0, it)
+    if parent_order[0] == moved_uid:
+        fail("precondition: rowsMoved should not have fired on manual take/insert")
+        return
+    ok("stale before drop commit (reproduces bug)")
+
+    # dropEvent schedules dlg.list.dropped; fire it as the deferred timer would.
+    dlg.list.dropped.emit()
+    app.processEvents()
+
+    if parent_order[0] == moved_uid:
+        ok("drop commit moved stop to the top", f"first={parent_order[0]}")
+    else:
+        fail("drop commit did not update order", f"first={parent_order[0]} want={moved_uid}")
+        return
+
+    # And the applied route must actually start at that stop.
+    picked = [by_uid[u] for u in parent_order]
+    res = apply_manual_order(tuple(job.home), picked, DATA_DIR)
+    applied = [str(s["uid"]) for s in res["order"]]
+    if applied and applied[0] == moved_uid:
+        ok("applied route starts at chosen top stop", f"miles={res['route'].get('miles', 0):.1f}")
+    else:
+        fail("applied route wrong start", str(applied[:3]))
+
+    _ = app
+
+
 def main() -> int:
     print("ROUTE PICK CLICK STRESS\n")
     test_js_assets()
     test_python_pick_flow()
+    test_drag_reorder_commit()
     print("\n" + "=" * 50)
     if FAILURES:
         for f in FAILURES:

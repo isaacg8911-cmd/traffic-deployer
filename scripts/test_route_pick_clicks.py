@@ -237,6 +237,28 @@ def test_drag_reorder_commit() -> None:
     else:
         fail("applied route wrong start", str(applied[:3]))
 
+    # Belt-and-suspenders: even if the drop-commit signal is NEVER delivered,
+    # Apply must adopt the list order. Simulate a totally missed signal.
+    class _AppWin:
+        def __init__(self, dialog, uids):
+            self._route_pick_dialog = dialog
+            self._route_pick_uids = list(uids)
+
+    from ui.controllers.route import RouteControllerMixin as _RC
+
+    # reorder list again (move NEW bottom to top) with NO signal at all
+    stale = [str(dlg.list.item(i).data(Qt.ItemDataRole.UserRole)) for i in range(dlg.list.count())]
+    last2 = dlg.list.count() - 1
+    top_uid = str(dlg.list.item(last2).data(Qt.ItemDataRole.UserRole))
+    it2 = dlg.list.takeItem(last2)
+    dlg.list.insertItem(0, it2)
+    app_win = _AppWin(dlg, stale)  # parent still holds pre-drag order
+    _RC._sync_pick_order_from_dialog(app_win)
+    if app_win._route_pick_uids and app_win._route_pick_uids[0] == top_uid:
+        ok("apply adopts list order even if drop signal missed")
+    else:
+        fail("apply did not adopt list order", str(app_win._route_pick_uids[:3]))
+
     _ = app
 
 

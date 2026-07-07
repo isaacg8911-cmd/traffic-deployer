@@ -368,8 +368,22 @@ class RouteControllerMixin:
         self.statusBar().showMessage(
             f"Auto-finished — {len(self._route_pick_uids)} stops in order. Tap Apply route.", 8000)
 
+    def _sync_pick_order_from_dialog(self) -> None:
+        """Adopt the order window's list order (source of truth for sequence).
+
+        Guarantees a drag-reorder ("start from the top") is honored on Apply,
+        independent of drop-signal timing. Only applies on a pure reorder (same
+        set of stops) so it never clobbers an out-of-sync selection.
+        """
+        if self._route_pick_dialog is None:
+            return
+        dlg_order = self._route_pick_dialog.current_order()
+        if dlg_order and set(dlg_order) == set(self._route_pick_uids):
+            self._route_pick_uids = list(dlg_order)
+
     def _route_pick_apply(self) -> None:
         total = len(self.state.stops)
+        self._sync_pick_order_from_dialog()
         if not self._route_pick_mode or not self._route_pick_uids:
             self._warn("Pick stop 1 on the map (blue or red dot) or from the dropdown.")
             return

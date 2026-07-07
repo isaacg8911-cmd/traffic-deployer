@@ -124,6 +124,14 @@ class RoutePickOrderDialog(QDialog):
         self.order_changed.emit(uids)
         self._update_count(len(uids))
 
+    def current_order(self) -> list[str]:
+        """Authoritative uid order as shown in the list right now.
+
+        Read at Apply time so the routed order always matches what the operator
+        sees, even if a drag-drop commit signal was ever missed.
+        """
+        return self._uids_from_list()
+
     def _uids_from_list(self) -> list[str]:
         out: list[str] = []
         for i in range(self.list.count()):

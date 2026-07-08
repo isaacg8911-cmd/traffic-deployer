@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QListWidgetItem, QMessageBox
 
 import gps_reader
 import road_router
@@ -124,6 +124,7 @@ class InstallControllerMixin:
         self.lbl_street_warn.setText(warn)
         self.lbl_street_warn.setVisible(bool(warn))
         self._refresh_install_checklist()
+        self._refresh_install_progress_list()
         self._update_compass_labels(self.gps.latest())
         self._update_counter_labels()
         self._counter_show_memory()
@@ -182,6 +183,55 @@ class InstallControllerMixin:
         card = self._heading_cardinal(hdg)
         self.statusBar().showMessage(
             f"Direction {hint['direction']} from compass: {hdg:.0f}° ({card})", 5000)
+
+    def _refresh_install_progress_list(self) -> None:
+        """Left-panel Excel/site progress — OK / SKIP / GPS per sheet row."""
+        lst = getattr(self, "list_install_progress", None)
+        if lst is None:
+            return
+        lst.blockSignals(True)
+        lst.clear()
+        if not self.state.stops:
+            lst.blockSignals(False)
+            return
+        visible = self._visible_stop_indices()
+        cur = self.current_index
+        cur_row = 0
+        for seq, idx in enumerate(visible, start=1):
+            s = self.state.stops[idx]
+            mark = "OK" if s.get("installed") else "SKIP" if s.get("skipped") else "--"
+            gps = "GPS" if s.get("field_lat") is not None else "   "
+            sheet = str(s.get("sheet") or "").strip()
+            sheet_txt = f" · {sheet}" if sheet else ""
+            item = QListWidgetItem(
+                f"{mark} {gps}  {seq}. Site {s.get('id', '?')}{sheet_txt} — "
+                f"{self._street_label(s)}")
+            item.setData(Qt.ItemDataRole.UserRole, idx)
+            lst.addItem(item)
+            if idx == cur:
+                cur_row = lst.count() - 1
+        if lst.count():
+            lst.setCurrentRow(cur_row)
+        lst.blockSignals(False)
+
+    def _install_progress_clicked(self, item: QListWidgetItem) -> None:
+        idx = item.data(Qt.ItemDataRole.UserRole)
+        if idx is None:
+            return
+        self._select_install_stop(int(idx))
+
+    def _select_install_stop(self, idx: int) -> None:
+        """Change install site — always flush the open form first."""
+        if not self.state.stops or idx < 0 or idx >= len(self.state.stops):
+            return
+        if idx == self.current_index:
+            return
+        self._end_manual_grab(silent=True)
+        self._flush_install_form()
+        self._persist_shift(quiet=True)
+        self.current_index = idx
+        self._refresh_install()
+        self._center_current()
 
     def _manual_grab_prompt(self) -> str:
         if not self.state.stops or self.current_index >= len(self.state.stops):
@@ -405,6 +455,12 @@ class InstallControllerMixin:
         if source == "gps":
             lat, lon, snapped = geo.snap_field_gps(lat, lon, DATA_DIR)
         s = self.state.stops[self.current_index]
+        had_gps = s.get("field_lat") is not None and s.get("field_lon") is not None
+        thread = getattr(self, "_field_street_thread", None)
+        if thread is not None and thread.isRunning():
+            thread.requestInterruption()
+            thread.wait(200)
+            self._field_street_thread = None
         s["field_lat"], s["field_lon"] = lat, lon
         s["field_coord_source"] = source
         label = "Manual GPS" if source == "manual" else "Field GPS"
@@ -417,11 +473,19 @@ class InstallControllerMixin:
             uid, lat, lon, site_id, pending=(source == "manual"), source=source, draggable=draggable,
         )
         snap_note = " (snapped to road)" if snapped else ""
-        self.statusBar().showMessage(
-            f"Site {site_id} pin saved at {lat:.5f}, {lon:.5f}{snap_note}.", 5000)
+        if had_gps:
+            verb = "GPS updated" if source == "gps" else "Pin updated"
+            self.statusBar().showMessage(
+                f"Site {site_id} — {verb} (newest replaces previous).{snap_note}", 6000)
+        else:
+            self.statusBar().showMessage(
+                f"Site {site_id} pin saved at {lat:.5f}, {lon:.5f}{snap_note}.", 5000)
         self._schedule_pin_persist()
         self._refresh_install_checklist()
+        self._refresh_install_progress_list()
         self._push_state()
+        if hasattr(self, "_update_live_shift_excel"):
+            self._update_live_shift_excel()
         if source != "manual":
             self._start_field_street_thread(
                 self.current_index, lat, lon, prefer_online=self._internet_allowed(),
@@ -513,16 +577,20 @@ class InstallControllerMixin:
         self._sync_counter_fields(s)
         self._persist_shift(quiet=True)
         self._counter_inventory_shift()
+        if hasattr(self, "_update_live_shift_excel"):
+            self._update_live_shift_excel()
         self._push_state()
         self._refresh_route_list()
         self._refresh_audit()
         self._refresh_field_alerts()
         verb = "Installed" if installed else "Skipped"
         self.statusBar().showMessage(
-            f"Site {s.get('id', '?')} {verb} — saved. Tap Next → for the next stop.", 8000)
+            f"Site {s.get('id', '?')} {verb} — saved on this site only. "
+            f"Tap Next → when you are ready to move on.", 8000)
         if installed:
             self._maybe_export_nudge()
         self._refresh_install()
+        # Stay on the same stop — INSTALL/SKIP never auto-advances.
 
     def _clear_field_gps(self) -> None:
         """Remove accidental duplicate GPS / manual pin for the current stop."""
@@ -546,14 +614,13 @@ class InstallControllerMixin:
         self._persist_shift(quiet=True)
         self._push_state()
         self._refresh_install_checklist()
+        self._refresh_install_progress_list()
         self.statusBar().showMessage(
             f"Site {s.get('id', '?')} GPS/pin cleared — grab again if needed.", 8000)
 
     def _nav_install(self, step: int):
         if not self.state.stops:
             return
-        self._flush_install_form()
-        self._persist_shift(quiet=True)
         vis = self._visible_stop_indices()
         if not vis:
             return
@@ -562,10 +629,7 @@ class InstallControllerMixin:
         except ValueError:
             pos = 0
         pos = max(0, min(len(vis) - 1, pos + step))
-        self.current_index = vis[pos]
-        self._end_manual_grab(silent=True)
-        self._refresh_install()
-        self._center_current()
+        self._select_install_stop(vis[pos])
 
     def _center_current(self):
         if self.state.stops and self.current_index < len(self.state.stops):

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -56,6 +57,18 @@ def build_install_page(win) -> QWidget:
     win.lbl_street_warn.hide()
     hv.addWidget(win.lbl_street_warn)
     v.addWidget(header)
+
+    lbl_prog = QLabel("Excel sites — OK / SKIP / GPS")
+    lbl_prog.setObjectName("hint")
+    v.addWidget(lbl_prog)
+    win.list_install_progress = QListWidget()
+    win.list_install_progress.setObjectName("installProgress")
+    win.list_install_progress.setMaximumHeight(110 if COMPACT_UI else 150)
+    win.list_install_progress.setToolTip(
+        "Route progress by Excel sheet — tap a row to open that site. "
+        "OK=installed, SKIP=skipped, GPS=grab saved.")
+    win.list_install_progress.itemClicked.connect(win._install_progress_clicked)
+    v.addWidget(win.list_install_progress)
 
     if COMPACT_UI:
         win.sec_compass = None

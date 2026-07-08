@@ -605,6 +605,8 @@ class MapSyncControllerMixin:
                     )
                 else:
                     self.statusBar().showMessage(f"Site {site_id} — install GPS pin", 8000)
+                if self.pages.currentIndex() == 2:
+                    self._select_install_stop(idx)
             return
         uid, side = self._parse_stop_click(str(uid).strip())
         if self._route_pick_mode:
@@ -623,9 +625,7 @@ class MapSyncControllerMixin:
         self.statusBar().showMessage(self._stop_click_status(stop, idx, side), 10000)
         if self.pages.currentIndex() == 2:
             if idx < len(self.state.stops):
-                self.current_index = idx
-                self._refresh_install()
-                self._center_current()
+                self._select_install_stop(idx)
             return
         # Setup / Route / other tabs: show Excel site # only — stay on current tab.
 

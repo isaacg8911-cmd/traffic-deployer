@@ -38,6 +38,9 @@ def main() -> int:
         def _refresh_install_checklist(self):
             pass
 
+        def _refresh_install_progress_list(self):
+            pass
+
         def _push_state(self, fit=False):
             pass
 

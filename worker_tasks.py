@@ -27,7 +27,8 @@ def _download_roads(p: dict) -> dict:
 def _route(p: dict) -> dict:
     from core import routing
     home = tuple(p["home"])
-    res = routing.optimize(p["stops"], home, p["data_dir"])
+    start = tuple(p["start"]) if p.get("start") else None
+    res = routing.optimize(p["stops"], home, p["data_dir"], start=start)
     ordered = res["order"]
     route = routing.build_route(ordered, home, p["data_dir"])
     return {"ok": True, "order": ordered, "route": route, "graph": res["graph"]}

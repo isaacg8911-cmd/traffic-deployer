@@ -1,16 +1,29 @@
 """Home setup checklist before READY FOR OFFLINE (P33)."""
 from __future__ import annotations
 
-from core.state import DEFAULT_HOME
+from core.state import DEFAULT_HOME, RouteState
+
+
+def road_map_covers_job(data_dir: str, stops: list[dict]) -> tuple[bool, str]:
+    """True when the saved road graph spans this job's sites (not a different county)."""
+    if not stops:
+        return True, ""
+    import road_router
+    from core.routing import graph_covers_stops
+
+    if not road_router.has_graph(data_dir):
+        return False, "Download or import road_graph.graphml"
+    graph = road_router.load_graph(data_dir)
+    if graph is None:
+        return False, "Road map on disk but will not load — re-import from home PC"
+    if graph_covers_stops(graph, stops):
+        return True, "Covers this job"
+    return False, "Saved map is for a different area — Setup → Download with this job loaded"
 
 
 def _home_ok(home: tuple[float, float], default_home: tuple | None) -> bool:
-    if default_home:
-        return True
-    return (
-        abs(float(home[0]) - DEFAULT_HOME[0]) > 1e-4
-        or abs(float(home[1]) - DEFAULT_HOME[1]) > 1e-4
-    )
+    ref = default_home if default_home is not None else home
+    return not RouteState.is_factory_home(ref[0], ref[1])
 
 
 def evaluate(
@@ -22,6 +35,9 @@ def evaluate(
     has_graph: bool,
     route_miles: float,
     field_report: dict | None = None,
+    stops: list[dict] | None = None,
+    data_dir: str = "",
+    route_graph_uncovered: bool = False,
 ) -> dict:
     """Return {ok, items: [{id, label, ok, detail}], blockers: [str]}."""
     items: list[dict] = []
@@ -47,25 +63,44 @@ def evaluate(
     if not ok_files:
         blockers.append("Add at least one Excel/CSV and one .EST map.")
 
-    ok_graph = has_graph
+    covers, cover_detail = True, ""
+    if stops and data_dir:
+        covers, cover_detail = road_map_covers_job(data_dir, stops)
+    elif route_graph_uncovered:
+        covers = False
+        cover_detail = "Road map does not cover this job"
+    ok_graph = has_graph and covers
+    road_detail = cover_detail if has_graph else "Download or import road_graph.graphml"
     items.append({
         "id": "roads",
-        "label": "Road map on laptop",
+        "label": "Road map covers this job",
         "ok": ok_graph,
-        "detail": "Download or import road_graph.graphml" if not ok_graph else "Local graph ready",
+        "detail": road_detail if ok_graph else (road_detail or "Download or import road_graph.graphml"),
     })
-    if not ok_graph:
+    if not has_graph:
         blockers.append("Download or import the road map for your work area.")
+    elif not covers:
+        blockers.append(
+            "Road map does not cover these sites — Setup → Download road map "
+            "while this Excel/.EST job is loaded, then BUILD ROUTE again."
+        )
 
     ok_route = route_miles > 0.05
     items.append({
         "id": "build",
         "label": "Route built",
         "ok": ok_route,
-        "detail": f"{route_miles:.1f} mi" if ok_route else "Press BUILD OPTIMIZED ROUTE",
+        "detail": (
+            f"{route_miles:.1f} mi"
+            if ok_route
+            else "Tap Apply route on Route tab (or BUILD ROUTE -> Suggest route)"
+        ),
     })
     if not ok_route:
-        blockers.append("Build your optimized route before leaving.")
+        blockers.append(
+            "Finish the route — tap Apply route on Route tab after picking order, "
+            "or use BUILD ROUTE -> Suggest route."
+        )
 
     if field_report:
         for it in field_report.get("items", []):
@@ -87,14 +122,18 @@ def route_summary(stops: list, route: dict) -> dict:
     miles = float(route.get("miles", 0) or 0)
     zones = sorted({int(s["route_zone"]) for s in stops if s.get("route_zone") is not None})
     on_graph = bool(route.get("graph"))
+    uncovered = bool(route.get("graph_uncovered"))
+    if on_graph:
+        kind = "real roads"
+    elif uncovered:
+        kind = "straight-line (wrong map area)"
+    else:
+        kind = "straight-line (no road map)"
     return {
         "stops": len(stops),
         "miles": miles,
         "zones": len(zones),
         "zone_list": zones,
         "on_graph": on_graph,
-        "text": (
-            f"{len(stops)} stops · {miles:.1f} mi · {len(zones)} zone(s) · "
-            f"{'real roads' if on_graph else 'segment lines only'}"
-        ),
+        "text": f"{len(stops)} stops · {miles:.1f} mi · {len(zones)} zone(s) · {kind}",
     }

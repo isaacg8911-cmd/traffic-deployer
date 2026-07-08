@@ -1,13 +1,11 @@
-"""Route engine: order stops for minimum drive time site 1 -> site N (open path).
+"""Route engine: suggest stop order site 1 -> site N (open path, no return leg).
 
-Each site is a street segment (begin -> end). Routing ignores the midpoint;
-it starts at the far edge of the job from the chosen start, chains the nearest
-blue/red dot from there, and reserves a home-near endpoint for the finish.
-Home is an ordering anchor only — you drive to site 1 yourself; the app chains
-site 1..N without a return-home leg.
+Each site is a street segment (begin -> end). The engine clusters nearby sites
+into zones, orders zones outward from your start (GPS fix when available, else
+setup origin), and minimizes road miles between crossings inside each zone.
 
-Full pipeline (ingest, road graph, open-path matrix/2-opt, map trace, driving):
-see ROUTING_AND_MAP.md in the project root.
+You drive to site 1 yourself; legs chain site 1..N only. Full pipeline:
+ROUTING_AND_MAP.md in the project root.
 """
 from __future__ import annotations
 
@@ -29,8 +27,8 @@ MAX_ORDER_STOPS = 100
 EXACT_MATRIX_MAX_STOPS = 9
 # Optional OR-Tools TSP when installed (pip install ortools); used for 10–15 stops.
 ORTOOLS_MATRIX_MAX_STOPS = 15
-# Zone-first ordering: finish a geographic area before driving to the next (reduces backtracking).
-ZONE_MIN_STOPS = 8
+# Zone sweep: cluster geographically for 12+ stops (P20/P21).
+ZONE_MIN_STOPS = 12
 
 
 def _haversine_km(a, b):
@@ -829,59 +827,211 @@ def _nearest_endpoint_from(
     return d_e, "end"
 
 
-def _order_far_first_homeward(
-    stops: list[dict],
+def _resolve_anchor(
     home: tuple[float, float],
+    start: tuple[float, float] | None = None,
+) -> tuple[float, float]:
+    """Day-start point: live GPS when provided, else setup origin."""
+    if start is not None:
+        try:
+            la, lo = float(start[0]), float(start[1])
+        except (TypeError, ValueError):
+            la, lo = 0.0, 0.0
+        if abs(la) > 1e-6 or abs(lo) > 1e-6:
+            return la, lo
+    return float(home[0]), float(home[1])
+
+
+def _min_dist_to_stop(
+    graph,
+    lengths: dict | None,
+    pt: tuple[float, float],
+    stop: dict,
+) -> float:
+    seg_b, seg_e = _seg_endpoints(stop)
+    return min(
+        _cached_dist(graph, lengths, pt, seg_b),
+        _cached_dist(graph, lengths, pt, seg_e),
+    )
+
+
+def _nearest_stop_index(
+    graph,
+    lengths: dict | None,
+    pt: tuple[float, float],
+    stops: list[dict],
+) -> int:
+    return min(
+        range(len(stops)),
+        key=lambda i: _min_dist_to_stop(graph, lengths, pt, stops[i]),
+    )
+
+
+def _exact_open_path_from_start(
+    matrix: list[list[float]],
+    n_stops: int,
+    start_idx: int,
+) -> list[int] | None:
+    """Best open path on stop-only matrix with a fixed first stop."""
+    if n_stops > EXACT_MATRIX_MAX_STOPS or n_stops < 2:
+        return None
+    rest = [i for i in range(n_stops) if i != start_idx]
+    best_route: list[int] | None = None
+    best_d = float("inf")
+    for perm in itertools.permutations(rest):
+        r = [start_idx] + list(perm)
+        d = _path_len_open(matrix, r)
+        if d < best_d:
+            best_d, best_route = d, r
+    return best_route
+
+
+def _open_path_heuristic_from_start(
+    matrix: list[list[float]],
+    n_stops: int,
+    start_idx: int,
+) -> list[int]:
+    route = [start_idx]
+    rem = set(range(n_stops)) - {start_idx}
+    cur = start_idx
+    while rem:
+        nxt = min(rem, key=lambda j: matrix[cur][j])
+        route.append(nxt)
+        rem.remove(nxt)
+        cur = nxt
+    if n_stops >= 4:
+        route = _two_opt_open(matrix, route, max_passes=_two_opt_max_passes(n_stops))
+    if n_stops <= 50:
+        route = _or_opt_open(matrix, route, max_rounds=2 if n_stops <= 30 else 1)
+    return route
+
+
+def _optimize_cluster_from_entry(
+    entry: tuple[float, float],
+    cluster: list[dict],
     graph,
 ) -> list[dict]:
-    """Field rule: start farthest from home, chain nearest dots, finish nearest home."""
+    """Open-path tour inside one zone, entering at the stop nearest to entry."""
+    n = len(cluster)
+    if n <= 1:
+        return copy.deepcopy(cluster)
+    work = copy.deepcopy(cluster)
+    matrix, lengths = _stops_only_matrix(graph, work)
+    start_idx = _nearest_stop_index(graph, lengths, entry, work)
+    route_idx = _exact_open_path_from_start(matrix, n, start_idx)
+    if route_idx is None:
+        route_idx = _open_path_heuristic_from_start(matrix, n, start_idx)
+    return [work[i] for i in route_idx]
+
+
+def _cluster_entry_dist(
+    anchor: tuple[float, float],
+    cluster: list[dict],
+    graph,
+) -> float:
+    """Road/hav meters from day-start to cluster centroid."""
+    la = sum(float(s["lat"]) for s in cluster) / len(cluster)
+    lo = sum(float(s["lon"]) for s in cluster) / len(cluster)
+    if graph is not None:
+        return road_router.road_distance_m(graph, anchor, (la, lo))
+    return _haversine_km(anchor, (la, lo)) * 1000.0
+
+
+def _order_clusters_near_to_far(
+    anchor: tuple[float, float],
+    clusters: list[list[dict]],
+    graph,
+) -> list[list[dict]]:
+    """Visit nearby zones first, then push outward — finish each area before leaving."""
+    if len(clusters) <= 1:
+        return clusters
+    return sorted(clusters, key=lambda cl: _cluster_entry_dist(anchor, cl, graph))
+
+
+def _stop_midpoint(stop: dict) -> tuple[float, float]:
+    return float(stop["lat"]), float(stop["lon"])
+
+
+def _order_stops_field(
+    stops: list[dict],
+    anchor: tuple[float, float],
+    graph,
+) -> list[dict]:
+    """Zone sweep + open-path legs: anchor -> zone1 -> zone2 -> ..."""
     n = len(stops)
     if n <= 1:
-        return _assign_crossings(graph, home, list(stops), lengths=None)
+        return copy.deepcopy(stops)
+    work = copy.deepcopy(stops)
+    use_zones = n >= ZONE_MIN_STOPS
+    if not use_zones:
+        return _optimize_cluster_from_entry(anchor, work, graph)
 
-    _, lengths = _road_matrix(graph, home, stops)
-    work = [copy.deepcopy(s) for s in stops]
-    home_pt = (float(home[0]), float(home[1]))
-    remaining = set(range(n))
-
-    def home_near(i: int) -> tuple[float, str]:
-        return _nearest_endpoint_from(graph, lengths, home_pt, work[i])
-
-    first_idx = max(remaining, key=lambda i: home_near(i)[0])
-    _, first_side = home_near(first_idx)
-    remaining.remove(first_idx)
-
-    ordered: list[dict] = [work[first_idx]]
-    cur = _set_crossing_side(ordered[-1], first_side)
-
-    final_idx: int | None = None
-    if remaining:
-        final_idx = min(remaining, key=lambda i: home_near(i)[0])
-        remaining.remove(final_idx)
-
-    while remaining:
-        nxt_idx = min(
-            remaining,
-            key=lambda i: _nearest_endpoint_from(graph, lengths, cur, work[i])[0],
-        )
-        _, side = _nearest_endpoint_from(graph, lengths, cur, work[nxt_idx])
-        remaining.remove(nxt_idx)
-        ordered.append(work[nxt_idx])
-        cur = _set_crossing_side(ordered[-1], side)
-
-    if final_idx is not None:
-        _, final_side = home_near(final_idx)
-        ordered.append(work[final_idx])
-        _set_crossing_side(ordered[-1], final_side)
-
+    clusters = _grid_clusters(work)
+    clusters = _order_clusters_near_to_far(anchor, clusters, graph)
+    ordered: list[dict] = []
+    entry = anchor
+    for zi, cluster in enumerate(clusters, start=1):
+        chunk = _optimize_cluster_from_entry(entry, cluster, graph)
+        for s in chunk:
+            s["route_zone"] = zi
+        ordered.extend(chunk)
+        if chunk:
+            entry = _stop_midpoint(chunk[-1])
     return ordered
 
 
-def _optimize_open_path(stops: list[dict], graph) -> list[dict]:
+def _open_path_cost_assigned(
+    graph,
+    ordered: list[dict],
+    lengths: dict | None,
+) -> float:
+    """Drive meters along assigned crossings (open path, no depot)."""
+    if len(ordered) < 2:
+        return 0.0
+    trial = _assign_crossings_open(graph, copy.deepcopy(ordered), lengths=lengths)
+    cur = _stop_pt(trial[0])
+    total = 0.0
+    for s in trial[1:]:
+        nxt = _stop_pt(s)
+        total += _cached_dist(graph, lengths, cur, nxt)
+        cur = nxt
+    return total
+
+
+def _refine_open_order(
+    graph,
+    ordered: list[dict],
+    lengths: dict | None,
+    *,
+    max_passes: int = 6,
+) -> list[dict]:
+    """2-opt on visit order using true open-path crossing cost."""
+    if graph is None or lengths is None or len(ordered) < 4:
+        return _assign_crossings_open(graph, ordered, lengths=lengths)
+    best = copy.deepcopy(ordered)
+    best_d = _open_path_cost_assigned(graph, best, lengths)
+    improved, passes = True, 0
+    while improved and passes < max_passes:
+        improved, passes = False, passes + 1
+        n = len(best)
+        for i in range(n - 1):
+            for j in range(i + 1, n):
+                if j - i == 1:
+                    continue
+                cand = best[:i] + best[i : j + 1][::-1] + best[j + 1 :]
+                d = _open_path_cost_assigned(graph, cand, lengths)
+                if d + 1e-4 < best_d:
+                    best, best_d, improved = cand, d, True
+    return _assign_crossings_open(graph, best, lengths=lengths)
+
+
+def _optimize_open_path(stops: list[dict], graph, *, anchor: tuple[float, float] | None = None) -> list[dict]:
     """Order stops to minimize road miles site 1 -> site N (open Hamiltonian path)."""
     n = len(stops)
     if n <= 1:
         return list(stops)
+    if anchor is not None:
+        return _optimize_cluster_from_entry(anchor, stops, graph)
     matrix, lengths = _stops_only_matrix(graph, stops)
     route_idx = _exact_open_path(matrix, n)
     if route_idx is None:
@@ -916,17 +1066,12 @@ def _optimize_zoned(
     stops: list[dict],
     home: tuple[float, float],
     graph,
+    *,
+    anchor: tuple[float, float] | None = None,
 ) -> list[dict]:
-    """Far zones first, trail back toward home; complete each zone before branching to the next."""
-    clusters = _grid_clusters(stops)
-    clusters = _order_clusters_far_to_near(home, clusters, graph)
-    ordered: list[dict] = []
-    for zi, cluster in enumerate(clusters, start=1):
-        chunk = _tour_cluster_trail_back(home, cluster, graph)
-        for s in chunk:
-            s["route_zone"] = zi
-        ordered.extend(chunk)
-    return ordered
+    """Zone sweep from anchor; kept for callers that already import this helper."""
+    pt = anchor if anchor is not None else (float(home[0]), float(home[1]))
+    return _order_stops_field(stops, pt, graph)
 
 
 def _matrix_tour(
@@ -974,8 +1119,14 @@ def _finish_crossings(
     return ordered
 
 
-def optimize(stops: list[dict], home: tuple[float, float], data_dir: str) -> dict:
-    """Order stops farthest-first, nearest dot-to-dot, ending near home."""
+def optimize(
+    stops: list[dict],
+    home: tuple[float, float],
+    data_dir: str,
+    *,
+    start: tuple[float, float] | None = None,
+) -> dict:
+    """Suggest stop order: zone sweep from GPS/start, open-path miles between sites."""
     if not stops:
         return {"order": [], "graph": False}
 
@@ -985,20 +1136,47 @@ def optimize(stops: list[dict], home: tuple[float, float], data_dir: str) -> dic
         n = len(stops)
 
     graph, uncovered = _covering_graph(data_dir, stops)
+    anchor = _resolve_anchor(home, start)
+    ordered = _order_stops_field(stops, anchor, graph)
 
-    ordered = _order_far_first_homeward(stops, home, graph)
-    return {"order": ordered, "graph": graph is not None, "graph_uncovered": uncovered}
+    lengths = None
+    if graph is not None:
+        _, lengths = _stops_only_matrix(graph, ordered)
+    zoned = n >= ZONE_MIN_STOPS
+    refine_passes = 0
+    if graph is not None and not zoned:
+        refine_passes = _cached_refine_passes(len(ordered))
+    if refine_passes and lengths is not None:
+        ordered = _refine_open_order(
+            graph, ordered, lengths, max_passes=refine_passes)
+    else:
+        ordered = _assign_crossings_open(graph, ordered, lengths=lengths)
+
+    return {
+        "order": ordered,
+        "graph": graph is not None,
+        "graph_uncovered": uncovered,
+        "anchor": [anchor[0], anchor[1]],
+        "zoned": zoned,
+        "used_gps": start is not None,
+    }
 
 
 def assign_crossings_for_display(
-    stops: list[dict], home: tuple[float, float], data_dir: str
+    stops: list[dict],
+    home: tuple[float, float],
+    data_dir: str,
+    *,
+    start: tuple[float, float] | None = None,
 ) -> list[dict]:
-    """Preview the same far-first blue/red crossing order used by BUILD ROUTE."""
+    """Preview crossings for the same suggested order BUILD ROUTE will use."""
     if not stops:
         return stops
     graph, _uncovered = _covering_graph(data_dir, stops)
-    out = copy.deepcopy(stops)
-    return _order_far_first_homeward(out, home, graph)
+    anchor = _resolve_anchor(home, start)
+    ordered = _order_stops_field(copy.deepcopy(stops), anchor, graph)
+    _, lengths = _stops_only_matrix(graph, ordered) if graph else (None, None)
+    return _assign_crossings_open(graph, ordered, lengths=lengths)
 
 
 def sanitize_leg_polyline(

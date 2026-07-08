@@ -8,6 +8,7 @@ def evaluate(
     has_stops: bool,
     route_miles: float,
     graph_loaded: bool,
+    route_graph_uncovered: bool = False,
 ) -> dict:
     """Return {ok, blockers[], warns[]} for READY FOR OFFLINE."""
     blockers: list[str] = []
@@ -22,11 +23,18 @@ def evaluate(
         if route_miles <= 0 or not field_report.get("field_ready", True):
             pass  # route check below
         if route_miles <= 0:
-            blockers.append("No built route — press BUILD OPTIMIZED ROUTE first.")
-        if not graph_loaded:
-            warns.append(
-                "Road graph not loaded — routes/driving may use straight lines only. "
-                "Download or Import road map while online."
+            blockers.append(
+                "No built route — tap Apply route on Route tab after picking order, "
+                "or BUILD ROUTE -> Suggest route."
+            )
+        if route_graph_uncovered:
+            blockers.append(
+                "Road map does not cover this job — download road map on Setup "
+                "with this Excel/.EST loaded, BUILD ROUTE again, then go offline."
+            )
+        elif not graph_loaded:
+            blockers.append(
+                "No road map for this job — download or import road_graph.graphml on Setup."
             )
     elif not graph_loaded:
         warns.append(

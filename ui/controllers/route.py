@@ -5,7 +5,7 @@ from __future__ import annotations
 import time as _time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QLabel, QMessageBox, QProgressDialog
+from PySide6.QtWidgets import QLabel, QListWidgetItem, QMessageBox, QProgressDialog
 
 import road_router
 from core import ingest, routing, validate
@@ -226,6 +226,9 @@ class RouteControllerMixin:
             self.btn_pick_order_win.setVisible(on)
         if hasattr(self, "pick_combo_row"):
             self.pick_combo_row.setVisible(not on)
+        if hasattr(self, "pick_side_row"):
+            self.pick_side_row.setVisible(on)
+            self._sync_pick_side_buttons()
         if on:
             self._enter_pick_map_focus()
         elif self._pick_layout_active:
@@ -246,7 +249,7 @@ class RouteControllerMixin:
             pick_text = f"All {total} stops picked on the map. Tap Apply route."
         else:
             pick_text = (
-                f"{self._pick_prompt_text()} — blue begin or red end. "
+                f"{self._pick_prompt_text()} — pick Begin/End below or tap dots on map. "
                 f"Order updates in the popup.")
         apply_active(self.lbl_pick_status, True, pick_text)
         if sync_dialog and on and self._route_pick_dialog is not None:
@@ -301,9 +304,69 @@ class RouteControllerMixin:
             return
         uid = self.combo_pick_site.itemData(index)
         if uid:
-            self._route_pick_add(str(uid))
+            self._route_pick_add_from_list(str(uid))
 
-    def _route_pick_add(self, uid: str, *, side: str | None = None) -> None:
+    def _set_pick_side_mode(self, mode: str) -> None:
+        """Begin / End / Auto — applies to the next left-list or combo pick."""
+        if mode not in ("begin", "end", "auto"):
+            return
+        self._pick_side_mode = mode
+        self._sync_pick_side_buttons()
+        labels = {
+            "begin": "Begin (blue) — next stop uses the begin end of the segment",
+            "end": "End (red) — next stop uses the end of the segment",
+            "auto": "Auto — route picks the nearest end when you Apply",
+        }
+        self.statusBar().showMessage(labels[mode], 6000)
+
+    def _sync_pick_side_buttons(self) -> None:
+        mode = getattr(self, "_pick_side_mode", "auto")
+        for attr, val in (
+            ("btn_pick_side_begin", "begin"),
+            ("btn_pick_side_end", "end"),
+            ("btn_pick_side_auto", "auto"),
+        ):
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                btn.setChecked(mode == val)
+
+    def _auto_pick_side(self, stop: dict) -> str:
+        """Nearest begin/end from the previous pick (or home) — preview only until Apply."""
+        from road_router import _haversine_m
+
+        if self._route_pick_uids:
+            by_uid = {str(s.get("uid") or ""): s for s in self.state.stops}
+            prev = by_uid.get(self._route_pick_uids[-1])
+            if prev and prev.get("cross_lat") is not None and prev.get("cross_lon") is not None:
+                cur = (float(prev["cross_lat"]), float(prev["cross_lon"]))
+            else:
+                cur = tuple(self.state.home)
+        else:
+            cur = tuple(self.state.home)
+        bl, blo = stop.get("begin_lat"), stop.get("begin_lon")
+        el, elo = stop.get("end_lat"), stop.get("end_lon")
+        if bl is None or blo is None or el is None or elo is None:
+            return "begin"
+        db = _haversine_m(cur[0], cur[1], float(bl), float(blo))
+        de = _haversine_m(cur[0], cur[1], float(el), float(elo))
+        return "begin" if db <= de else "end"
+
+    def _route_pick_add_from_list(self, uid: str) -> None:
+        """Left list / combo — honor Begin/End/Auto mode."""
+        by_uid = {str(s.get("uid") or ""): s for s in self.state.stops}
+        stop = by_uid.get(uid)
+        if stop is None:
+            return
+        mode = getattr(self, "_pick_side_mode", "auto")
+        if mode in ("begin", "end"):
+            self._route_pick_add(uid, side=mode, lock_side=True)
+        else:
+            side = self._auto_pick_side(stop)
+            self._route_pick_add(uid, side=side, lock_side=False)
+
+    def _route_pick_add(
+        self, uid: str, *, side: str | None = None, lock_side: bool | None = None,
+    ) -> None:
         if not self._route_pick_mode:
             return
         uid = str(uid).strip()
@@ -319,8 +382,13 @@ class RouteControllerMixin:
                 "Unknown site — pick a blue or red dot on the map.", 5000)
             return
         if stop and side in ("begin", "end"):
-            self._route_pick_sides[uid] = side
-            self._apply_pick_side(stop, side)
+            if lock_side is None:
+                lock_side = True
+            self._apply_pick_side(stop, side, lock=bool(lock_side))
+            if lock_side:
+                self._route_pick_sides[uid] = side
+            else:
+                self._route_pick_sides.pop(uid, None)
         self._route_pick_uids.append(uid)
         n = len(self._route_pick_uids)
         total = len(self.state.stops)
@@ -329,7 +397,8 @@ class RouteControllerMixin:
         self._push_state()
         side_note = ""
         if side in ("begin", "end"):
-            side_note = f" ({side} end)"
+            locked = uid in self._route_pick_sides
+            side_note = f" ({side}{'' if locked else ', auto preview'})"
         if n >= total:
             self.statusBar().showMessage(
                 f"Stop {n}{side_note} added — all sites chosen. Tap Apply route.", 8000)
@@ -475,11 +544,11 @@ class RouteControllerMixin:
                 10000,
             )
             if route_res.get("graph_uncovered"):
-                self._warn(
-                    "These sites are outside the saved road map area, so the route is a "
-                    "straight-line estimate.\n\n"
-                    "On Wi‑Fi: Setup → Download road map with this job loaded, then BUILD again "
-                    "for real-street order and miles.")
+                self.statusBar().showMessage(
+                    f"Route applied: {len(self.state.stops)} stops, {miles:.1f} mi "
+                    "(straight-line — saved road map is for a different job). "
+                    "Setup → Download roads with this job loaded, then Build again for real streets.",
+                    14000)
             if hasattr(self, "btn_build"):
                 self.btn_build.setEnabled(True)
                 self.btn_build.setText(BUILD_LABEL)
@@ -518,7 +587,7 @@ class RouteControllerMixin:
                 9000)
 
         dlg = QProgressDialog(
-            "Building route order (best sequence for your sites)...",
+            "Building route — zone sweep from your start point...",
             "Cancel", 0, 0, self)
         dlg.setWindowTitle("Building route")
         dlg.setWindowModality(Qt.WindowModal)
@@ -532,7 +601,13 @@ class RouteControllerMixin:
         if hasattr(self, "btn_build"):
             self.btn_build.setEnabled(False)
             self.btn_build.setText("BUILDING ROUTE…")
-        thread = RouteOptimizeThread(list(stops), tuple(self.state.home), DATA_DIR)
+        start = None
+        if hasattr(self, "gps"):
+            from gps_reader import fix_from_snapshot
+
+            start = fix_from_snapshot(self.gps.latest())
+        thread = RouteOptimizeThread(
+            list(stops), tuple(self.state.home), DATA_DIR, start=start)
         self._route_thread = thread
 
         def _restore_build_btn():
@@ -576,6 +651,10 @@ class RouteControllerMixin:
                 failed = int(r.get("failed_legs") or 0)
                 if failed:
                     kind += f" ({failed} leg(s) need road map refresh)"
+                if res.get("used_gps"):
+                    kind += " · started from GPS"
+                elif res.get("zoned"):
+                    kind += " · zoned sweep"
             elif uncovered:
                 kind = "straight-line — road map does not cover this job area"
             else:
@@ -583,12 +662,11 @@ class RouteControllerMixin:
             self.statusBar().showMessage(
                 f"Route ready: {len(res['order'])} stops, {miles:.1f} mi — {kind}", 12000)
             if uncovered:
-                self._warn(
-                    "The downloaded road map does not cover these sites — they are well "
-                    "outside the saved map area, so the order and miles are straight-line "
-                    "estimates (not real streets).\n\n"
-                    "On Wi‑Fi: Setup → Download road map while these files are loaded "
-                    "(it fetches the area around this job), then BUILD again.")
+                self.statusBar().showMessage(
+                    f"Route ready: {len(res['order'])} stops, {miles:.1f} mi — "
+                    "straight-line (saved road map is for a different job). "
+                    "Setup → Download roads with these files loaded, then Build again for real streets.",
+                    14000)
             elif not r.get("graph"):
                 self.statusBar().showMessage(
                     "Route built (straight-line miles). For real-street order and miles, "
@@ -786,17 +864,21 @@ class RouteControllerMixin:
                     continue
                 mark = "OK" if s.get("installed") else "SKIP" if s.get("skipped") else "--"
                 sheet = f" · {s.get('sheet')}" if s.get("sheet") else ""
-                self.list_route.addItem(
+                item = QListWidgetItem(
                     f"→ {i + 1}. [{letters.get(uid, '?')}] Site {s['id']}{sheet} — "
                     f"{self._street_label(s)} [{mark}]")
+                item.setData(Qt.ItemDataRole.UserRole, str(uid))
+                self.list_route.addItem(item)
             picked_set = set(self._route_pick_uids)
             for s in self.state.stops:
                 if s["uid"] in picked_set:
                     continue
                 sheet = f" · {s.get('sheet')}" if s.get("sheet") else ""
-                self.list_route.addItem(
+                item = QListWidgetItem(
                     f"   [{letters.get(s['uid'], '?')}] Site {s['id']}{sheet} — "
                     f"{self._street_label(s)}")
+                item.setData(Qt.ItemDataRole.UserRole, str(s["uid"]))
+                self.list_route.addItem(item)
             return
         visible = self._visible_stop_indices()
         for seq, i in enumerate(visible, start=1):
@@ -845,6 +927,18 @@ class RouteControllerMixin:
         self.btn_start.style().polish(self.btn_start)
 
     def _route_item_clicked(self, item):
+        # While picking a route, the left list mirrors the map dots. Clicking a
+        # row must build the pick order — never jump to Install (P: field bug).
+        if self._route_pick_mode:
+            uid = item.data(Qt.ItemDataRole.UserRole)
+            uid = str(uid) if uid else ""
+            if not uid:
+                return
+            if uid in self._route_pick_uids:
+                self._select_pick_in_dialog(uid)
+            else:
+                self._route_pick_add_from_list(uid)
+            return
         row = self.list_route.row(item)
         visible = self._visible_stop_indices()
         if row < len(visible):
@@ -853,6 +947,20 @@ class RouteControllerMixin:
             self.current_index = row
         self._go_page(2)
         self._center_current()
+
+    def _select_pick_in_dialog(self, uid: str) -> None:
+        """Highlight an already-picked stop in the order window (no page change)."""
+        dlg = self._route_pick_dialog
+        if dlg is None:
+            return
+        for i in range(dlg.list.count()):
+            it = dlg.list.item(i)
+            if it and str(it.data(Qt.ItemDataRole.UserRole)) == uid:
+                dlg.list.setCurrentRow(i)
+                break
+        self.statusBar().showMessage(
+            "Already in your order — drag it in the order window to move it, "
+            "or tap an orange dot to add the next stop.", 5000)
 
     # ----------------------------------------------------- Map follow (GPS)
     def _toggle_drive(self):

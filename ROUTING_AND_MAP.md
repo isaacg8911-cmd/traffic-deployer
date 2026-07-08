@@ -82,7 +82,7 @@ Validation (`validate.validate_build`) blocks builds with missing coords or empt
 
 ---
 
-## 3. Efficient stop order (cross each street line cheaply)
+## 3. Efficient stop order (zone sweep + open path)
 
 **Module:** `core/routing.py` — `optimize()`
 
@@ -96,17 +96,16 @@ Goal: order sites so total **road** travel between segment crossings is low, and
 
 ### Tour improvement
 
-1. **≥12 stops — zone-first, far-to-near:** grid clusters; visit **farthest zone from home first**, finish all stops in that zone (farthest stop in the zone first, trail back), then the next-closer zone, working homeward (avoids revisiting finished areas).
-2. **≤9 stops — exact** matrix tour when small enough.
-3. Otherwise **nearest-neighbor** → **2-opt** → **Or-opt** on the road matrix (smaller jobs).
-4. **Crossing assignment** from home; extra global 2-opt/polish only on non-zoned builds.
+1. **≥12 stops — zone sweep:** grid clusters; visit **nearest zone to anchor first**, complete all stops in that zone (open-path tour), then the next zone outward.
+2. **≤11 stops — single open path:** exact matrix tour when ≤9 stops; otherwise nearest-neighbor → open 2-opt → Or-opt from the stop closest to anchor.
+3. **Crossing assignment** chains begin/end per leg (`_assign_crossings_open`); optional crossing-aware 2-opt polish on smaller jobs.
 
 ### Crossing side
 
-**`_assign_crossings`** walks the ordered list:
+**`_assign_crossings_open`** walks the ordered list stop-to-stop:
 
-- From current road position, compare drive distance to **begin** vs **end** attachment.
-- Set `cross_side`, `cross_lat`, `cross_lon` (point on the segment line where the route should touch).
+- Site 1: pick begin vs end by which faces site 2 on the road.
+- Later stops: pick the endpoint closer on the road from the previous crossing.
 - Navigation targets use **field GPS** if stamped, else **crossing**, else midpoint (`_stop_pt`).
 
 This is why the route is “efficient” for **traffic deployer** work: it optimizes **which way you cross each street line**, not just visiting map pins in Excel order.
@@ -117,7 +116,7 @@ This is why the route is “efficient” for **traffic deployer** work: it optim
 
 **Module:** `core/routing.py` — `build_route()`
 
-1. Re-run **`_assign_crossings`** on the final order (reuses length tables when available).
+1. Re-run **`_assign_crossings_open`** on the final order (reuses length tables when available).
 2. For each leg **home → stop₁ → … → stopₙ → home**:
    - **`road_router.route_between`** (polyline + miles only; turn list deferred to **START DRIVING** via `leg_plan`).
    - **`_snap_leg_end`** — last point of the leg snaps to the **crossing** on the site line (road meets the segment, does not overshoot to midpoint).

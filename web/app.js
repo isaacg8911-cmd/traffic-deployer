@@ -607,6 +607,7 @@
     return letters;
   }
 
+  // Map badges use route sequence (drive order), not Excel site #.
   function stopSeqLabel(s, i, picking, pickIdx) {
     var seq = s.seq != null ? s.seq : (pickIdx[s.uid] || 0);
     if (picking && !seq) return '+';

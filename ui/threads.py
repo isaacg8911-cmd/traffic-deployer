@@ -263,11 +263,19 @@ class RouteOptimizeThread(QThread):
     finished_result = Signal(dict)
     progress_text = Signal(str)
 
-    def __init__(self, stops: list, home: tuple, data_dir: str):
+    def __init__(
+        self,
+        stops: list,
+        home: tuple,
+        data_dir: str,
+        *,
+        start: tuple[float, float] | None = None,
+    ):
         super().__init__()
         self.stops = stops
         self.home = home
         self.data_dir = data_dir
+        self.start = start
 
     def run(self):
         import traceback
@@ -276,8 +284,9 @@ class RouteOptimizeThread(QThread):
             return
         try:
             self.progress_text.emit(
-                "Ordering stops (cross each street line — road network)...")
-            res = routing.optimize(self.stops, self.home, self.data_dir)
+                "Suggesting stop order (zones + shortest path on roads)...")
+            res = routing.optimize(
+                self.stops, self.home, self.data_dir, start=self.start)
             if self.isInterruptionRequested():
                 return
             ordered = res["order"]
@@ -291,6 +300,7 @@ class RouteOptimizeThread(QThread):
                 return
             self.finished_result.emit({
                 "ok": True, "order": ordered, "route": route, "graph": res["graph"],
+                **{k: res[k] for k in ("zoned", "used_gps", "anchor") if k in res},
             })
         except Exception as exc:  # noqa: BLE001
             if not self.isInterruptionRequested():

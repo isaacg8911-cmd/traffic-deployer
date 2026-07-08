@@ -7,7 +7,10 @@ import road_router
 
 from core.routing import (
     _assign_crossings_open,
-    _cached_dist,
+    _covering_graph,
+    _optimize_cluster_from_entry,
+    _order_stops_field,
+    _resolve_anchor,
     _seg_endpoints,
     _stops_only_matrix,
     build_route,
@@ -49,52 +52,41 @@ def _cross_point(stop: dict) -> tuple[float, float]:
     return float(stop["lat"]), float(stop["lon"])
 
 
+def _finish_pick_order(
+    order: list[dict],
+    graph,
+    data_dir: str,
+) -> list[dict]:
+    lengths = None
+    if graph is not None:
+        try:
+            _, lengths = _stops_only_matrix(graph, order)
+        except Exception:
+            lengths = None
+    return _assign_crossings_open(graph, copy.deepcopy(order), lengths=lengths)
+
+
 def auto_finish_order(
     home: tuple[float, float],
     picked: list[dict],
     pool: list[dict],
     data_dir: str,
 ) -> list[dict]:
-    """Append remaining sites: nearest road miles from last pick (no home leg)."""
-    del home
+    """Append remaining sites using the same zone/open-path engine as auto-build."""
     if not pool:
         return list(picked)
-    from core.routing import _covering_graph
-
     graph, _uncovered = _covering_graph(data_dir, picked + pool)
-    lengths = None
-    if graph is not None:
-        try:
-            import networkx as nx  # noqa: F401
-            from core.routing import _stops_only_matrix
-
-            all_stops = picked + pool
-            _, lengths = _stops_only_matrix(graph, all_stops)
-        except Exception:
-            lengths = None
     order = copy.deepcopy(picked)
     rem = [s for s in pool if s["uid"] not in {p["uid"] for p in order}]
-    if not order and rem:
-        from core.routing import _optimize_open_path
-
-        if graph is not None:
-            return _optimize_open_path(rem, graph)
-        return list(rem)
-    cur = _cross_point(order[-1]) if order else (float(rem[0]["lat"]), float(rem[0]["lon"]))
-    while rem:
-        def leg_cost(s: dict) -> float:
-            seg_b, seg_e = _seg_endpoints(s)
-            d_b = _cached_dist(graph, lengths, cur, seg_b)
-            d_e = _cached_dist(graph, lengths, cur, seg_e)
-            return min(d_b, d_e)
-
-        nxt = min(rem, key=leg_cost)
-        rem.remove(nxt)
-        order.append(nxt)
-        cur = _cross_point(nxt)
-    from core.routing import _assign_crossings_open
-
-    return _assign_crossings_open(graph, order, lengths=lengths)
+    if not order:
+        anchor = _resolve_anchor(home, None)
+        return _finish_pick_order(
+            _order_stops_field(rem, anchor, graph), graph, data_dir)
+    cur = _cross_point(order[-1])
+    if rem:
+        tail = _optimize_cluster_from_entry(cur, rem, graph)
+        order.extend(tail)
+    return _finish_pick_order(order, graph, data_dir)
 
 
 def apply_manual_order(
@@ -104,8 +96,6 @@ def apply_manual_order(
 ) -> dict:
     """Assign begin/end crossings and compute miles (site 1 -> site N)."""
     del home
-    from core.routing import _covering_graph
-
     graph, _uncovered = _covering_graph(data_dir, ordered)
     lengths = None
     if graph is not None:

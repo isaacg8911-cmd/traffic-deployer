@@ -396,15 +396,9 @@ class RouteControllerMixin:
             self.statusBar().showMessage("Route build already running…", 4000)
             return
         if not road_router.has_graph(DATA_DIR):
-            msg = (
-                "Download the road map first (Setup tab → Download road map).\n\n"
-                "That is required for accurate routes that follow real streets.")
-            if self.state.offline_mode:
-                self._field_notice(
-                    "No local road map — import road_graph.graphml at home, or resume online mode.")
-            else:
-                self._warn(msg)
-            return
+            self.statusBar().showMessage(
+                "No road map yet — applying your order as straight-line miles. "
+                "Add a road map on Setup for real streets.", 9000)
 
         import time as _time
 
@@ -518,19 +512,13 @@ class RouteControllerMixin:
         self._exit_pick_map_focus()
         self._hide_route_pick_dialog()
         if not road_router.has_graph(DATA_DIR):
-            msg = (
-                "Download the road map first (Setup tab → Download road map).\n\n"
-                "That is required for accurate routes that follow real streets and "
-                "cross each site line efficiently.")
-            if self.state.offline_mode:
-                self._field_notice(
-                    "No local road map — import road_graph.graphml at home, or resume online mode.")
-            else:
-                self._warn(msg)
-            return
+            self.statusBar().showMessage(
+                "No road map yet — building your route now as straight-line miles. "
+                "Add a road map on Setup (Download roads / Import .graphml) for real streets.",
+                9000)
 
         dlg = QProgressDialog(
-            "Optimizing route on real streets\n(crossing each site line in best order)...",
+            "Building route order (best sequence for your sites)...",
             "Cancel", 0, 0, self)
         dlg.setWindowTitle("Building route")
         dlg.setWindowModality(Qt.WindowModal)
@@ -602,9 +590,9 @@ class RouteControllerMixin:
                     "On Wi‑Fi: Setup → Download road map while these files are loaded "
                     "(it fetches the area around this job), then BUILD again.")
             elif not r.get("graph"):
-                self._warn(
-                    "Route line is straight (chord) because no road graph is loaded.\n\n"
-                    "Setup → Download road map (or import road_graph.graphml), then BUILD again.")
+                self.statusBar().showMessage(
+                    "Route built (straight-line miles). For real-street order and miles, "
+                    "add a road map on Setup, then Build again.", 9000)
             self._refresh_field_ready()
             self._refresh_route_summary_ui()
 

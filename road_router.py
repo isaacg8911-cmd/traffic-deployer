@@ -64,7 +64,10 @@ def _configure_osmnx_for_download() -> None:
     """Tune osmnx HTTP for one-shot road downloads (work Wi‑Fi, proxies, long queries)."""
     if not HAS_OSMNX:
         return
-    for attr, val in (("requests_timeout", 300), ("timeout", 300)):
+    # Fail fast on blocked corporate Wi‑Fi: a silent-drop firewall would otherwise
+    # hang each Overpass mirror for the full timeout (5 mirrors × old 300s ≈ 25 min,
+    # which feels like "nothing works"). 75s is plenty for a tight job-area bbox.
+    for attr, val in (("requests_timeout", 75), ("timeout", 75)):
         try:
             setattr(ox.settings, attr, val)
         except Exception:

@@ -383,7 +383,7 @@ class MapSyncControllerMixin:
         return msg
 
     @staticmethod
-    def _apply_pick_side(stop: dict, side: str) -> None:
+    def _apply_pick_side(stop: dict, side: str, *, lock: bool = True) -> None:
         if side == "begin":
             stop["cross_lat"] = stop["begin_lat"]
             stop["cross_lon"] = stop["begin_lon"]
@@ -391,7 +391,10 @@ class MapSyncControllerMixin:
             stop["cross_lat"] = stop["end_lat"]
             stop["cross_lon"] = stop["end_lon"]
         stop["cross_side"] = side
-        stop["pick_cross_locked"] = True
+        if lock:
+            stop["pick_cross_locked"] = True
+        else:
+            stop.pop("pick_cross_locked", None)
 
     def _ask_route_build_mode(self) -> str | None:
         """Simple mode: auto-optimize (no blocking dialog). Pick via Route → Pick on map."""
@@ -402,9 +405,9 @@ class MapSyncControllerMixin:
         box.setText("How should stop order be chosen?")
         box.setInformativeText(
             "Pick route: tap blue or red on each site for stop order and drive-to end.\n"
-            "Auto-optimize: the app picks the best order on real streets.")
+            "Suggest route: zones near your start first, shortest path between sites.")
         btn_pick = box.addButton("Pick route on map", QMessageBox.AcceptRole)
-        btn_opt = box.addButton("Auto-optimize", QMessageBox.ActionRole)
+        btn_opt = box.addButton("Suggest route", QMessageBox.ActionRole)
         box.addButton(QMessageBox.Cancel)
         box.exec()
         clicked = box.clickedButton()
@@ -591,12 +594,17 @@ class MapSyncControllerMixin:
             idx = self.state.index_of(real_uid)
             if idx >= 0:
                 stop = self.state.stops[idx]
+                site_id = stop.get("id", "?")
                 flat, flon = stop.get("field_lat"), stop.get("field_lon")
+                src = str(stop.get("field_coord_source") or "gps")
+                src_txt = "manual pin" if src == "manual" else "GPS grab"
                 if flat is not None and flon is not None:
                     self.statusBar().showMessage(
-                        f"Site {stop.get('id')} install GPS — {float(flat):.6f}, {float(flon):.6f}",
+                        f"Site {site_id} — {src_txt} at {float(flat):.6f}, {float(flon):.6f}",
                         10000,
                     )
+                else:
+                    self.statusBar().showMessage(f"Site {site_id} — install GPS pin", 8000)
             return
         uid, side = self._parse_stop_click(str(uid).strip())
         if self._route_pick_mode:

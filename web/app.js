@@ -177,20 +177,34 @@
       fieldPinMarker.remove();
       fieldPinMarker = null;
     }
+    if (!draggable) return;
     fieldPinMarker = new maplibregl.Marker({
       color: fieldPinColor(src),
-      draggable: draggable,
+      draggable: true,
       scale: 1.15
     }).setLngLat([lon, lat]).addTo(map);
     fieldPinMarker._tdLat = lat;
     fieldPinMarker._tdLon = lon;
     fieldPinMarker._tdSource = src;
-    fieldPinMarker._tdDraggable = draggable;
-    if (draggable) {
-      fieldPinMarker.on('dragend', function () {
-        var ll = fieldPinMarker.getLngLat();
-        fieldPinMarker._tdLat = ll.lat;
-        fieldPinMarker._tdLon = ll.lng;
+    fieldPinMarker._tdDraggable = true;
+    fieldPinMarker._tdUid = opts.uid || '';
+    fieldPinMarker._tdSiteId = opts.siteId != null ? String(opts.siteId) : '';
+    fieldPinMarker.on('dragend', function () {
+      var ll = fieldPinMarker.getLngLat();
+      fieldPinMarker._tdLat = ll.lat;
+      fieldPinMarker._tdLon = ll.lng;
+    });
+    var el = fieldPinMarker.getElement();
+    if (el && !el._tdClickBound) {
+      el._tdClickBound = true;
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var uid = fieldPinMarker._tdUid;
+        if (!uid) return;
+        var payload = 'install|' + uid;
+        showSiteInfoToast(payload);
+        fireStopClick(payload);
       });
     }
   }
@@ -210,7 +224,16 @@
     }
     var src = stop.field_coord_source || stop.field_source || 'gps';
     var draggable = state.map_mode === 'manual_grab';
-    placeFieldPin(stop.field_lat, stop.field_lon, { source: src, draggable: draggable });
+    if (!draggable) {
+      clearFieldPinMarker();
+      return;
+    }
+    placeFieldPin(stop.field_lat, stop.field_lon, {
+      source: src,
+      draggable: true,
+      uid: stop.uid,
+      siteId: stop.id
+    });
   }
 
   function emptyFC() { return { type: 'FeatureCollection', features: [] }; }
@@ -250,7 +273,22 @@
     '#c45f14'
   ];
 
-  // Dark numerals + light halo — readable on blue/red/orange map dots (not white-on-white).
+  // White numerals centered inside colored dots — high contrast in sunlight.
+  var DOT_LABEL_FONT = ['Noto Sans Regular'];
+  var DOT_LABEL_LAYOUT = {
+    'text-font': DOT_LABEL_FONT,
+    'text-size': ['interpolate', ['linear'], ['zoom'], 10, 11, 14, 15, 16, 17],
+    'text-allow-overlap': true,
+    'text-ignore-placement': true,
+    'text-anchor': 'center'
+  };
+  var DOT_LABEL_PAINT = {
+    'text-color': '#ffffff',
+    'text-halo-color': 'rgba(15, 39, 68, 0.9)',
+    'text-halo-width': 1.5
+  };
+
+  // Legacy alias — road pick labels on pale halos.
   var MAP_LABEL_PAINT = {
     'text-color': '#0f2744',
     'text-halo-color': '#ffffff',
@@ -284,7 +322,8 @@
   var PICK_CLICK_LAYERS = [
     'pick-target-circle', 'pick-target-label',
     'stop-circle', 'stop-label',
-    'site-begin', 'site-end', 'site-begin-label', 'site-end-label'
+    'site-begin', 'site-end', 'site-begin-label', 'site-end-label',
+    'install-pts', 'install-pts-label'
   ];
   // Hit tolerance (px) so small begin/end dots are easy to tap on a touch /
   // high-DPI work laptop. A bare 1px hit test made the dots feel un-clickable.
@@ -362,6 +401,9 @@
     }
     if (!best) return null;
     var kind = best.kind;
+    if (kind === 'install') {
+      return 'install|' + String(best.uid);
+    }
     if (kind === 'begin' || kind === 'end') {
       return String(best.uid) + '|' + kind;
     }
@@ -374,7 +416,7 @@
     // Clicks are routed through the single map-level handler (pickLayerAtPoint),
     // which uses a padded hit box. Here we only set the hover cursor.
     ['stop-circle', 'site-begin', 'site-end', 'site-begin-label', 'site-end-label',
-      'pick-target-circle', 'pick-target-label'].forEach(function (id) {
+      'pick-target-circle', 'pick-target-label', 'install-pts', 'install-pts-label'].forEach(function (id) {
       map.on('mouseenter', id, function () { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', id, function () { map.getCanvas().style.cursor = ''; });
     });
@@ -418,37 +460,32 @@
       map.addLayer({ id: 'site-begin', type: 'circle', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'begin'],
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 8, 15, 9],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 16, 24],
           'circle-color': '#1565c0',
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
+          'circle-stroke-width': 2.5,
           'circle-opacity': 0.95
         } });
       map.addLayer({ id: 'site-end', type: 'circle', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'end'],
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 8, 15, 9],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 16, 24],
           'circle-color': '#c62828',
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
+          'circle-stroke-width': 2.5,
           'circle-opacity': 0.95
         } });
-      var siteLabelLayout = {
-        'text-field': ['get', 'seq'],
-        'text-font': ['Noto Sans Regular'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 13, 15, 14],
-        'text-allow-overlap': true,
-        'text-ignore-placement': true
-      };
-      var siteLabelPaint = MAP_LABEL_PAINT;
+      var siteLabelLayout = Object.assign({}, DOT_LABEL_LAYOUT, {
+        'text-field': ['to-string', ['get', 'site_id']]
+      });
       map.addLayer({ id: 'site-begin-label', type: 'symbol', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'begin'],
         layout: siteLabelLayout,
-        paint: siteLabelPaint });
+        paint: DOT_LABEL_PAINT });
       map.addLayer({ id: 'site-end-label', type: 'symbol', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'end'],
         layout: siteLabelLayout,
-        paint: siteLabelPaint });
+        paint: DOT_LABEL_PAINT });
     }
     if (!map.getSource('stop-markers')) {
       map.addSource('stop-markers', { type: 'geojson', data: emptyFC() });
@@ -456,8 +493,8 @@
         paint: {
           'circle-radius': [
             'case', ['boolean', ['get', 'highlight'], false],
-            ['interpolate', ['linear'], ['zoom'], 10, 18, 14, 24, 15, 28],
-            ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 15, 22]
+            ['interpolate', ['linear'], ['zoom'], 10, 22, 14, 28, 16, 32],
+            ['interpolate', ['linear'], ['zoom'], 10, 18, 14, 24, 16, 28]
           ],
           'circle-color': STOP_STATUS_COLOR,
           'circle-stroke-color': '#ffffff',
@@ -465,18 +502,15 @@
           'circle-opacity': 0.96
         } });
       map.addLayer({ id: 'stop-label', type: 'symbol', source: 'stop-markers',
-        layout: {
-          'text-field': ['to-string', ['get', 'seq']],
-          'text-font': ['Noto Sans Regular'],
+        layout: Object.assign({}, DOT_LABEL_LAYOUT, {
+          'text-field': ['to-string', ['get', 'site_id']],
           'text-size': [
             'case', ['boolean', ['get', 'highlight'], false],
-            ['interpolate', ['linear'], ['zoom'], 10, 13, 14, 17, 15, 20],
-            ['interpolate', ['linear'], ['zoom'], 10, 11, 14, 15, 15, 17]
-          ],
-          'text-allow-overlap': true,
-          'text-ignore-placement': true
-        },
-        paint: MAP_LABEL_PAINT });
+            ['interpolate', ['linear'], ['zoom'], 10, 13, 14, 17, 16, 19],
+            ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 15, 16, 17]
+          ]
+        }),
+        paint: DOT_LABEL_PAINT });
       bindStopClicks();
     }
     if (!map.getSource('pick-targets')) {
@@ -504,15 +538,21 @@
       map.addSource('install-pts', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'install-pts', type: 'circle', source: 'install-pts',
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6, 14, 9, 16, 11],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 16, 14, 22, 16, 26],
           'circle-color': [
             'case',
             ['==', ['get', 'source'], 'manual'], '#e65100',
-            '#2e7d32'
+            '#1565c0'
           ],
           'circle-stroke-color': '#fff',
-          'circle-stroke-width': 2.5
+          'circle-stroke-width': 3
         } });
+      map.addLayer({ id: 'install-pts-label', type: 'symbol', source: 'install-pts',
+        layout: Object.assign({}, DOT_LABEL_LAYOUT, {
+          'text-field': ['to-string', ['get', 'site_id']]
+        }),
+        paint: DOT_LABEL_PAINT });
+      bindStopClicks();
     }
   }
 
@@ -527,10 +567,10 @@
       ? ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2.5]
       : ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4];
     var ptR = drive
-      ? ['interpolate', ['linear'], ['zoom'], 10, 2.5, 14, 4]
+      ? ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 16]
       : pick
-        ? ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 14, 15, 16]
-        : ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 8, 15, 9];
+        ? ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 16, 24]
+        : ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 16, 24];
     var casingW = drive
       ? ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 11]
       : ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 12];
@@ -578,19 +618,29 @@
     if (picking) {
       return (pickLetters && pickLetters[s.uid]) || siteLetterFromIndex(i);
     }
-    // Map dots: route sequence (1, 2, 3…). Excel site # appears on click / Install tab.
-    return stopSeqLabel(s, i, false, {});
+    return siteIdLabel(s, i);
+  }
+
+  function siteIdLabel(s, i) {
+    if (s.id != null && String(s.id).trim() !== '') return String(s.id);
+    if (s.seq != null) return String(s.seq);
+    return String((i != null ? i : 0) + 1);
   }
 
   var _siteToastTimer = null;
   function showSiteInfoToast(payload) {
     var el = document.getElementById('site-toast');
     if (!el || !lastState || !lastState.stops) return;
-    var uid = payload, side = null;
+    var uid = payload, side = null, isInstall = false;
     if (String(payload).indexOf('|') >= 0) {
       var parts = String(payload).split('|');
-      uid = parts[0];
-      side = parts[1];
+      if (parts[0] === 'install') {
+        isInstall = true;
+        uid = parts[1];
+      } else {
+        uid = parts[0];
+        side = parts[1];
+      }
     }
     var stop = null, idx = -1;
     for (var i = 0; i < lastState.stops.length; i++) {
@@ -598,10 +648,12 @@
     }
     if (!stop) return;
     var seq = stop.seq != null ? stop.seq : (idx + 1);
-    var siteId = stop.id != null && String(stop.id).trim() !== '' ? String(stop.id) : '?';
+    var siteId = siteIdLabel(stop, idx);
     var street = String(stop.street || '').trim();
     if (!street || street.toLowerCase() === 'nan') street = '';
-    var txt = 'Stop ' + seq + ' · Excel site ' + siteId;
+    var txt = isInstall
+      ? ('Site ' + siteId + ' — GPS grab pin')
+      : ('Stop ' + seq + ' · Site ' + siteId);
     if (street) txt += ' — ' + street;
     if (side === 'begin' || side === 'end') {
       txt += ' (' + (side === 'begin' ? 'Begin' : 'End') + ')';
@@ -704,6 +756,7 @@
     setLayerVis('stop-circle', false);
     setLayerVis('stop-label', false);
     setLayerVis('install-pts', false);
+    setLayerVis('install-pts-label', false);
     updatePickBanner(state);
     updateDriveBanner(state);
     window.__dbg.applied++;
@@ -755,7 +808,7 @@
       segs.push({ type: 'Feature', properties: { seq: picking ? dotLabel : (s.seq || (i + 1)) },
                   geometry: { type: 'LineString', coordinates: coords } });
       if (!alreadyPicked) {
-        var ptProps = { kind: 'begin', uid: s.uid, seq: dotLabel, site_id: s.id };
+        var ptProps = { kind: 'begin', uid: s.uid, seq: dotLabel, site_id: siteIdLabel(s, i) };
         pts.push(pt(bLat, bLon, ptProps));
         pts.push(pt(eLat, eLon, Object.assign({}, ptProps, { kind: 'end' })));
         if (picking) {
@@ -764,10 +817,16 @@
         }
       }
       if (s.field_lat != null && s.field_lon != null) {
-        var isCurrent = state.current_uid && s.uid === state.current_uid && state.on_install;
-        if (!isCurrent) {
-          var fsrc = s.field_coord_source || s.field_source || 'gps';
-          installs.push(pt(s.field_lat, s.field_lon, { uid: s.uid, source: fsrc }));
+        var fsrc = s.field_coord_source || s.field_source || 'gps';
+        var hideForDrag = state.map_mode === 'manual_grab' &&
+          state.current_uid && s.uid === state.current_uid && state.on_install;
+        if (!hideForDrag) {
+          installs.push(pt(s.field_lat, s.field_lon, {
+            uid: s.uid,
+            source: fsrc,
+            site_id: siteIdLabel(s, i),
+            kind: 'install'
+          }));
         }
       }
       if (showStops || (picking && pickIdx[s.uid])) {
@@ -777,9 +836,11 @@
           if (picking && !pickIdx[s.uid]) {
             /* no anchor badge until site is picked */
           } else {
+            var badgeLabel = picking ? String(pickIdx[s.uid] || '') : siteIdLabel(s, i);
             stops.push(pt(anchor[0], anchor[1], {
               uid: s.uid,
               seq: seq,
+              site_id: badgeLabel,
               status: stopStatus(s),
               highlight: hiUid && s.uid === hiUid
             }));
@@ -810,6 +871,7 @@
     setLayerVis('stop-circle', (showStops || picking) && stops.length > 0);
     setLayerVis('stop-label', (showStops || picking) && stops.length > 0);
     setLayerVis('install-pts', installs.length > 0);
+    setLayerVis('install-pts-label', installs.length > 0);
     syncFieldPinFromState(state);
     updatePickBanner(state);
     updateDriveBanner(state);
@@ -870,7 +932,21 @@
 
   map.on('click', function (e) {
     if (lastState && lastState.map_mode === 'manual_grab') {
-      placeFieldPin(e.lngLat.lat, e.lngLat.lng, { source: 'manual', draggable: true });
+      var siteId = '';
+      if (lastState.current_uid && lastState.stops) {
+        for (var mi = 0; mi < lastState.stops.length; mi++) {
+          if (lastState.stops[mi].uid === lastState.current_uid) {
+            siteId = siteIdLabel(lastState.stops[mi], mi);
+            break;
+          }
+        }
+      }
+      placeFieldPin(e.lngLat.lat, e.lngLat.lng, {
+        source: 'manual',
+        draggable: true,
+        uid: lastState.current_uid || '',
+        siteId: siteId
+      });
       fireMapClick(e.lngLat.lat, e.lngLat.lng);
       return;
     }
@@ -932,7 +1008,20 @@
   };
   window.__tdSetFollow = function (on) { setFollow(!!on, true); };
   window.__tdSetFieldPin = function (lat, lon, source, draggable) {
-    placeFieldPin(lat, lon, { source: source || 'gps', draggable: !!draggable });
+    var uid = '';
+    var siteId = '';
+    if (lastState && lastState.current_uid) {
+      uid = lastState.current_uid;
+      (lastState.stops || []).forEach(function (s, i) {
+        if (s.uid === uid) siteId = siteIdLabel(s, i);
+      });
+    }
+    placeFieldPin(lat, lon, {
+      source: source || 'gps',
+      draggable: !!draggable,
+      uid: uid,
+      siteId: siteId
+    });
   };
   window.__tdClearFieldPin = function () { clearFieldPinMarker(); };
   window.__tdConfirmDropPin = function () {

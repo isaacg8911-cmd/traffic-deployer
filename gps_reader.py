@@ -189,11 +189,11 @@ class GPSStream:
         self._thread.start()
         return True
 
-    def stop(self):
+    def stop(self, join_timeout: float = 2.0):
         self._stop = True
         t = self._thread
         if t is not None:
-            t.join(timeout=2.0)
+            t.join(timeout=join_timeout)
         self._thread = None
 
     def latest(self) -> dict:
@@ -348,6 +348,34 @@ class GPSStream:
                 self._update(connected=False, fix=False)
                 import time as _t
                 _t.sleep(1.0)
+
+
+def fix_from_snapshot(g: dict | None) -> tuple[float, float] | None:
+    """Non-blocking fix from GPSStream.latest() — never opens the serial port."""
+    if not g or not g.get("fix"):
+        return None
+    lat, lon = g.get("lat"), g.get("lon")
+    if lat is None or lon is None:
+        return None
+    try:
+        return float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+
+
+def no_fix_message(g: dict | None) -> str:
+    """User-facing hint when Grab GPS cannot read a fix."""
+    g = g or {}
+    if not HAS_SERIAL:
+        return "GPS libraries missing — use Drop pin on the map."
+    if not g.get("connected"):
+        return "No GPS found — plug in the BU-353N and check Device Manager."
+    if not g.get("fix"):
+        sats = int(g.get("satellites") or 0)
+        if sats:
+            return f"GPS searching ({sats} sats) — wait for fix or tap Drop pin."
+        return "No GPS fix yet — open sky or tap Drop pin on the map."
+    return "GPS fix unavailable — try Drop pin."
 
 
 def diagnose() -> dict:

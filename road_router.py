@@ -415,6 +415,49 @@ def _street_name(G, u, v):
     return name or "road"
 
 
+def snap_coords_to_road(
+    data_dir: str,
+    lat: float,
+    lon: float,
+    *,
+    max_m: float = 45.0,
+) -> tuple[float, float, bool]:
+    """Snap a raw GPS point onto the nearest road edge when a graph is loaded.
+
+    Returns (lat, lon, snapped). Keeps the raw point when offline, no graph,
+    or the road is farther than *max_m* (bad fix / parking lot).
+    """
+    lat, lon = float(lat), float(lon)
+    if not (HAS_ROUTING and has_graph(data_dir)):
+        return lat, lon, False
+    G = load_graph(data_dir)
+    if G is None:
+        return lat, lon, False
+    try:
+        import osmnx as ox
+        from shapely.geometry import LineString, Point
+        from shapely.ops import nearest_points
+
+        u, v, key = ox.nearest_edges(G, lon, lat)
+        data = G[u][v][key]
+        geom = data.get("geometry")
+        if geom is None:
+            line = LineString([
+                (float(G.nodes[u]["x"]), float(G.nodes[u]["y"])),
+                (float(G.nodes[v]["x"]), float(G.nodes[v]["y"])),
+            ])
+        else:
+            line = geom
+        nearest = nearest_points(Point(lon, lat), line)[1]
+        snap_lon, snap_lat = float(nearest.x), float(nearest.y)
+        d = _haversine_m(lat, lon, snap_lat, snap_lon)
+        if d > max_m:
+            return lat, lon, False
+        return snap_lat, snap_lon, True
+    except Exception:
+        return lat, lon, False
+
+
 def street_name_at(data_dir: str, lat: float, lon: float) -> str:
     """Nearest OSM road name from the saved graph (fully offline)."""
     if not (HAS_ROUTING and has_graph(data_dir)):

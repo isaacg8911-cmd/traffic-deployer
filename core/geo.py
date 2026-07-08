@@ -203,3 +203,26 @@ def parse_dictation(text: str, direction: str, lanes: int, serial: str):
     if m:
         serial = str(m.group(1)).upper()
     return direction, lanes, serial
+
+
+def normalize_ca_coords(lat: float, lon: float) -> tuple[float, float]:
+    """Fix common field typo: positive longitude when latitude is in California."""
+    lat, lon = float(lat), float(lon)
+    if 32.0 <= lat <= 42.5 and lon > 0:
+        lon = -abs(lon)
+    return lat, lon
+
+
+def ca_coords_plausible(lat: float, lon: float) -> bool:
+    return 32.0 < float(lat) < 42.5 and -125.0 < float(lon) < -114.0
+
+
+def snap_field_gps(
+    lat: float, lon: float, data_dir: str, *, max_m: float = 45.0,
+) -> tuple[float, float, bool]:
+    """Snap USB/phone field GPS onto the saved road graph when possible."""
+    try:
+        import road_router
+        return road_router.snap_coords_to_road(data_dir, lat, lon, max_m=max_m)
+    except Exception:
+        return float(lat), float(lon), False

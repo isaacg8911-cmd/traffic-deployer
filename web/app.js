@@ -58,6 +58,7 @@
   var follow = true;
   var homeMarker = null;
   var gpsMarker = null;
+  var fieldPinMarker = null;
   var lastState = null;
   var _lastHomeKey = '';
   var _leanDrive = false;
@@ -155,6 +156,61 @@
 
   if (nextSiteBtn) {
     nextSiteBtn.addEventListener('click', frameNextSite);
+  }
+
+  function fieldPinColor(source) {
+    return source === 'manual' ? '#e65100' : '#1565c0';
+  }
+
+  function clearFieldPinMarker() {
+    if (fieldPinMarker) { fieldPinMarker.remove(); fieldPinMarker = null; }
+  }
+
+  function placeFieldPin(lat, lon, opts) {
+    opts = opts || {};
+    var src = opts.source || 'gps';
+    var draggable = !!opts.draggable;
+    if (fieldPinMarker) {
+      var same = fieldPinMarker._tdLat === lat && fieldPinMarker._tdLon === lon &&
+        fieldPinMarker._tdSource === src && fieldPinMarker._tdDraggable === draggable;
+      if (same) return;
+      fieldPinMarker.remove();
+      fieldPinMarker = null;
+    }
+    fieldPinMarker = new maplibregl.Marker({
+      color: fieldPinColor(src),
+      draggable: draggable,
+      scale: 1.15
+    }).setLngLat([lon, lat]).addTo(map);
+    fieldPinMarker._tdLat = lat;
+    fieldPinMarker._tdLon = lon;
+    fieldPinMarker._tdSource = src;
+    fieldPinMarker._tdDraggable = draggable;
+    if (draggable) {
+      fieldPinMarker.on('dragend', function () {
+        var ll = fieldPinMarker.getLngLat();
+        fieldPinMarker._tdLat = ll.lat;
+        fieldPinMarker._tdLon = ll.lng;
+      });
+    }
+  }
+
+  function syncFieldPinFromState(state) {
+    if (!state || !state.on_install || !state.current_uid) {
+      if (!state || state.map_mode !== 'manual_grab') clearFieldPinMarker();
+      return;
+    }
+    var stop = null;
+    (state.stops || []).forEach(function (s) {
+      if (s.uid === state.current_uid) stop = s;
+    });
+    if (!stop || stop.field_lat == null || stop.field_lon == null) {
+      if (state.map_mode !== 'manual_grab') clearFieldPinMarker();
+      return;
+    }
+    var src = stop.field_coord_source || stop.field_source || 'gps';
+    var draggable = state.map_mode === 'manual_grab';
+    placeFieldPin(stop.field_lat, stop.field_lon, { source: src, draggable: draggable });
   }
 
   function emptyFC() { return { type: 'FeatureCollection', features: [] }; }
@@ -448,10 +504,14 @@
       map.addSource('install-pts', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'install-pts', type: 'circle', source: 'install-pts',
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 6],
-          'circle-color': '#43a047',
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6, 14, 9, 16, 11],
+          'circle-color': [
+            'case',
+            ['==', ['get', 'source'], 'manual'], '#e65100',
+            '#2e7d32'
+          ],
           'circle-stroke-color': '#fff',
-          'circle-stroke-width': 2
+          'circle-stroke-width': 2.5
         } });
     }
   }
@@ -703,8 +763,12 @@
           pickTargets.push(pt(eLat, eLon, { kind: 'end', uid: s.uid, label: dotLabel }));
         }
       }
-      if (!driving && s.field_lat != null && s.field_lon != null) {
-        installs.push(pt(s.field_lat, s.field_lon, { uid: s.uid }));
+      if (s.field_lat != null && s.field_lon != null) {
+        var isCurrent = state.current_uid && s.uid === state.current_uid && state.on_install;
+        if (!isCurrent) {
+          var fsrc = s.field_coord_source || s.field_source || 'gps';
+          installs.push(pt(s.field_lat, s.field_lon, { uid: s.uid, source: fsrc }));
+        }
       }
       if (showStops || (picking && pickIdx[s.uid])) {
         var anchor = stopAnchor(s);
@@ -746,6 +810,7 @@
     setLayerVis('stop-circle', (showStops || picking) && stops.length > 0);
     setLayerVis('stop-label', (showStops || picking) && stops.length > 0);
     setLayerVis('install-pts', installs.length > 0);
+    syncFieldPinFromState(state);
     updatePickBanner(state);
     updateDriveBanner(state);
 
@@ -804,6 +869,11 @@
   function renderNav() { /* turn-by-turn banner removed — map + status bar only */ }
 
   map.on('click', function (e) {
+    if (lastState && lastState.map_mode === 'manual_grab') {
+      placeFieldPin(e.lngLat.lat, e.lngLat.lng, { source: 'manual', draggable: true });
+      fireMapClick(e.lngLat.lat, e.lngLat.lng);
+      return;
+    }
     var payload = pickLayerAtPoint(e.point);
     if (!payload && lastState && lastState.map_mode === 'pick') {
       payload = nearestPickAt(e.lngLat.lat, e.lngLat.lng);
@@ -832,21 +902,26 @@
     try {
       new QWebChannel(qt.webChannelTransport, function (channel) {
         bridge = channel.objects.bridge;
-        bridge.pushState.connect(safe(renderState, 'pushState'));
-        bridge.pushGps.connect(safe(renderGps, 'pushGps'));
-        bridge.pushNav.connect(safe(renderNav, 'pushNav'));
-        bridge.flyTo.connect(function (lat, lon, zoom) {
-          map.flyTo({ center: [lon, lat], zoom: zoom || map.getZoom(), duration: 800 });
-        });
-        bridge.setFollowSignal.connect(function (on) { setFollow(!!on, true); });
+        // State / GPS / nav / flyTo / follow all arrive Python->JS via the
+        // window.__td* hooks below (runJavaScript), NOT QWebChannel signals.
+        // The bridge object exists only for the JS->Python direction
+        // (onReady / onMapClick / onStopClick / onFollowToggled slots). Do not
+        // connect to signals it doesn't define — that throws and aborts init,
+        // which used to leave clicks stranded on slower machines.
         window.__bridgeReady = true;
-        bridge.onReady();
+        if (bridge && typeof bridge.onReady === 'function') {
+          bridge.onReady();
+        }
       });
     } catch (e) {
       window.__jsErrors.push('bridge init: ' + e);
     }
   }
   initBridge();
+
+  // Test seams: exercise the exact JS->Python click paths headlessly.
+  window.__fireStopClick = function (payload) { fireStopClick(payload); };
+  window.__fireMapClick = function (lat, lon) { fireMapClick(lat, lon); };
 
   window.__tdPushState = renderState;
   window.__tdPushGps = renderGps;
@@ -856,6 +931,14 @@
     map.flyTo({ center: [lon, lat], zoom: z, duration: 600 });
   };
   window.__tdSetFollow = function (on) { setFollow(!!on, true); };
+  window.__tdSetFieldPin = function (lat, lon, source, draggable) {
+    placeFieldPin(lat, lon, { source: source || 'gps', draggable: !!draggable });
+  };
+  window.__tdClearFieldPin = function () { clearFieldPinMarker(); };
+  window.__tdConfirmDropPin = function () {
+    if (!fieldPinMarker) return null;
+    return { lat: fieldPinMarker._tdLat, lon: fieldPinMarker._tdLon };
+  };
   window.__tdFrameNextSite = frameNextSite;
   window.__tdSetDriveLeg = function (coords, active) {
     ensureSources();

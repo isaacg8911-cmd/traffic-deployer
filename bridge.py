@@ -30,6 +30,7 @@ class MapBridge(QObject):
     mapReady = Signal()
     mapClicked = Signal(float, float)
     stopClicked = Signal(str)
+    followToggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -54,6 +55,10 @@ class MapBridge(QObject):
     def onStopClick(self, uid: str):
         self.stopClicked.emit(uid)
 
+    @Slot(bool)
+    def onFollowToggled(self, on: bool):
+        self.followToggled.emit(bool(on))
+
     def send_state(self, state: dict):
         self._run(f"window.__tdPushState && window.__tdPushState({_dumps(state)})")
 
@@ -77,3 +82,30 @@ class MapBridge(QObject):
         self._run(
             f"window.__tdSetDriveLeg && window.__tdSetDriveLeg({_dumps(polyline)}, {str(active).lower()})"
         )
+
+    def set_manual_grab(self, on: bool, prompt: str = "") -> None:
+        """Manual pin mode is driven by push_state; this is a safe no-op hook."""
+        _ = (on, prompt)
+
+    def send_field_pin(
+        self,
+        uid: str,
+        lat: float,
+        lon: float,
+        site_id: str,
+        *,
+        pending: bool = False,
+        source: str = "gps",
+        draggable: bool = False,
+    ) -> None:
+        """Place the install field pin immediately — distinct from the live GPS dot."""
+        _ = (uid, site_id, pending)
+        src = _dumps(str(source or "gps"))
+        drag = "true" if draggable else "false"
+        self._run(
+            f"window.__tdSetFieldPin && window.__tdSetFieldPin("
+            f"{float(lat)}, {float(lon)}, {src}, {drag})"
+        )
+
+    def clear_field_pin(self) -> None:
+        self._run("window.__tdClearFieldPin && window.__tdClearFieldPin()")

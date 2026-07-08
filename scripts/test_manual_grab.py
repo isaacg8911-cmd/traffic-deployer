@@ -38,8 +38,19 @@ def main() -> int:
         def _refresh_install_checklist(self):
             pass
 
+        def _push_state(self, fit=False):
+            pass
+
+        def _schedule_pin_persist(self):
+            pass
+
         def statusBar(self):
             return type("B", (), {"showMessage": lambda self, *a: None})()
+
+        bridge = type("Br", (), {
+            "send_field_pin": lambda *a, **k: None,
+            "clear_field_pin": lambda *a, **k: None,
+        })()
 
     from main import MainWindow
 

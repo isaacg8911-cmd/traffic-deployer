@@ -37,7 +37,8 @@ The app has two modes:
 **On the road:** field mode stays on until you are home again and tap **I'm online** (top bar)
 for the next day’s files/route. In field mode the app **does not call the internet** (no address
 lookup, no downloads) and avoids blocking error popups — map, GPS, driving, installs, and export
-use only local data.
+use only local data. Field-mode warnings use the **status bar** (no blocking popups) and are
+still saved under **`tds_data/crashes/`** (`notice_*.log`, `error_*.log`) for USB handoff.
 
 **Import road map from file** works in both modes (no internet — copy `road_graph.graphml`
 from another PC).

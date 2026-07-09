@@ -98,4 +98,10 @@ Director-approved bundles. Forge lists these in `build` / `ship` menus.
 
 **Shipped (2026-06-03 overnight):** P47–P50 + `core/map_display.py` tracked; routing crossing polish (ZONE_MIN 8).
 
+| ID | Name | One-line scope | Prove with |
+|----|------|----------------|------------|
+| P51 | **Stability & bugfix** | Non-routing stability: ingest parse errors, field-mode error logging, PicoCount/audit/export guards; **no** routing/TSP/matrix changes. | `SMOKE.bat` |
+
+**Director pin (2026-07-08):** P51 whitelist — `core/ingest.py`, GPS/PicoCount USB I/O, `core/export.py`, `core/crash_log.py`, error/logging paths, `main.py` wiring only. **Excluded:** `road_router.py`, P16–P22 matrix/zone-ordering until routing package is canonical.
+
 **Modes:** `explore` | `build` | `ship`

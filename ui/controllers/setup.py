@@ -935,6 +935,9 @@ class SetupControllerMixin:
         except ingest.ExcelEngineMissing as exc:
             self._warn(str(exc))
             return pts
+        except ingest.IngestFileReadError as exc:
+            self._warn(str(exc))
+            return pts
         stops = ingest.match_est_files(self._est_configs(), sites, self.state.home)
         for s in stops:
             pts.append([s["begin_lat"], s["begin_lon"]])

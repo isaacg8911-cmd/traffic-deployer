@@ -2,19 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QMessageBox
-
 from core import app_lifecycle
 from ui.paths import DATA_DIR
 
 
 class ShellLifecycleMixin:
-    def _info(self, msg):
-        QMessageBox.information(self, "Traffic Deployer", msg)
-
-    def _warn(self, msg):
-        QMessageBox.warning(self, "Traffic Deployer", msg)
-
     def closeEvent(self, event):
         try:
             self._hide_route_pick_dialog()

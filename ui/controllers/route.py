@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QLabel, QListWidgetItem, QMessageBox, QProgressDialog
 
 import road_router
-from core import ingest, routing, validate
+from core import crash_log, ingest, routing, validate
 from ui.paths import DATA_DIR
 from ui.route_pick_dialog import RoutePickOrderDialog
 from ui.setup_wizard import SetupWizard
@@ -46,6 +46,10 @@ class RouteControllerMixin:
         try:
             sites = ingest.parse_excel_sites(self.excel_paths)
         except ingest.ExcelEngineMissing as exc:
+            self._warn(str(exc))
+            self._restore_build_button_if_idle()
+            return
+        except ingest.IngestFileReadError as exc:
             self._warn(str(exc))
             self._restore_build_button_if_idle()
             return
@@ -786,7 +790,14 @@ class RouteControllerMixin:
                 return None
             old_by_uid = {s["uid"]: s for s in self.state.stops}
             return [ingest.merge_stop_progress(old_by_uid.get(f["uid"]), f) for f in stops]
-        except Exception:
+        except ingest.ExcelEngineMissing as exc:
+            self._warn(str(exc))
+            return None
+        except ingest.IngestFileReadError as exc:
+            self._warn(str(exc))
+            return None
+        except Exception as exc:  # noqa: BLE001
+            crash_log.log_error(exc, context="stops_from_uploads_merged")
             return None
 
     def _nudge_stop(self, delta: int):

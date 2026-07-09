@@ -447,7 +447,16 @@ class MapSyncControllerMixin:
             self._map_preview_stops = routing.assign_crossings_for_display(
                 raw, self.state.home, DATA_DIR)
             self._map_preview_route = {"polyline": [], "miles": 0.0, "graph": False}
-        except Exception:
+        except ingest.ExcelEngineMissing as exc:
+            crash_log.log_field_notice(str(exc), context="map_preview_ingest")
+            self._map_preview_stops = []
+            self._map_preview_route = {"polyline": [], "miles": 0.0, "graph": False}
+        except ingest.IngestFileReadError as exc:
+            crash_log.log_field_notice(str(exc), context="map_preview_ingest")
+            self._map_preview_stops = []
+            self._map_preview_route = {"polyline": [], "miles": 0.0, "graph": False}
+        except Exception as exc:  # noqa: BLE001
+            crash_log.log_error(exc, context="map_preview")
             self._map_preview_stops = []
             self._map_preview_route = {"polyline": [], "miles": 0.0, "graph": False}
         self._update_right(force_map=bool(self._map_preview_stops))

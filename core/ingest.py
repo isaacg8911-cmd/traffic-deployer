@@ -30,6 +30,17 @@ class ExcelEngineMissing(RuntimeError):
     """
 
 
+class IngestFileReadError(RuntimeError):
+    """One or more spreadsheet paths failed to read (corrupt, missing, locked)."""
+
+
+def _file_read_hint(path: str, exc: Exception) -> str:
+    name = os.path.basename(str(path)) or str(path)
+    if not os.path.isfile(path):
+        return f"File not found: {name}"
+    return f"Can't read '{name}': {exc}"
+
+
 def _engine_hint(path: str, exc: Exception) -> str:
     ext = os.path.splitext(str(path))[1].lower()
     name = os.path.basename(str(path)) or str(path)
@@ -88,6 +99,7 @@ def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
     Auto-detects column names. Only rows with an in-California begin point are kept.
     """
     sites: dict[str, dict] = {}
+    file_errors: list[str] = []
     for path in excel_paths:
         try:
             if str(path).lower().endswith(".csv"):
@@ -100,7 +112,8 @@ def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
             # instead of dropping all sites and showing a misleading
             # "no coordinates found" message.
             raise ExcelEngineMissing(_engine_hint(path, exc)) from exc
-        except Exception:
+        except Exception as exc:
+            file_errors.append(_file_read_hint(path, exc))
             continue
 
         for _, df in frames.items():
@@ -142,6 +155,8 @@ def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
                     "lat": (blat + elat) / 2.0, "lon": (blon + elon) / 2.0,
                     "street": street,
                 })
+    if not sites and file_errors:
+        raise IngestFileReadError("\n".join(file_errors))
     return sites
 
 

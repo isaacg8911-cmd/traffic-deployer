@@ -745,6 +745,31 @@ def test_volume_report():
         check("volume vehicles", (res.get("vehicle_count") or 0) > 0)
 
 
+def test_field_error_logging():
+    print("[field error logging]")
+    from core import crash_log
+
+    check("log_field_notice helper", callable(crash_log.log_field_notice))
+    fm = open(os.path.join(ROOT, "ui", "shell", "field_mode.py"), encoding="utf-8").read()
+    check("field _warn logs notices", "log_field_notice" in fm and "offline_mode" in fm)
+    check("map preview ingest log", "map_preview_ingest" in open(
+        os.path.join(ROOT, "ui", "controllers", "map_sync.py"), encoding="utf-8").read())
+
+
+def test_ingest_file_errors():
+    print("[ingest file errors]")
+    from core import ingest
+
+    missing = os.path.join(ROOT, "tds_data", "__smoke_missing__.xlsx")
+    try:
+        ingest.parse_excel_sites([missing])
+        check("missing spreadsheet raises", False, "expected IngestFileReadError")
+    except ingest.IngestFileReadError as exc:
+        check("missing spreadsheet raises", "not found" in str(exc).lower())
+    except Exception as exc:  # noqa: BLE001
+        check("missing spreadsheet raises", False, str(exc))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Traffic Deployer headless smoke suite")
     ap.add_argument(
@@ -779,6 +804,8 @@ def main(argv: list[str] | None = None) -> int:
         test_offline_session_script()
         test_offline_no_internet()
         test_offline_gate()
+        test_field_error_logging()
+        test_ingest_file_errors()
     print()
     if FAILURES:
         print(f"SMOKE FAILED ({len(FAILURES)}):")

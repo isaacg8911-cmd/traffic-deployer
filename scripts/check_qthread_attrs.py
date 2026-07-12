@@ -1,11 +1,13 @@
 """AST guard: QThread subclasses must not assign reserved Qt method names.
 
-FP-QTHREAD-SHADOW — `self.start = gps` overwrites QThread.start() →
-TypeError: 'NoneType' object is not callable when BUILD ROUTE runs.
+Enforces OS rule `.cursor/rules/framework-shadow.mdc` (universal) /
+fingerprint FP-QTHREAD-SHADOW.
+
+Proven: Traffic Deployer — `self.start = gps` overwrote QThread.start() →
+TypeError: 'NoneType' object is not callable when BUILD ROUTE ran.
 
 Usage:
   python scripts/check_qthread_attrs.py [path ...]
-  (default: ui/ and any *.py under project that subclass QThread)
 """
 from __future__ import annotations
 

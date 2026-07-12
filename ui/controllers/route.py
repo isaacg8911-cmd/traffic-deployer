@@ -111,6 +111,8 @@ class RouteControllerMixin:
         self._push_state(fit=True)
         mode = self._ask_route_build_mode()
         if mode == "pick":
+            # Pick is interactive — unlock Build so Setup is not stuck on BUILDING…
+            self._restore_build_button_if_idle()
             self._begin_route_pick(merged)
         elif mode == "optimize":
             self._optimize_and_route(merged)
@@ -579,6 +581,13 @@ class RouteControllerMixin:
         return nxt["to_uid"] if nxt else None
 
     def _optimize_and_route(self, stops):
+        if self._route_thread is not None and self._route_thread.isRunning():
+            self.statusBar().showMessage("Route build already running…", 4000)
+            return
+        rt = getattr(self, "_retrace_thread", None)
+        if rt is not None and rt.isRunning():
+            self.statusBar().showMessage("Wait — route re-trace still running…", 4000)
+            return
         self._route_pick_mode = False
         self._route_pick_uids = []
         self._route_pick_sides = {}

@@ -13,6 +13,7 @@ Read **SCOPE.md** and **SCOPE_PACKAGES.md**. Workflow: **HOW_TO_RUN.md**, **STAR
 
 - Python 3.10+, PySide6, Qt WebEngine, `local_server.py`, OSMnx routing — **ROUTING_AND_MAP.md**
 - Do not break SwiftShader/WebGL env in `main.py` without map test.
+- **FP-QTHREAD-SHADOW:** never assign `self.start` / `self.run` / `self.quit` / `self.wait` on a `QThread` subclass (overwrites the method — BUILD ROUTE crash). Prefer `start_ll`. Guard: `scripts/check_qthread_attrs.py`.
 
 ## Prove before done
 

@@ -50,6 +50,7 @@ class ShellStartupMixin:
         self._route_pick_mode = False
         self._route_pick_uids: list[str] = []
         self._route_pick_sides: dict[str, str] = {}
+        self._pick_side_mode = "auto"  # begin | end | auto — for left-list / combo picks
         self._route_pick_dialog: RoutePickOrderDialog | None = None
         self._manual_grab_mode = False
         self._follow_before_manual_grab = False
@@ -127,9 +128,11 @@ class ShellStartupMixin:
         self.view.setPage(page)
         self.bridge = MapBridge()
         self.bridge.bind_page(page)
-        channel = QWebChannel()
-        channel.registerObject("bridge", self.bridge)
-        page.setWebChannel(channel)
+        # Keep a strong ref — PySide can GC a local QWebChannel and the JS
+        # handshake never completes (qt.webChannelTransport exists, __bridgeReady stays false).
+        self._web_channel = QWebChannel(self)
+        self._web_channel.registerObject("bridge", self.bridge)
+        page.setWebChannel(self._web_channel)
         self.bridge.mapReady.connect(self._on_map_ready)
         self.bridge.followToggled.connect(self._on_map_follow_toggled)
         self.bridge.mapClicked.connect(self._on_map_clicked)

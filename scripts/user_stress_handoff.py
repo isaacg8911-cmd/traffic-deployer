@@ -6,6 +6,7 @@ as OPEN_APP.bat would: TDS_WORK_LAPTOP=1, tds_data beside exe, frozen web assets
 Logs: logs/handoff_stress/YYYY-MM-DD.jsonl
 
 Override: TD_HANDOFF=C:\\path\\to\\TrafficDeployer
+Job files: TD_JOB_XLS + TD_JOB_EST (see field_job_fixtures.py); bundled demo if unset.
 """
 from __future__ import annotations
 
@@ -14,13 +15,14 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+
+from field_job_fixtures import resolve_field_job  # noqa: E402
 HANDOFF_DEFAULT = os.path.join(ROOT, "dist", "TrafficDeployer-AppUpdate", "TrafficDeployer")
 LOG_DIR = os.path.join(ROOT, "logs", "handoff_stress")
 REPO_DATA = os.path.join(ROOT, "tds_data")
@@ -257,28 +259,22 @@ def test_ui_stress(handoff: str) -> None:
     map_ready = {"v": False}
     win.bridge.mapReady.connect(lambda: map_ready.__setitem__("v", True))
     print("  ... waiting for map (work-laptop may take 3–5 min)", flush=True)
-    bridge_ok, bridge_s = _wait_js_flag(app, win, "__bridgeReady", 60.0)
-    _record("bridge_ready", bridge_s, ok_flag=bridge_ok)
-    if bridge_ok:
-        ok("JS bridge", f"{bridge_s:.1f}s")
-    else:
-        warn(f"JS bridge not ready in {bridge_s:.0f}s")
-    # Shorter wait when bridge never connected — offscreen/build-PC WebEngine harness.
-    map_budget = MAP_FAIL_S if bridge_ok else min(90.0, MAP_FAIL_S)
-    loaded, map_s = _wait_js_flag(app, win, "__mapLoaded", map_budget)
+    # Gate on tiles (__mapLoaded), not QWebChannel — map can render without bridge.
+    loaded, map_s = _wait_js_flag(app, win, "__mapLoaded", MAP_FAIL_S)
     _record("map_loaded", map_s, ok_flag=loaded)
-    if not loaded and not bridge_ok:
-        warn(
-            f"map tiles not loaded ({map_s:.0f}s) — harness/WebEngine (bridge dead); "
-            "not a ship blocker; prove map on OPEN_APP.bat"
-        )
-    elif not loaded:
+    if not loaded:
         fail(f"map tiles never loaded ({map_s:.0f}s) — check california.pmtiles beside exe")
     elif map_s > MAP_WARN_S:
         warn(f"map load slow {map_s:.0f}s — matches 3–5 min laptop warning")
         ok("map loaded", f"{map_s:.1f}s")
     else:
         ok("map loaded", f"{map_s:.1f}s")
+    bridge_ok, bridge_s = _wait_js_flag(app, win, "__bridgeReady", 30.0)
+    _record("bridge_ready", bridge_s, ok_flag=bridge_ok)
+    if bridge_ok:
+        ok("JS bridge", f"{bridge_s:.1f}s")
+    else:
+        warn(f"JS bridge not ready in {bridge_s:.0f}s — clicks use tdstop:// fallback")
 
     section("3. Rapid nav switching")
     for round_i in range(3):
@@ -341,24 +337,40 @@ def test_ui_stress(handoff: str) -> None:
         ok("button clicks", "no >5s hangs on visible buttons")
 
     section("5. Workflow actions")
-    from ui.paths import DEMO_CSV, DEMO_EST
-
-    if os.path.isfile(DEMO_CSV) and os.path.isfile(DEMO_EST):
+    job = resolve_field_job()
+    job_xls_ok = os.path.isfile(job.xls)
+    job_ests = [(p, lbl) for p, lbl in job.ests if os.path.isfile(p)]
+    if job_xls_ok and job_ests:
         win._go_page(0)
-        win.excel_paths = [DEMO_CSV]
-        win.est_paths = [DEMO_EST]
+        win.excel_paths = [job.xls]
+        win.est_paths = [p for p, _ in job_ests]
         win.state.excel_paths = list(win.excel_paths)
         win.state.est_paths = list(win.est_paths)
+        if hasattr(win.state, "set_start_point"):
+            try:
+                win.state.set_start_point(job.home[0], job.home[1], job.home_label)
+            except Exception:  # noqa: BLE001
+                win.state.home = job.home
+                win.state.default_home = job.home
+        else:
+            win.state.home = job.home
+            win.state.default_home = job.home
         win._refresh_file_lists()
         app.processEvents()
-        ok("load demo files")
+        ok(
+            "load job files",
+            f"{job.label} ({job.source}): {os.path.basename(job.xls)} + "
+            f"{len(job_ests)} est",
+        )
 
+        # Real field jobs can be large; keep headroom beyond demo 90s.
+        build_budget = 300.0 if job.source != "bundled" else 90.0
         t0 = time.perf_counter()
         try:
             # Avoid pick/suggest dialog; prove the optimize thread (real field default).
             win._ask_route_build_mode = lambda: "optimize"  # type: ignore[method-assign]
             win._build_route_from_uploads()
-            deadline = time.perf_counter() + 90.0
+            deadline = time.perf_counter() + build_budget
             while time.perf_counter() < deadline:
                 app.processEvents()
                 rt = getattr(win, "_route_thread", None)
@@ -373,11 +385,12 @@ def test_ui_stress(handoff: str) -> None:
             still = getattr(win, "_route_thread", None)
             running = still is not None and still.isRunning()
             miles = float((getattr(win.state, "route", None) or {}).get("miles") or 0)
+            stops_n = len(getattr(win.state, "stops", None) or [])
             _record(
                 "build_route",
                 build_s,
                 ok_flag=not running and miles > 0,
-                detail=f"miles={miles}",
+                detail=f"miles={miles};stops={stops_n};job={job.label}",
             )
             if running:
                 fail(f"BUILD ROUTE hung {build_s:.0f}s")
@@ -385,13 +398,17 @@ def test_ui_stress(handoff: str) -> None:
                 fail(f"BUILD ROUTE finished with 0 miles ({build_s:.0f}s)")
             elif build_s > 60:
                 warn(f"BUILD ROUTE took {build_s:.0f}s — may feel stuck on laptop")
-                ok("BUILD ROUTE", f"{build_s:.1f}s, {miles:.1f} mi")
+                ok("BUILD ROUTE", f"{build_s:.1f}s, {miles:.1f} mi, {stops_n} stops")
             else:
-                ok("BUILD ROUTE", f"{build_s:.1f}s, {miles:.1f} mi")
+                ok("BUILD ROUTE", f"{build_s:.1f}s, {miles:.1f} mi, {stops_n} stops")
         except Exception as exc:  # noqa: BLE001
             fail(f"BUILD ROUTE: {exc}")
     else:
-        warn("demo files missing in bundle — skip BUILD ROUTE")
+        missing = []
+        if not job_xls_ok:
+            missing.append(job.xls or "(no xls)")
+        missing.extend(p for p, _ in job.ests if not os.path.isfile(p))
+        warn(f"job files missing — skip BUILD ROUTE: {missing}")
 
     win._go_page(1)
     app.processEvents()

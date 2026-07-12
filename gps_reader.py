@@ -22,6 +22,14 @@ except Exception:
 # BU-353N typically enumerates at 4800 or 9600 baud; try the common set.
 COMMON_BAUDS = [4800, 9600, 38400, 115200]
 
+# Windows often exposes Bluetooth SPP as COM ports. Opening them hangs for
+# seconds per baud — never auto-scan those when looking for a USB GPS.
+_GPS_PORT_KEYWORDS = (
+    "prolific", "pl2303", "globalsat", "bu-353", "bu353", "gps",
+    "u-blox", "ublox", "garmin", "nmea",
+)
+_SKIP_PORT_KEYWORDS = ("bluetooth", "bthenum", "standard serial over bluetooth")
+
 
 def _haversine_m(lat1, lon1, lat2, lon2) -> float:
     R = 6371000.0
@@ -50,6 +58,39 @@ def describe_ports() -> list[dict]:
         return [{"device": p.device, "description": p.description} for p in list_ports.comports()]
     except Exception:
         return []
+
+
+def _port_blob(device: str) -> str:
+    if not HAS_SERIAL or not device:
+        return ""
+    try:
+        for p in list_ports.comports():
+            if p.device == device:
+                return f"{p.description or ''} {p.manufacturer or ''} {p.hwid or ''}".lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _is_skip_port(device: str) -> bool:
+    """True for virtual/Bluetooth COMs that hang on open during GPS scan."""
+    blob = _port_blob(device)
+    return bool(blob) and any(k in blob for k in _SKIP_PORT_KEYWORDS)
+
+
+def _is_likely_gps_port(device: str) -> bool:
+    blob = _port_blob(device)
+    return bool(blob) and any(k in blob for k in _GPS_PORT_KEYWORDS)
+
+
+def candidate_gps_ports(preferred_port: str | None = None) -> list[str]:
+    """Ordered COM ports to try for NMEA GPS — USB GPS first, no Bluetooth."""
+    if preferred_port:
+        return [preferred_port]
+    ports = list_serial_ports()
+    usable = [p for p in ports if p and not _is_skip_port(p)]
+    gps_like = [p for p in usable if _is_likely_gps_port(p)]
+    return gps_like or usable
 
 
 def _valid_fix(msg) -> tuple[float, float] | None:
@@ -93,10 +134,7 @@ def get_fix(preferred_port: str | None = None, bauds: list[int] | None = None):
     if not HAS_SERIAL:
         return None, None
     bauds = bauds or COMMON_BAUDS
-    ports = [preferred_port] if preferred_port else list_serial_ports()
-    for port in ports:
-        if not port:
-            continue
+    for port in candidate_gps_ports(preferred_port):
         for baud in bauds:
             fix = _read_fix_from_port(port, baud)
             if fix:
@@ -115,8 +153,7 @@ def get_status(preferred_port: str | None = None, bauds: list[int] | None = None
     if not HAS_SERIAL:
         return out
     bauds = bauds or COMMON_BAUDS
-    ports = [preferred_port] if preferred_port else list_serial_ports()
-    for port in ports:
+    for port in candidate_gps_ports(preferred_port):
         if not port:
             continue
         for baud in bauds:
@@ -296,10 +333,7 @@ class GPSStream:
 
     def _open_port(self):
         """Find a port/baud that produces NMEA data and return an open Serial."""
-        ports = [self.preferred_port] if self.preferred_port else list_serial_ports()
-        for port in ports:
-            if not port:
-                continue
+        for port in candidate_gps_ports(self.preferred_port):
             for baud in self.bauds:
                 try:
                     ser = serial.Serial(port, baud, timeout=2.0)

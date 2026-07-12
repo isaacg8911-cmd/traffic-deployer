@@ -432,10 +432,11 @@ def test_web_assets():
     check("field crash log hook", "install_crash_logging" in main_src)
     check("map guide when following", '"show_guide": bool(following)' in main_src)
     check("launch maximized", "showMaximized" in main_src)
-    from core.picocount import is_gps_port, is_counter_port
+    from core.picocount import is_gps_port, is_counter_port, is_bluetooth_port
     pc_src = open(os.path.join(ROOT, "core", "picocount.py"), encoding="utf-8").read()
     check("counter skips gps in probe", "_is_gps_port" in pc_src and "not _is_gps_port" in pc_src)
-    check("counter port helpers", callable(is_gps_port) and callable(is_counter_port))
+    check("counter skips bluetooth in probe", "_is_bluetooth_port" in pc_src and "not _is_bluetooth_port" in pc_src)
+    check("counter port helpers", callable(is_gps_port) and callable(is_counter_port) and callable(is_bluetooth_port))
     check("picocount UI wired", "btn_counter_clear" in main_src and "PicocountThread" in main_src)
     check("counter refresh connect", "btn_counter_refresh" in main_src and "_counter_refresh_and_connect" in main_src)
     check("counter gps pause", "_counter_pause_gps" in main_src and "_counter_resume_gps" in main_src)
@@ -666,6 +667,12 @@ def test_gps_only():
     check("fix_from_snapshot ok", pair == (33.7, -117.8))
     check("no_fix_message disconnected", "No GPS found" in no_fix_message({"connected": False}))
     check("list_serial_ports", callable(gps_reader.list_serial_ports))
+    check("candidate_gps_ports skips bluetooth", callable(gps_reader.candidate_gps_ports))
+    cands = gps_reader.candidate_gps_ports()
+    check(
+        "gps candidates exclude bluetooth",
+        all("bluetooth" not in (gps_reader._port_blob(p) or "") for p in cands),
+    )
     st = gps_reader.get_status(attempts=2)
     check("get_status shape", isinstance(st, dict) and "connected" in st and "fix" in st)
 
@@ -711,10 +718,11 @@ def test_gps_only():
     from core import direction as direction_rules
     short = direction_rules.infer_from_segment(33.0, -118.0, 33.0, -118.0)
     check("direction needs gps", short["direction"] is None and short["source"] == "needs_gps")
-    from core.picocount import is_gps_port, is_counter_port
+    from core.picocount import is_gps_port, is_counter_port, is_bluetooth_port
     pc_src = open(os.path.join(ROOT, "core", "picocount.py"), encoding="utf-8").read()
     check("counter skips gps in probe", "_is_gps_port" in pc_src and "not _is_gps_port" in pc_src)
-    check("counter port helpers", callable(is_gps_port) and callable(is_counter_port))
+    check("counter skips bluetooth in probe", "_is_bluetooth_port" in pc_src and "not _is_bluetooth_port" in pc_src)
+    check("counter port helpers", callable(is_gps_port) and callable(is_counter_port) and callable(is_bluetooth_port))
     check("counter gps pause", "_counter_pause_gps" in main_src and "_counter_resume_gps" in main_src)
     check("gps follow mode", "_gps_follow" in main_src and "btn_drive_arrived" in main_src)
     grab_src = inspect.getsource(main_mod.MainWindow._grab_gps_here)

@@ -20,6 +20,10 @@
   var MAX_ZOOM = 16;
   var FOLLOW_ZOOM = 13;
   var FOLLOW_ZOOM_MIN = 8;
+  var SITE_CLICK_ZOOM = 15;
+  // D6: fan overlapping site dots so badges stay readable.
+  var COLLOC_THRESHOLD_M = 28;
+  var COLLOC_FAN_RADIUS_M = 22;
   // D1: sites, GPS, and pins only — no route/segment/drive-leg polylines.
   var SHOW_TRACE_LINES = false;
 
@@ -342,6 +346,76 @@
     return 2 * R * Math.asin(Math.sqrt(a));
   }
 
+  function offsetMeters(lat, lon, bearingDeg, distM) {
+    var br = bearingDeg * Math.PI / 180;
+    var latRad = lat * Math.PI / 180;
+    var cosLat = Math.cos(latRad);
+    if (Math.abs(cosLat) < 1e-6) cosLat = 1e-6;
+    var dLat = (distM * Math.cos(br)) / 111320;
+    var dLon = (distM * Math.sin(br)) / (111320 * cosLat);
+    return [lat + dLat, lon + dLon];
+  }
+
+  /** D6: spread collocated map dots in a small fan so circles do not stack. */
+  function spreadCollocated(items, thresholdM, radiusM) {
+    if (!items || items.length < 2) return;
+    thresholdM = thresholdM || COLLOC_THRESHOLD_M;
+    radiusM = radiusM || COLLOC_FAN_RADIUS_M;
+    var n = items.length;
+    var parent = items.map(function (_, i) { return i; });
+    function find(a) {
+      while (parent[a] !== a) {
+        parent[a] = parent[parent[a]];
+        a = parent[a];
+      }
+      return a;
+    }
+    function unite(a, b) {
+      parent[find(a)] = find(b);
+    }
+    for (var i = 0; i < n; i++) {
+      for (var j = i + 1; j < n; j++) {
+        if (haversineM(items[i].lat, items[i].lon, items[j].lat, items[j].lon) <= thresholdM) {
+          unite(i, j);
+        }
+      }
+    }
+    var groups = {};
+    for (var k = 0; k < n; k++) {
+      var root = find(k);
+      if (!groups[root]) groups[root] = [];
+      groups[root].push(k);
+    }
+    Object.keys(groups).forEach(function (key) {
+      var idxs = groups[key];
+      if (idxs.length < 2) return;
+      var cLat = 0;
+      var cLon = 0;
+      idxs.forEach(function (ix) {
+        cLat += items[ix].lat;
+        cLon += items[ix].lon;
+      });
+      cLat /= idxs.length;
+      cLon /= idxs.length;
+      if (idxs.length === 2) {
+        var half = radiusM * 0.55;
+        var o0 = offsetMeters(cLat, cLon, 135, half);
+        var o1 = offsetMeters(cLat, cLon, 315, half);
+        items[idxs[0]].lat = o0[0];
+        items[idxs[0]].lon = o0[1];
+        items[idxs[1]].lat = o1[0];
+        items[idxs[1]].lon = o1[1];
+        return;
+      }
+      var step = 360 / idxs.length;
+      idxs.forEach(function (ix, pos) {
+        var o = offsetMeters(cLat, cLon, pos * step, radiusM);
+        items[ix].lat = o[0];
+        items[ix].lon = o[1];
+      });
+    });
+  }
+
   /** When layer hit-test misses, snap to nearest unpicked begin/end (mirrors Python). */
   function nearestPickAt(lat, lon, maxM) {
     if (!lastState || lastState.map_mode !== 'pick') return null;
@@ -478,7 +552,7 @@
           'circle-opacity': 0.95
         } });
       var siteLabelLayout = Object.assign({}, DOT_LABEL_LAYOUT, {
-        'text-field': ['to-string', ['get', 'site_id']]
+        'text-field': ['to-string', ['get', 'seq']]
       });
       map.addLayer({ id: 'site-begin-label', type: 'symbol', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'begin'],
@@ -505,7 +579,7 @@
         } });
       map.addLayer({ id: 'stop-label', type: 'symbol', source: 'stop-markers',
         layout: Object.assign({}, DOT_LABEL_LAYOUT, {
-          'text-field': ['to-string', ['get', 'site_id']],
+          'text-field': ['to-string', ['get', 'seq']],
           'text-size': [
             'case', ['boolean', ['get', 'highlight'], false],
             ['interpolate', ['linear'], ['zoom'], 10, 13, 14, 17, 16, 19],
@@ -551,7 +625,7 @@
         } });
       map.addLayer({ id: 'install-pts-label', type: 'symbol', source: 'install-pts',
         layout: Object.assign({}, DOT_LABEL_LAYOUT, {
-          'text-field': ['to-string', ['get', 'site_id']]
+          'text-field': ['to-string', ['get', 'seq']]
         }),
         paint: DOT_LABEL_PAINT });
       bindStopClicks();
@@ -621,7 +695,8 @@
     if (picking) {
       return (pickLetters && pickLetters[s.uid]) || siteLetterFromIndex(i);
     }
-    return siteIdLabel(s, i);
+    if (s.seq != null) return String(s.seq);
+    return String((i != null ? i : 0) + 1);
   }
 
   function siteIdLabel(s, i) {
@@ -794,6 +869,13 @@
     pickOrder.forEach(function (uid, i) { pickIdx[uid] = i + 1; });
     var pickLetters = state.pick_letters || {};
     var segs = [], pts = [], stops = [], installs = [], pickTargets = [];
+    var fanAnchors = {};
+    function registerFanAnchor(lat, lon, applyFn) {
+      if (lat == null || lon == null) return;
+      var key = lat.toFixed(6) + ',' + lon.toFixed(6);
+      if (!fanAnchors[key]) fanAnchors[key] = { lat: lat, lon: lon, applies: [] };
+      fanAnchors[key].applies.push(applyFn);
+    }
     (state.stops || []).forEach(function (s, i) {
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
       if (bLat == null || bLon == null || eLat == null || eLon == null) return;
@@ -810,11 +892,20 @@
                   geometry: { type: 'LineString', coordinates: coords } });
       if (!alreadyPicked) {
         var ptProps = { kind: 'begin', uid: s.uid, seq: dotLabel, site_id: siteIdLabel(s, i) };
-        pts.push(pt(bLat, bLon, ptProps));
-        pts.push(pt(eLat, eLon, Object.assign({}, ptProps, { kind: 'end' })));
+        registerFanAnchor(bLat, bLon, function (la, lo) {
+          pts.push(pt(la, lo, ptProps));
+        });
+        var endProps = Object.assign({}, ptProps, { kind: 'end' });
+        registerFanAnchor(eLat, eLon, function (la, lo) {
+          pts.push(pt(la, lo, endProps));
+        });
         if (picking) {
-          pickTargets.push(pt(bLat, bLon, { kind: 'begin', uid: s.uid, label: dotLabel }));
-          pickTargets.push(pt(eLat, eLon, { kind: 'end', uid: s.uid, label: dotLabel }));
+          registerFanAnchor(bLat, bLon, function (la, lo) {
+            pickTargets.push(pt(la, lo, { kind: 'begin', uid: s.uid, label: dotLabel }));
+          });
+          registerFanAnchor(eLat, eLon, function (la, lo) {
+            pickTargets.push(pt(la, lo, { kind: 'end', uid: s.uid, label: dotLabel }));
+          });
         }
       }
       if (s.field_lat != null && s.field_lon != null) {
@@ -822,12 +913,16 @@
         var hideForDrag = state.map_mode === 'manual_grab' &&
           state.current_uid && s.uid === state.current_uid && state.on_install;
         if (!hideForDrag) {
-          installs.push(pt(s.field_lat, s.field_lon, {
-            uid: s.uid,
-            source: fsrc,
-            site_id: siteIdLabel(s, i),
-            kind: 'install'
-          }));
+          var installSeq = picking ? dotLabel : stopSeqLabel(s, i, picking, pickIdx);
+          registerFanAnchor(s.field_lat, s.field_lon, function (la, lo) {
+            installs.push(pt(la, lo, {
+              uid: s.uid,
+              source: fsrc,
+              seq: installSeq,
+              site_id: siteIdLabel(s, i),
+              kind: 'install'
+            }));
+          });
         }
       }
       if (showStops || (picking && pickIdx[s.uid])) {
@@ -837,17 +932,25 @@
           if (picking && !pickIdx[s.uid]) {
             /* no anchor badge until site is picked */
           } else {
-            var badgeLabel = picking ? String(pickIdx[s.uid] || '') : siteIdLabel(s, i);
-            stops.push(pt(anchor[0], anchor[1], {
+            var badgeLabel = seq;
+            var stopProps = {
               uid: s.uid,
-              seq: seq,
-              site_id: badgeLabel,
+              seq: badgeLabel,
+              site_id: siteIdLabel(s, i),
               status: stopStatus(s),
               highlight: hiUid && s.uid === hiUid
-            }));
+            };
+            registerFanAnchor(anchor[0], anchor[1], function (la, lo) {
+              stops.push(pt(la, lo, stopProps));
+            });
           }
         }
       }
+    });
+    var anchorList = Object.keys(fanAnchors).map(function (k) { return fanAnchors[k]; });
+    spreadCollocated(anchorList, COLLOC_THRESHOLD_M, COLLOC_FAN_RADIUS_M);
+    anchorList.forEach(function (anchor) {
+      anchor.applies.forEach(function (fn) { fn(anchor.lat, anchor.lon); });
     });
     map.getSource('segments').setData({ type: 'FeatureCollection', features: segs });
     map.getSource('site-pts').setData({ type: 'FeatureCollection', features: pts });
@@ -1028,6 +1131,11 @@
     return { lat: fieldPinMarker._tdLat, lon: fieldPinMarker._tdLon };
   };
   window.__tdFrameNextSite = frameNextSite;
+  window.__spreadCollocated = spreadCollocated;
+  window.__tdZoomToSite = function (lat, lon, zoom) {
+    var z = zoom != null ? Math.min(MAX_ZOOM, zoom) : SITE_CLICK_ZOOM;
+    map.flyTo({ center: [lon, lat], zoom: z, duration: 550 });
+  };
   window.__tdSetDriveLeg = function (coords, active) {
     ensureSources();
     if (!lastState) return;

@@ -434,6 +434,9 @@ def test_web_assets():
     check("no map trace lines", "SHOW_TRACE_LINES = false" in appjs)
     check("pick-first build", '_begin_route_pick(merged)' in main_src)
     check("fleet nav hidden", "FLEET_NAV_ENABLED = False" in open(os.path.join(ROOT, "ui", "simple_mode.py")).read())
+    check("D4 seq badge labels", "'text-field': ['to-string', ['get', 'seq']]" in appjs)
+    check("D5 site click zoom", "_zoom_to_stop_click" in open(os.path.join(ROOT, "ui", "controllers", "map_sync.py")).read())
+    check("D6 collocated fan", "spreadCollocated" in appjs and "registerFanAnchor" in appjs)
     check("launch maximized", "showMaximized" in main_src)
     from core.picocount import is_gps_port, is_counter_port, is_bluetooth_port
     pc_src = open(os.path.join(ROOT, "core", "picocount.py"), encoding="utf-8").read()

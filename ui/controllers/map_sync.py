@@ -19,6 +19,7 @@ from ui.simple_mode import FIELD_NAV_INDICES, FIELD_SHELL, SIMPLE_MODE
 from version import APP_VERSION
 
 DAY_FILTER_ALL = "All days"
+SITE_CLICK_ZOOM = 15
 
 
 class MapSyncControllerMixin:
@@ -524,6 +525,33 @@ class MapSyncControllerMixin:
                 f"   ({len(self.state.stops)} stops total)")
 
     @staticmethod
+    def _stop_click_coords(stop: dict, side: str | None = None) -> tuple[float, float] | None:
+        if side == "begin":
+            bl, blo = stop.get("begin_lat"), stop.get("begin_lon")
+            if bl is not None and blo is not None:
+                return float(bl), float(blo)
+        elif side == "end":
+            el, elo = stop.get("end_lat"), stop.get("end_lon")
+            if el is not None and elo is not None:
+                return float(el), float(elo)
+        anchor = MapSyncControllerMixin._stop_anchor_coords(stop)
+        if anchor:
+            return anchor
+        bl, blo = stop.get("begin_lat"), stop.get("begin_lon")
+        if bl is not None and blo is not None:
+            return float(bl), float(blo)
+        return None
+
+    def _zoom_to_stop_click(self, stop: dict, side: str | None = None) -> None:
+        """D5: recenter map on a tapped site at street-level zoom."""
+        if not getattr(self, "_map_js_ready", False):
+            return
+        coords = self._stop_click_coords(stop, side)
+        if coords:
+            lat, lon = coords
+            self.bridge.fly_to(lat, lon, SITE_CLICK_ZOOM)
+
+    @staticmethod
     def _stop_anchor_coords(s: dict) -> tuple[float, float] | None:
         clat, clon = s.get("cross_lat"), s.get("cross_lon")
         if clat is not None and clon is not None:
@@ -569,7 +597,11 @@ class MapSyncControllerMixin:
             return
         uid, side = self._nearest_unpicked_stop(lat, lon)
         if uid:
+            idx = self.state.index_of(uid)
+            stop = self.state.stops[idx] if idx >= 0 else None
             self._route_pick_add(uid, side=side)
+            if stop is not None:
+                self._zoom_to_stop_click(stop, side)
             return
         self.statusBar().showMessage(
             "No site near that click — tap the blue or red dot (or lettered orange ring).",
@@ -608,11 +640,13 @@ class MapSyncControllerMixin:
                 )
                 return
             self._route_pick_add(uid, side=side)
+            self._zoom_to_stop_click(stop, side)
             return
         idx, stop = self._stop_by_uid(uid)
         if stop is None:
             return
         self.statusBar().showMessage(self._stop_click_status(stop, idx, side), 10000)
+        self._zoom_to_stop_click(stop, side)
         if self.pages.currentIndex() == 2:
             if idx < len(self.state.stops):
                 self._select_install_stop(idx)

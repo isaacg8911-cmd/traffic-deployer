@@ -10,6 +10,7 @@ import road_router
 from core import direction as direction_rules
 from core import geo, install_checklist
 from core.state import ca_now
+from ui.controllers.map_sync import SITE_CLICK_ZOOM
 from ui.paths import DATA_DIR, DIRECTIONS
 from ui.threads import FieldStreetThread
 
@@ -634,5 +635,5 @@ class InstallControllerMixin:
     def _center_current(self):
         if self.state.stops and self.current_index < len(self.state.stops):
             lat, lon = self.state.point(self.state.stops[self.current_index])
-            self.bridge.fly_to(lat, lon, 13)
+            self.bridge.fly_to(lat, lon, SITE_CLICK_ZOOM)
 

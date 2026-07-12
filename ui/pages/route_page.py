@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -78,8 +79,43 @@ def build_route_page(win) -> QWidget:
     row_pick_site.addWidget(win.lbl_pick_slot)
     row_pick_site.addWidget(win.combo_pick_site, 1)
     sec_pick_lay.addWidget(win.pick_combo_row)
-    win.btn_pick_auto = QPushButton("Auto-finish")
+    win.pick_side_row = QWidget()
+    row_side = QHBoxLayout(win.pick_side_row)
+    row_side.setContentsMargins(0, 0, 0, 0)
+    win.lbl_pick_side = QLabel("Drive-to:")
+    win.lbl_pick_side.setMinimumWidth(52)
+    win.btn_pick_side_begin = QPushButton("Begin")
+    win.btn_pick_side_begin.setObjectName("secondary")
+    win.btn_pick_side_begin.setCheckable(True)
+    win.btn_pick_side_begin.setToolTip("Next stop from the list uses the blue (begin) end")
+    win.btn_pick_side_end = QPushButton("End")
+    win.btn_pick_side_end.setObjectName("secondary")
+    win.btn_pick_side_end.setCheckable(True)
+    win.btn_pick_side_end.setToolTip("Next stop from the list uses the red (end) end")
+    win.btn_pick_side_auto = QPushButton("Auto")
+    win.btn_pick_side_auto.setObjectName("secondary")
+    win.btn_pick_side_auto.setCheckable(True)
+    win.btn_pick_side_auto.setChecked(True)
+    win.btn_pick_side_auto.setToolTip(
+        "Route picks the nearest begin/end when you Apply (Install uses that choice)")
+    win._pick_side_group = QButtonGroup(win.pick_side_row)
+    win._pick_side_group.setExclusive(True)
+    for btn in (win.btn_pick_side_begin, win.btn_pick_side_end, win.btn_pick_side_auto):
+        win._pick_side_group.addButton(btn)
+    win.btn_pick_side_begin.clicked.connect(lambda: win._set_pick_side_mode("begin"))
+    win.btn_pick_side_end.clicked.connect(lambda: win._set_pick_side_mode("end"))
+    win.btn_pick_side_auto.clicked.connect(lambda: win._set_pick_side_mode("auto"))
+    row_side.addWidget(win.lbl_pick_side)
+    row_side.addWidget(win.btn_pick_side_begin)
+    row_side.addWidget(win.btn_pick_side_end)
+    row_side.addWidget(win.btn_pick_side_auto)
+    row_side.addStretch(1)
+    win.pick_side_row.hide()
+    sec_pick_lay.addWidget(win.pick_side_row)
+    win.btn_pick_auto = QPushButton("Suggest order")
     win.btn_pick_auto.setObjectName("secondary")
+    win.btn_pick_auto.setToolTip(
+        "Auto-finish remaining stops using road-graph order (explicit secondary to manual pick)")
     win.btn_pick_auto.clicked.connect(win._route_pick_auto_finish)
     win.btn_pick_auto.hide()
     win.btn_pick_clear = QPushButton("Clear")
@@ -105,6 +141,7 @@ def build_route_page(win) -> QWidget:
     sec_map = sec_map_lay.parentWidget() if not SIMPLE_MODE else None
     win.chk_show_segments = QCheckBox("Site lines")
     win.chk_show_segments.setChecked(False)
+    win.chk_show_segments.hide()
     win.chk_show_segments.stateChanged.connect(lambda: win._push_state())
     b_fit = QPushButton("Zoom all")
     b_fit.setObjectName("secondary")

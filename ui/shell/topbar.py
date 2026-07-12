@@ -22,7 +22,7 @@ from core.field_ready import check_all
 from ui import workflow as setup_workflow
 from ui.page_indices import NAV_PAGE_COUNT, PAGE_INVENTORY
 from ui.paths import APP_DIR, DATA_DIR, IS_PORTABLE
-from ui.simple_mode import COMPACT_UI, FIELD_NAV_INDICES, FIELD_SHELL, HIDE_PANEL_THEMES, SIMPLE_MODE
+from ui.simple_mode import COMPACT_UI, FIELD_NAV_INDICES, FIELD_SHELL, FLEET_NAV_ENABLED, HIDE_PANEL_THEMES, SIMPLE_MODE
 from ui.status_style import apply_status
 from ui.spacing import TOPBAR_CLUSTER_GAP, TOPBAR_PAD_H, TOPBAR_PAD_V
 from ui.threads import SmokeTestThread
@@ -141,10 +141,12 @@ class ShellTopbarMixin:
         )
 
     def _go_page(self, i: int):
+        if not FLEET_NAV_ENABLED and i == PAGE_INVENTORY:
+            return
         if FIELD_SHELL and self.state.offline_mode and i not in FIELD_NAV_INDICES:
             self.statusBar().showMessage(
                 "Field mode — Route, Install, Pickup, Audit. "
-                "Tap I'm online at home for Setup and Fleet.",
+                "Tap I'm online at home for Setup.",
                 5000,
             )
             return

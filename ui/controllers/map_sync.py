@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMessageBox
 
 from core import crash_log, geo, ingest
 from ui.map_helpers import (
@@ -397,25 +396,8 @@ class MapSyncControllerMixin:
             stop.pop("pick_cross_locked", None)
 
     def _ask_route_build_mode(self) -> str | None:
-        """Simple mode: auto-optimize (no blocking dialog). Pick via Route → Pick on map."""
-        if SIMPLE_MODE:
-            return "optimize"
-        box = QMessageBox(self)
-        box.setWindowTitle("Build route")
-        box.setText("How should stop order be chosen?")
-        box.setInformativeText(
-            "Pick route: tap blue or red on each site for stop order and drive-to end.\n"
-            "Suggest route: zones near your start first, shortest path between sites.")
-        btn_pick = box.addButton("Pick route on map", QMessageBox.AcceptRole)
-        btn_opt = box.addButton("Suggest route", QMessageBox.ActionRole)
-        box.addButton(QMessageBox.Cancel)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked == btn_pick:
-            return "pick"
-        if clicked == btn_opt:
-            return "optimize"
-        return None
+        """Pick-first workflow — BUILD ROUTE always opens manual pick (D2)."""
+        return "pick"
 
     @staticmethod
     def _stops_with_seq(stops: list[dict]) -> list[dict]:
@@ -518,10 +500,9 @@ class MapSyncControllerMixin:
                 self._pick_prompt_text() if picking else ""),
             "pick_waiting": self._pick_waiting_hint() if picking else "",
             "pick_letters": self._pick_site_letters() if picking else {},
-            "show_segments": self.chk_show_segments.isChecked(),
+            "show_segments": False,
             "show_badges": not picking,
-            # Blue leg to next stop while following GPS; soft lean on work laptop keeps streets + next pin.
-            "show_guide": bool(following),
+            "show_guide": False,
             # Lean map stripped streets/sites and broke field GPS follow — keep full map offline.
             "lean_drive": False,
             "current_uid": (

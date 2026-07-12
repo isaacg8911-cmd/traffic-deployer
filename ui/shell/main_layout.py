@@ -23,7 +23,7 @@ import road_router
 from ui.page_indices import NAV_PAGE_COUNT
 from ui.pages import audit_page, install_page, inventory_page, pickup_page, route_page, setup_page
 from ui.paths import DATA_DIR
-from ui.simple_mode import FIELD_NAV_INDICES, FIELD_SHELL
+from ui.simple_mode import FIELD_NAV_INDICES, FIELD_SHELL, FLEET_NAV_ENABLED
 from ui.spacing import NAV_GAP, NAV_PAD_H, NAV_PAD_V, NAV_WIDTH, SIDE_MAX, SIDE_MIN, SPLIT_DEFAULT
 from version import APP_NAME, APP_TAGLINE
 
@@ -42,6 +42,10 @@ class ShellLayoutMixin:
                 btn.setVisible(i in FIELD_NAV_INDICES)
             else:
                 btn.setVisible(True)
+        if not FLEET_NAV_ENABLED:
+            fleet_btn = getattr(self, "_navbtn_5", None)
+            if fleet_btn is not None:
+                fleet_btn.setVisible(False)
         if on_field and self.pages.currentIndex() not in FIELD_NAV_INDICES:
             self._go_page(1)
         self._apply_field_desk_chrome()
@@ -165,6 +169,8 @@ class ShellLayoutMixin:
             b.setObjectName("navBtn")
             b.setCheckable(True)
             b.clicked.connect(lambda _=False, i=idx: self._go_page(i))
+            if not FLEET_NAV_ENABLED and idx == 5:
+                b.setVisible(False)
             nav_lay.addWidget(b)
             setattr(self, f"_navbtn_{idx}", b)
         self._navbtn_0.setChecked(True)
@@ -272,7 +278,7 @@ class ShellLayoutMixin:
         for text in (
             "1  Set your start (GPS, address, or coordinates)",
             "2  Add Excel + .EST, download road map",
-            "3  Build optimized route — map appears here",
+            "3  Build route — pick stop order on the map",
         ):
             step = QLabel(text)
             step.setObjectName("phStep")

@@ -367,12 +367,12 @@ def test_ui_stress(handoff: str) -> None:
         build_budget = 300.0 if job.source != "bundled" else 90.0
         t0 = time.perf_counter()
         try:
-            # Avoid pick/suggest dialog; prove the optimize thread (real field default).
-            win._ask_route_build_mode = lambda: "optimize"  # type: ignore[method-assign]
             win._build_route_from_uploads()
             deadline = time.perf_counter() + build_budget
             while time.perf_counter() < deadline:
                 app.processEvents()
+                if getattr(win, "_route_pick_mode", False):
+                    break
                 rt = getattr(win, "_route_thread", None)
                 if rt is None or not rt.isRunning():
                     break
@@ -384,23 +384,26 @@ def test_ui_stress(handoff: str) -> None:
             build_s = time.perf_counter() - t0
             still = getattr(win, "_route_thread", None)
             running = still is not None and still.isRunning()
+            pick_mode = bool(getattr(win, "_route_pick_mode", False))
             miles = float((getattr(win.state, "route", None) or {}).get("miles") or 0)
             stops_n = len(getattr(win.state, "stops", None) or [])
             _record(
                 "build_route",
                 build_s,
-                ok_flag=not running and miles > 0,
-                detail=f"miles={miles};stops={stops_n};job={job.label}",
+                ok_flag=not running and pick_mode and stops_n > 0,
+                detail=f"pick={pick_mode};miles={miles};stops={stops_n};job={job.label}",
             )
             if running:
                 fail(f"BUILD ROUTE hung {build_s:.0f}s")
-            elif miles <= 0:
-                fail(f"BUILD ROUTE finished with 0 miles ({build_s:.0f}s)")
+            elif not pick_mode:
+                fail(f"BUILD ROUTE did not enter pick mode ({build_s:.0f}s)")
+            elif stops_n <= 0:
+                fail(f"BUILD ROUTE loaded 0 stops ({build_s:.0f}s)")
             elif build_s > 60:
                 warn(f"BUILD ROUTE took {build_s:.0f}s — may feel stuck on laptop")
-                ok("BUILD ROUTE", f"{build_s:.1f}s, {miles:.1f} mi, {stops_n} stops")
+                ok("BUILD ROUTE", f"{build_s:.1f}s, pick mode, {stops_n} stops")
             else:
-                ok("BUILD ROUTE", f"{build_s:.1f}s, {miles:.1f} mi, {stops_n} stops")
+                ok("BUILD ROUTE", f"{build_s:.1f}s, pick mode, {stops_n} stops")
         except Exception as exc:  # noqa: BLE001
             fail(f"BUILD ROUTE: {exc}")
     else:

@@ -20,6 +20,8 @@
   var MAX_ZOOM = 16;
   var FOLLOW_ZOOM = 13;
   var FOLLOW_ZOOM_MIN = 8;
+  // D1: sites, GPS, and pins only — no route/segment/drive-leg polylines.
+  var SHOW_TRACE_LINES = false;
 
   var map = new maplibregl.Map({
     container: 'map',
@@ -697,6 +699,7 @@
   }
 
   function resolveRouteLine(state) {
+    if (!SHOW_TRACE_LINES) return null;
     var mode = state.map_mode || (state.driving ? 'drive' : 'plan');
     if (mode === 'pick' || mode === 'preview' || mode === 'manual_grab') {
       return null;
@@ -718,13 +721,10 @@
   }
 
   function paintRouteLayer(state) {
-    var route = resolveRouteLine(state);
-    var showRoute = route && route.coords.length >= 2;
     if (map.getSource('route')) {
-      map.getSource('route').setData(
-        showRoute ? routeLineFC(route.coords, route.onRoads) : emptyFC());
-      setLayerVis('route-casing', showRoute);
-      setLayerVis('route-line', showRoute);
+      map.getSource('route').setData(emptyFC());
+      setLayerVis('route-casing', false);
+      setLayerVis('route-line', false);
     }
   }
 
@@ -857,11 +857,9 @@
     }
     if (map.getSource('install-pts')) map.getSource('install-pts').setData({ type: 'FeatureCollection', features: installs });
 
-    var showGuide = !!state.show_guide;
-    var showSegs = state.show_segments !== false && !driving;
     var hasSites = (state.stops || []).length > 0;
     paintRouteLayer(state);
-    setLayerVis('segments-line', showSegs);
+    setLayerVis('segments-line', false);
     setLayerVis('site-begin', hasSites);
     setLayerVis('site-end', hasSites);
     setLayerVis('site-begin-label', hasSites);
@@ -1033,10 +1031,9 @@
   window.__tdSetDriveLeg = function (coords, active) {
     ensureSources();
     if (!lastState) return;
-    var on = active && coords && coords.length >= 2;
-    lastState.next_leg = on ? { polyline: coords } : null;
-    lastState.show_guide = on;
-    if (styleReady) applyData(lastState);
+    lastState.next_leg = null;
+    lastState.show_guide = false;
+    if (styleReady) paintRouteLayer(lastState);
   };
 
   window.__tdSetDriveHighlight = function (uid) {

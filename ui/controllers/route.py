@@ -109,16 +109,8 @@ class RouteControllerMixin:
         self._refresh_route_list()
         self._refresh_day_filter()
         self._push_state(fit=True)
-        mode = self._ask_route_build_mode()
-        if mode == "pick":
-            # Pick is interactive — unlock Build so Setup is not stuck on BUILDING…
-            self._restore_build_button_if_idle()
-            self._begin_route_pick(merged)
-        elif mode == "optimize":
-            self._optimize_and_route(merged)
-        else:
-            self.statusBar().showMessage("Route build cancelled.", 4000)
-            self._restore_build_button_if_idle()
+        self._restore_build_button_if_idle()
+        self._begin_route_pick(merged)
 
     def _start_pick_route_from_route_tab(self) -> None:
         """Manual pick order — alternative to auto-optimize BUILD ROUTE."""
@@ -713,21 +705,7 @@ class RouteControllerMixin:
         if not self.state.stops:
             return
         stops = self._stops_from_uploads_merged() or list(self.state.stops)
-        if SIMPLE_MODE:
-            self._begin_route_pick(stops)
-            return
-        mode = self._ask_route_build_mode()
-        if mode is None:
-            return
-        if mode == "pick":
-            self._begin_route_pick(stops)
-        else:
-            self._route_pick_mode = False
-            self._route_pick_uids = []
-            self._route_pick_sides = {}
-            self._exit_pick_map_focus()
-            self._hide_route_pick_dialog()
-            self._optimize_and_route(stops)
+        self._begin_route_pick(stops)
 
     def _schedule_retrace(self, *, select_row: int | None = None) -> None:
         self._retrace_pending_row = select_row

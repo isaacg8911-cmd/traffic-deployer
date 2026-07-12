@@ -13,6 +13,9 @@ BUILD_LABEL = "Build" if SIMPLE_MODE else "PLAN ROUTE — pick stop order"
 FIELD_SHELL = SIMPLE_MODE
 FIELD_NAV_INDICES = (1, 2, 3, 4)  # Route, Install, Pickup, Audit (Setup + Fleet are desk-only)
 
+# D3: hide Fleet nav until field basics are solid — code stays, tab not in main path.
+FLEET_NAV_ENABLED = False
+
 # Battery + bridge throttle (SwiftShader map is CPU-heavy — fewer JS pushes help).
 GPS_TICK_MS = 1000
 GPS_TICK_DRIVE_MS = 450

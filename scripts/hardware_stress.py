@@ -22,6 +22,8 @@ if ROOT not in sys.path:
 LOG_DIR = os.path.join(ROOT, "logs", "hardware_stress")
 AUTO_DETECT_BUDGET_S = 8.0
 PROBE_BUDGET_S = 12.0
+# TD_GPS_ONLY=1 — skip PicoCount probe (Director: GPS stress only)
+GPS_ONLY = os.environ.get("TD_GPS_ONLY", "").strip() in ("1", "true", "yes")
 
 FAILURES: list[str] = []
 WARNS: list[str] = []
@@ -60,7 +62,10 @@ def main() -> int:
     import gps_reader
     from core import picocount
 
-    print("HARDWARE STRESS — GPS + PicoCount\n", flush=True)
+    print(
+        "HARDWARE STRESS — GPS only\n" if GPS_ONLY else "HARDWARE STRESS — GPS + PicoCount\n",
+        flush=True,
+    )
 
     ports = gps_reader.describe_ports()
     print(f"Ports ({len(ports)}):", flush=True)
@@ -117,28 +122,35 @@ def main() -> int:
     record("gps_pause_for_counter", stop_elapsed, ok_flag=stop_elapsed < 5.0,
            detail="stop join")
 
-    # Simulate counter probe window while GPS paused
-    t0 = time.perf_counter()
-    labeled = picocount.counter_ports_labeled()
-    bt_labeled = [d for d, _ in labeled if picocount.is_bluetooth_port(d)]
-    probe = picocount.probe_port()
-    probe_elapsed = time.perf_counter() - t0
-    if bt_labeled:
-        record("counter_ports_no_bluetooth", probe_elapsed, ok_flag=False,
-               detail=f"bluetooth still listed: {bt_labeled}")
-    elif probe_elapsed > PROBE_BUDGET_S:
-        record("counter_probe_auto", probe_elapsed, ok_flag=False,
-               detail=f"too slow — {probe.message}")
-    elif probe.ok:
-        record("counter_probe_auto", probe_elapsed, ok_flag=True,
-               detail=f"{probe.port} {probe.message}")
+    # Pause window (same pattern as counter connect) then resume GPS
+    if GPS_ONLY:
+        time.sleep(0.5)
+        record("counter_probe_auto", 0.0, ok_flag=True, detail="skipped (TD_GPS_ONLY=1)")
     else:
-        # Required: probe must finish fast. Missing FTDI is WARN (hardware).
-        record("counter_probe_auto", probe_elapsed, ok_flag=True,
-               detail=f"no counter ACK (hardware) — {probe.message}")
-        warn(f"PicoCount not responding: {probe.message}")
-        if not labeled:
-            warn("No FTDI/counter COM — Device Manager shows Unknown COM10/COM11? Run packaging\\FIX_USB.bat")
+        t0 = time.perf_counter()
+        labeled = picocount.counter_ports_labeled()
+        bt_labeled = [d for d, _ in labeled if picocount.is_bluetooth_port(d)]
+        probe = picocount.probe_port()
+        probe_elapsed = time.perf_counter() - t0
+        if bt_labeled:
+            record("counter_ports_no_bluetooth", probe_elapsed, ok_flag=False,
+                   detail=f"bluetooth still listed: {bt_labeled}")
+        elif probe_elapsed > PROBE_BUDGET_S:
+            record("counter_probe_auto", probe_elapsed, ok_flag=False,
+                   detail=f"too slow — {probe.message}")
+        elif probe.ok:
+            record("counter_probe_auto", probe_elapsed, ok_flag=True,
+                   detail=f"{probe.port} {probe.message}")
+        else:
+            # Required: probe must finish fast. Missing FTDI is WARN (hardware).
+            record("counter_probe_auto", probe_elapsed, ok_flag=True,
+                   detail=f"no counter ACK (hardware) — {probe.message}")
+            warn(f"PicoCount not responding: {probe.message}")
+            if not labeled:
+                warn(
+                    "No FTDI/counter COM — Device Manager shows Unknown COM10/COM11? "
+                    "Run packaging\\FIX_USB.bat"
+                )
 
     t0 = time.perf_counter()
     stream.start()
@@ -146,7 +158,7 @@ def main() -> int:
     resumed = stream.latest()
     resume_ok = bool(resumed.get("fix") and resumed.get("lat") is not None)
     record(
-        "gps_resume_after_counter",
+        "gps_resume_after_pause",
         time.perf_counter() - t0,
         ok_flag=resume_ok,
         detail=str({k: resumed.get(k) for k in ("port", "fix", "satellites", "lat", "lon")}),

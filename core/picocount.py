@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import struct
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -575,14 +576,49 @@ def _port_busy_message(port: str) -> str:
         "(GPS pauses briefly while the counter connects).")
 
 
+def _phantom_counter_hint() -> str:
+    """Detect ghost FTDI nodes (cable unplugged / CM_PROB_PHANTOM) for a clear UI message."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import subprocess
+        ps = (
+            "Get-PnpDevice -ErrorAction SilentlyContinue | "
+            "Where-Object { ($_.InstanceId -like '*VID_0403*' -or $_.InstanceId -like '*FTDIBUS*') "
+            "-and ($_.Status -ne 'OK' -or $_.Problem -eq 'CM_PROB_PHANTOM') } | "
+            "Select-Object -First 3 Status,FriendlyName | "
+            "ForEach-Object { '{0}|{1}' -f $_.Status,$_.FriendlyName }"
+        )
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+        if not lines:
+            return ""
+        return (
+            "Windows still lists a ghost FTDI (VehicleCounts) COM that is not connected. "
+            "Unplug/replug the PicoCount download USB cable. "
+            "If it stays Unknown: run packaging\\clear_ftdi_phantoms.ps1 as Administrator."
+        )
+    except Exception:
+        return ""
+
+
 def probe_port(port: str | None = None) -> ProbeResult:
     ports = list_serial_ports()
     if serial is None:
         return ProbeResult(False, None, "pyserial not installed", ports)
     candidates = _probe_candidates(port, ports)
     if not candidates:
-        return ProbeResult(
-            False, None, "No COM port — plug in the PicoCount download cable.", ports)
+        msg = "No COM port — plug in the PicoCount download cable."
+        hint = _phantom_counter_hint()
+        if hint:
+            msg = f"{msg}\n{hint}"
+        return ProbeResult(False, None, msg, ports)
     last_msg = ""
     for target in candidates:
         try:

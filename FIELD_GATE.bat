@@ -19,8 +19,13 @@ echo === [1/5] smoke_full (source gate before freeze) ===
 if errorlevel 1 set FAIL=1
 
 echo.
-echo === [2/5] field_sim (desk job cycle, no GPS) ===
+echo === [2/6] field_sim (desk job cycle, no GPS) ===
 ".venv\Scripts\python.exe" scripts\test_field_sim.py
+if errorlevel 1 set FAIL=1
+
+echo.
+echo === [3/6] BUILD ROUTE thread (QThread.start shadow guard) ===
+".venv\Scripts\python.exe" scripts\prove_build_route_thread.py
 if errorlevel 1 set FAIL=1
 
 if %FAIL% neq 0 (
@@ -30,7 +35,7 @@ if %FAIL% neq 0 (
 )
 
 echo.
-echo === [3/5] BUILD AppUpdate (PyInstaller + pack) ===
+echo === [4/6] BUILD AppUpdate (PyInstaller + pack) ===
 powershell -ExecutionPolicy Bypass -File scripts\build_app_update.ps1
 if errorlevel 1 (
     echo BUILD FAILED
@@ -38,16 +43,16 @@ if errorlevel 1 (
 )
 
 echo.
-echo === [4/5] shipment verify (what the zip contains) ===
+echo === [5/6] shipment verify (what the zip contains) ===
 ".venv\Scripts\python.exe" scripts\test_shipment.py
 if errorlevel 1 set FAIL=1
 
 echo.
-echo === [5/5] handoff stress (bonus — offscreen map may WARN/FAIL on build PC) ===
+echo === [6/6] handoff stress (map WARN OK if bridge dead on build PC) ===
 set TDS_WORK_LAPTOP=1
 ".venv\Scripts\python.exe" scripts\user_stress_handoff.py
 if errorlevel 1 (
-    echo   WARN stress failed — known on build-PC WebEngine; shipment PASS is the ship gate.
+    echo   WARN stress reported FAIL — check BUILD ROUTE; map-only WARN is OK on build PC.
 )
 
 echo.

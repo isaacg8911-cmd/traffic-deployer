@@ -336,7 +336,14 @@ def test_web_assets():
     check("pick order dialog", "RoutePickOrderDialog" in main_src and "_show_route_pick_dialog" in main_src)
     dlg_src = open(os.path.join(ROOT, "ui", "route_pick_dialog.py"), encoding="utf-8").read()
     check("pick dialog apply button", "apply_requested" in dlg_src and "btn_apply" in dlg_src)
-    check("apply pick thread", "RouteApplyPickThread" in open(os.path.join(ROOT, "ui", "threads.py"), encoding="utf-8").read())
+    thr_src = open(os.path.join(ROOT, "ui", "threads.py"), encoding="utf-8").read()
+    check("apply pick thread", "RouteApplyPickThread" in thr_src)
+    # QThread.start() must remain callable — never store GPS as self.start
+    check("optimize thread start_ll", "self.start_ll" in thr_src and "class RouteOptimizeThread" in thr_src)
+    from ui.threads import RouteOptimizeThread as _ROT
+    _t = _ROT([], (0.0, 0.0), ".", start=None)
+    check("optimize thread.start callable", callable(getattr(_t, "start", None)))
+    _t.deleteLater()
     check("retrace background thread", "RouteRetraceThread" in open(os.path.join(ROOT, "ui", "threads.py"), encoding="utf-8").read())
     import subprocess
     proc = subprocess.run(

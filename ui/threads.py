@@ -275,7 +275,8 @@ class RouteOptimizeThread(QThread):
         self.stops = stops
         self.home = home
         self.data_dir = data_dir
-        self.start = start
+        # Must not be named `start` — that shadows QThread.start().
+        self.start_ll = start
 
     def run(self):
         import traceback
@@ -286,7 +287,7 @@ class RouteOptimizeThread(QThread):
             self.progress_text.emit(
                 "Suggesting stop order (zones + shortest path on roads)...")
             res = routing.optimize(
-                self.stops, self.home, self.data_dir, start=self.start)
+                self.stops, self.home, self.data_dir, start=self.start_ll)
             if self.isInterruptionRequested():
                 return
             ordered = res["order"]

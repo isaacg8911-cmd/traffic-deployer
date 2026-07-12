@@ -49,7 +49,7 @@ def build_route_page(win) -> QWidget:
         sec_drive = section_group("Navigate", v)
     win.btn_start = QPushButton("Follow GPS")
     win.btn_start.setObjectName("go")
-    win.btn_start.setToolTip("Follow mode pans the map with your GPS position.")
+    win.btn_start.setToolTip("GPS marker stays live; map recenters only when you tap Follow.")
     win.btn_start.clicked.connect(win._toggle_drive)
     if SIMPLE_MODE:
         win.btn_pick_on_map = QPushButton("Pick on map")

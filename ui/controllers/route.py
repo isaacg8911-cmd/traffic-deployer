@@ -422,8 +422,13 @@ class RouteControllerMixin:
     def _route_pick_auto_finish(self) -> None:
         if not self._route_pick_mode or not self.state.stops:
             return
+        import road_router
         from core.map_display import auto_finish_order
 
+        if not road_router.has_graph(DATA_DIR):
+            self.statusBar().showMessage(
+                "No road map — Suggest order uses straight-line miles. "
+                "Download road map on Setup for Dijkstra routing.", 9000)
         by_uid = {s["uid"]: s for s in self.state.stops}
         picked = [by_uid[u] for u in self._route_pick_uids if u in by_uid]
         remaining = [s for s in self.state.stops if s["uid"] not in self._route_pick_uids]
@@ -432,8 +437,10 @@ class RouteControllerMixin:
         self._refresh_route_pick_ui()
         self._refresh_route_list()
         self._push_state()
+        graph_note = "road miles" if road_router.has_graph(DATA_DIR) else "straight-line"
         self.statusBar().showMessage(
-            f"Auto-finished — {len(self._route_pick_uids)} stops in order. Tap Apply route.", 8000)
+            f"Suggest order ({graph_note}) — {len(self._route_pick_uids)} stops. Tap Apply route.",
+            8000)
 
     def _sync_pick_order_from_dialog(self) -> None:
         """Adopt the order window's list order (source of truth for sequence).
@@ -996,7 +1003,7 @@ class RouteControllerMixin:
         if nxt:
             self.statusBar().showMessage(
                 f"Following GPS — next Site {nxt.get('to_id', '?')} "
-                f"({nxt['miles']:.1f} mi). Map pans with you.",
+                f"({nxt['miles']:.1f} mi). Marker live — pan freely; tap Follow to recenter.",
                 10000,
             )
 

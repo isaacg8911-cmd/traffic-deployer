@@ -61,7 +61,10 @@
   });
 
   var bridge = null;
-  var follow = true;
+  // D7: camera follow is opt-in — GPS marker always updates; pan freely without re-lock.
+  var follow = false;
+  var recenterPending = false;
+  var lastGps = null;
   var homeMarker = null;
   var gpsMarker = null;
   var fieldPinMarker = null;
@@ -105,15 +108,35 @@
     }
   }
 
+  function recenterOnGps(g, animate) {
+    if (!g || g.lat == null) return;
+    var z = Math.max(map.getZoom(), FOLLOW_ZOOM);
+    if (animate === false) {
+      map.jumpTo({ center: [g.lon, g.lat], zoom: z });
+    } else {
+      map.flyTo({ center: [g.lon, g.lat], zoom: z, duration: 550 });
+    }
+    recenterPending = false;
+  }
+
   function setFollow(on, fromPython) {
     follow = !!on;
     followBtn.textContent = follow ? 'Following' : 'Follow Me';
     followBtn.className = 'hudBtn primary' + (follow ? '' : ' off');
+    if (follow) {
+      recenterPending = true;
+      if (lastGps) recenterOnGps(lastGps, true);
+    } else {
+      recenterPending = false;
+    }
     if (!fromPython && bridge && typeof bridge.onFollowToggled === 'function') {
       try { bridge.onFollowToggled(follow); } catch (e) { /* QWebChannel optional */ }
     }
   }
   followBtn.addEventListener('click', function () { setFollow(!follow, false); });
+  map.on('dragstart', function () {
+    if (follow) setFollow(false, false);
+  });
   if (zoomInBtn) {
     zoomInBtn.addEventListener('click', function () {
       map.zoomTo(Math.min(map.getZoom() + 1, MAX_ZOOM), { duration: 200 });
@@ -1012,6 +1035,7 @@
     if (!g) return;
     if (!_leanDrive) updateCompass(g);
     if (g.lat == null) return;
+    lastGps = g;
     if (!gpsMarker) {
       var el = document.createElement('div');
       el.style.width = '12px';
@@ -1025,9 +1049,8 @@
     } else {
       gpsMarker.setLngLat([g.lon, g.lat]);
     }
-    if (follow) {
-      map.jumpTo({ center: [g.lon, g.lat], zoom: map.getZoom() });
-    }
+    // D7: recenter only when Follow was explicitly turned on — not every GPS tick.
+    if (follow && recenterPending) recenterOnGps(g, true);
   }
 
   function renderNav() { /* turn-by-turn banner removed — map + status bar only */ }

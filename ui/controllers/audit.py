@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
 from core import export, handoff, volume_report
 from core.shift_summary import summarize as shift_summarize
@@ -25,8 +25,38 @@ class AuditControllerMixin:
         else:
             audit_txt = f"All {rep['count']} completed sites have full data. Ready to export."
         self.lbl_audit.setText(audit_txt)
+        self._refresh_audit_sheet()
         self._refresh_export_hint()
         self._refresh_field_alerts()
+
+    def _refresh_audit_sheet(self) -> None:
+        tbl = getattr(self, "table_audit_sheet", None)
+        if tbl is None:
+            return
+        stops = self.state.stops or []
+        tbl.setRowCount(len(stops))
+        for i, s in enumerate(stops):
+            lat = s.get("field_lat") or s.get("lat")
+            lon = s.get("field_lon") or s.get("lon")
+            gps = ""
+            if lat is not None and lon is not None:
+                gps = f"{float(lat):.5f}, {float(lon):.5f}"
+            cells = (
+                str(i + 1),
+                str(s.get("id", "")),
+                str(s.get("street", "") or ""),
+                str(s.get("serial", "") or ""),
+                str(s.get("direction", "") or ""),
+                str(s.get("lanes", "") or ""),
+                "x" if s.get("installed") else "",
+                "x" if s.get("skipped") else "",
+                "x" if s.get("picked_up") else "",
+                str(s.get("counter_unit_id", "") or ""),
+                str(s.get("counter_serial", "") or ""),
+                gps,
+            )
+            for j, text in enumerate(cells):
+                tbl.setItem(i, j, QTableWidgetItem(text))
 
     def _refresh_export_hint(self):
         if not hasattr(self, "lbl_export_hint"):

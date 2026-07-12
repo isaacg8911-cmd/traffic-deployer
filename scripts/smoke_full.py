@@ -289,7 +289,7 @@ def test_web_assets():
     check("lean gps render", "jumpTo" in appjs and "_gpsAnimId" not in appjs)
     check("lean drive path", "lean_drive" in appjs and "highlight_uid" in appjs)
     check("soft lean keeps roads", "LEAN_BASE_LAYERS" in appjs and "landuse" in appjs)
-    check("follow zoom not locked", "zoom: map.getZoom()" in appjs)
+    check("follow zoom not locked", "recenterPending" in appjs and "map.jumpTo({ center: [g.lon, g.lat]" not in appjs.split("function renderGps")[1].split("function renderNav")[0])
     check("next site frame button", "next-site-btn" in idx and "__tdFrameNextSite" in appjs)
     check("stop marker source", "stop-markers" in appjs)
     check("numbered stop layers", "stop-label" in appjs and "stop-circle" in appjs)
@@ -437,6 +437,9 @@ def test_web_assets():
     check("D4 seq badge labels", "'text-field': ['to-string', ['get', 'seq']]" in appjs)
     check("D5 site click zoom", "_zoom_to_stop_click" in open(os.path.join(ROOT, "ui", "controllers", "map_sync.py")).read())
     check("D6 collocated fan", "spreadCollocated" in appjs and "registerFanAnchor" in appjs)
+    check("D7 gps pan unlock", "recenterPending" in appjs and "map.on('dragstart'" in appjs)
+    check("D8 road suggest order", "_refine_open_order" in open(os.path.join(ROOT, "core", "map_display.py")).read())
+    check("D9 audit sheet table", "table_audit_sheet" in open(os.path.join(ROOT, "ui", "pages", "audit_page.py")).read())
     check("launch maximized", "showMaximized" in main_src)
     from core.picocount import is_gps_port, is_counter_port, is_bluetooth_port
     pc_src = open(os.path.join(ROOT, "core", "picocount.py"), encoding="utf-8").read()

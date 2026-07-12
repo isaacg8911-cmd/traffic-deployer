@@ -43,15 +43,12 @@ class MapSyncControllerMixin:
 
     def _on_map_ready(self):
         self._hide_map_load_overlay()
-        self.bridge.set_follow(bool(self._gps_follow or self._map_follow))
+        self.bridge.set_follow(bool(self._map_follow))
         if self.state.stops:
             self._apply_map_startup_view()
 
     def _on_map_follow_toggled(self, on: bool) -> None:
-        """Map HUD Follow Me — must work in field/offline mode (no Wi‑Fi)."""
-        if not on and self._gps_follow:
-            self._stop_drive()
-            return
+        """Map HUD Follow Me — camera recenter only; drive mode stays on (D7)."""
         self._map_follow = bool(on)
         if on:
             self._last_gps_bridge = None
@@ -63,7 +60,10 @@ class MapSyncControllerMixin:
                     "heading_mode": g.get("heading_mode"), "speed_mps": g.get("speed_mps"),
                 })
             self.statusBar().showMessage(
-                "Following GPS on map — works offline, no Wi‑Fi needed.", 8000)
+                "Map following GPS — pan freely; tap Follow Me to recenter.", 8000)
+        elif self._gps_follow:
+            self.statusBar().showMessage(
+                "Map pan unlocked — GPS marker still live. Tap Follow Me to recenter.", 6000)
         else:
             self.statusBar().showMessage("Map follow off.", 4000)
         self._apply_power_profile(force=True)

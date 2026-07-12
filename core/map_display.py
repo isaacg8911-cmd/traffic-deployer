@@ -7,13 +7,14 @@ import road_router
 
 from core.routing import (
     _assign_crossings_open,
+    _cached_refine_passes,
     _covering_graph,
     _optimize_cluster_from_entry,
-    _order_stops_field,
-    _resolve_anchor,
+    _refine_open_order,
     _seg_endpoints,
     _stops_only_matrix,
     build_route,
+    optimize,
 )
 
 
@@ -72,20 +73,40 @@ def auto_finish_order(
     pool: list[dict],
     data_dir: str,
 ) -> list[dict]:
-    """Append remaining sites using the same zone/open-path engine as auto-build."""
+    """Append remaining sites using road-graph open-path order (Dijkstra matrix)."""
     if not pool:
         return list(picked)
-    graph, _uncovered = _covering_graph(data_dir, picked + pool)
+    all_stops = picked + pool
+    graph, _uncovered = _covering_graph(data_dir, all_stops)
+    if not picked:
+        return optimize(pool, home, data_dir)["order"]
+
     order = copy.deepcopy(picked)
     rem = [s for s in pool if s["uid"] not in {p["uid"] for p in order}]
-    if not order:
-        anchor = _resolve_anchor(home, None)
-        return _finish_pick_order(
-            _order_stops_field(rem, anchor, graph), graph, data_dir)
+    if not rem:
+        return _finish_pick_order(order, graph, data_dir)
     cur = _cross_point(order[-1])
-    if rem:
-        tail = _optimize_cluster_from_entry(cur, rem, graph)
-        order.extend(tail)
+    order.extend(_optimize_cluster_from_entry(cur, rem, graph))
+
+    if graph is not None and len(order) >= 3:
+        try:
+            prefix_len = len(picked)
+            tail = order[prefix_len:]
+            if tail and len(tail) >= 3:
+                _, lengths = _stops_only_matrix(graph, tail)
+                passes = _cached_refine_passes(len(tail))
+                if passes and lengths is not None:
+                    refined = _refine_open_order(
+                        graph, tail, lengths, max_passes=passes)
+                    order = order[:prefix_len] + refined
+            elif len(order) >= 4:
+                _, lengths = _stops_only_matrix(graph, order)
+                passes = _cached_refine_passes(len(order))
+                if passes and lengths is not None:
+                    order = _refine_open_order(
+                        graph, order, lengths, max_passes=passes)
+        except Exception:
+            pass
     return _finish_pick_order(order, graph, data_dir)
 
 

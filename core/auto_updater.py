@@ -593,6 +593,10 @@ def maybe_apply_on_launch(current_version: str) -> UpdateRunResult:
     if resumed is not None:
         return resumed
     field = app_lifecycle.load_persisted_field_mode(DATA_DIR)
+    # OPEN_APP / WIFI_UPDATE_NOW set TD_UPDATE_* when launching on home Wi‑Fi —
+    # do not skip the check just because last session left field mode on.
+    if os.environ.get("TD_UPDATE_URL", "").strip() or os.environ.get("TD_UPDATE_HOME", "").strip():
+        field = False
     channel = bool(update_check.channel_url())
     force = (
         channel

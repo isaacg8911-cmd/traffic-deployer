@@ -9,39 +9,32 @@
     h1 { font-size: 1.4rem; }
     .step { background: #f4f7fb; border: 1px solid #c5d0de; border-radius: 10px; padding: 1rem 1.1rem; margin: 1rem 0; }
     .step strong { display: block; margin-bottom: 0.35rem; }
-    a.btn { display: inline-block; margin-top: 0.5rem; padding: 0.7rem 1.1rem; background: #0d5c4b; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 700; }
+    a.btn { display: inline-block; margin-top: 0.5rem; padding: 0.85rem 1.2rem; background: #0d5c4b; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 1.05rem; }
+    a.btn2 { display: inline-block; margin-top: 0.5rem; padding: 0.6rem 1rem; background: #1565c0; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 700; }
     code { background: #e8edf3; padding: 0.1rem 0.35rem; border-radius: 4px; }
     .warn { color: #9a3412; }
   </style>
 </head>
 <body>
-  <h1>Traffic Deployer — Wi-Fi update setup</h1>
-  <p>Do this <strong>once</strong> on the work laptop (same home Wi-Fi as the home PC). No USB.</p>
+  <h1>Traffic Deployer — Wi-Fi update</h1>
+  <p>Same home Wi-Fi as the home PC. <strong>No USB.</strong></p>
 
   <div class="step">
-    <strong>Step 1 — Download the channel file</strong>
-    Tap the green button. Save the file as<br/>
-    <code>C:\TrafficDeployer\tds_data\update_channel.json</code><br/>
-    (If Windows asks, choose Save As and go to that folder.)
+    <strong>Do this (easiest)</strong>
+    1. Close Traffic Deployer if it is open.<br/>
+    2. Download the green button.<br/>
+    3. Double-click the downloaded file.<br/>
+    4. Wait (~300 MB). Black window shows progress.<br/>
+    5. App reopens — title must show <strong>1.0.13</strong> (or newer).
     <br/>
-    <a class="btn" href="update_channel.json" download="update_channel.json">Download update_channel.json</a>
+    <a class="btn" href="WIFI_UPDATE_NOW.bat" download="WIFI_UPDATE_NOW.bat">Download WIFI_UPDATE_NOW.bat</a>
   </div>
 
   <div class="step">
-    <strong>Step 2 — Open the app online</strong>
-    Close Traffic Deployer if it is open.<br/>
-    Open <code>C:\TrafficDeployer</code> → double-click <code>OPEN_APP.bat</code>.<br/>
-    At the top of the app, make sure it says <strong>ONLINE</strong>
-    (if it says OFFLINE, tap <strong>I'm online</strong>).
+    <strong>Optional: normal launcher</strong>
+    <a class="btn2" href="OPEN_APP.bat" download="OPEN_APP.bat">Download OPEN_APP.bat</a>
   </div>
 
-  <div class="step">
-    <strong>Step 3 — Wait for the popup</strong>
-    A box should say an update was found (~300 MB).<br/>
-    Wait — the app closes, updates, and reopens.<br/>
-    Window title must show the new version (not 1.0.12).
-  </div>
-
-  <p class="warn">Home PC must leave the update server running. If this page will not load, the home PC server is off.</p>
+  <p class="warn">If download fails: home PC update server is off, or laptop is on a different Wi-Fi.</p>
 </body>
 </html>

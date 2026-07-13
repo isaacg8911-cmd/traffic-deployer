@@ -65,12 +65,21 @@ function Get-LanIp {
 
 $LanIp = Get-LanIp
 $BaseUrl = "http://${LanIp}:${Port}"
-$DownloadUrl = "$BaseUrl/$ZipName"
+# Stable download name — each publish overwrites the previous zip (no version pile-up).
+$StableZipName = "TrafficDeployer-AppUpdate.zip"
+$DownloadUrl = "$BaseUrl/$StableZipName"
 
 New-Item -ItemType Directory -Force -Path $ReleasesDir | Out-Null
-Copy-Item -Force $ZipSrc (Join-Path $ReleasesDir $ZipName)
+Copy-Item -Force $ZipSrc (Join-Path $ReleasesDir $StableZipName)
 
-$sha256 = (Get-FileHash -Path (Join-Path $ReleasesDir $ZipName) -Algorithm SHA256).Hash.ToLower()
+# Prune older versioned zips in TDReleases — keep only the live overwrite slot.
+Get-ChildItem -LiteralPath $ReleasesDir -File -Filter "TrafficDeployer-AppUpdate-*.zip" -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+        Write-Host "  removed stale release zip: $($_.Name)"
+    }
+
+$sha256 = (Get-FileHash -Path (Join-Path $ReleasesDir $StableZipName) -Algorithm SHA256).Hash.ToLower()
 
 $manifestPath = Join-Path $ReleasesDir "version.json"
 $channelPath = Join-Path $ReleasesDir "update_channel.json"
@@ -110,7 +119,8 @@ Write-Host "  Folder : $ReleasesDir"
 Write-Host "  Version: v$AppVersion"
 Write-Host "  LAN IP : $LanIp"
 Write-Host "  Manifest: $manifestPath"
-Write-Host "  Zip    : $(Join-Path $ReleasesDir $ZipName)"
+Write-Host "  Zip    : $(Join-Path $ReleasesDir $StableZipName)"
+Write-Host "  (overwrites previous — one zip on the update server)"
 Write-Host ""
 Write-Host "HOME PC - start server (leave running while laptop updates):"
 Write-Host "  $ReleasesDir\SERVE_RELEASES.bat"
@@ -122,5 +132,6 @@ Write-Host "  Example install: C:\TrafficDeployer\tds_data\update_channel.json"
 Write-Host ""
 Write-Host "TEST: on work laptop at home Wi-Fi, open app (online mode)."
 Write-Host "  App checks $BaseUrl/version.json and applies if newer."
+Write-Host "  Laptop keeps one overwrite slot under tds_data\update_staging (no version pile-up)."
 Write-Host ""
 exit 0

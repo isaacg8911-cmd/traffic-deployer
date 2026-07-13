@@ -23,6 +23,8 @@ HOW UPDATE RUNS
 - Open Traffic Deployer (or tap I'm online on Setup)
 - App reads version.json, downloads zip, replaces exe + _internal + web
 - tds_data\ is never touched; app restarts on new version
+- Downloads overwrite one slot (tds_data\update_staging) — old update files are deleted
+- Home server keeps one zip: C:\TDReleases\TrafficDeployer-AppUpdate.zip (overwritten each publish)
 
 EACH NEW RELEASE
 ----------------

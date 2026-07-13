@@ -26,6 +26,9 @@ STAGING_DIRNAME = "update_staging"
 READY_DIRNAME = "update_ready"
 BACKUP_DIRNAME = "backup_app"
 APPLY_BAT = "apply_update_pending.bat"
+# Fixed names — each download overwrites the previous (no versioned pile-up on the laptop).
+STAGING_ZIP_NAME = "update.zip"
+STAGING_EXTRACT_NAME = "extracted"
 CHECK_COOLDOWN_S = 60
 _UA = "TrafficDeployer-AutoUpdate/1.0"
 
@@ -333,6 +336,16 @@ def resume_pending_apply(
     return result
 
 
+def _clear_staging(data_dir: str) -> None:
+    """Drop tds_data/update_staging so prior downloads do not accumulate."""
+    staging = os.path.join(data_dir, STAGING_DIRNAME)
+    if os.path.isdir(staging):
+        try:
+            shutil.rmtree(staging)
+        except OSError:
+            pass
+
+
 def stage_bundle_for_apply(bundle_root: str, data_dir: str) -> str:
     """Copy validated bundle into tds_data/update_ready for the helper bat."""
     ready = os.path.join(data_dir, READY_DIRNAME)
@@ -359,6 +372,8 @@ def stage_bundle_for_apply(bundle_root: str, data_dir: str) -> str:
         src = os.path.join(bundle_root, name)
         if os.path.isfile(src):
             shutil.copy2(src, os.path.join(ready, name))
+    # Staging extract/zip no longer needed — free disk before restart.
+    _clear_staging(data_dir)
     return ready
 
 
@@ -406,6 +421,7 @@ def schedule_apply_and_exit(
         os.path.abspath(ready_target)
     ):
         ready = ready_target
+        _clear_staging(data_dir)  # drop leftover download if still present
     else:
         ready = stage_bundle_for_apply(bundle_root, data_dir)
     bat = _write_apply_bat(app_dir, ready, version)
@@ -493,20 +509,26 @@ def check_and_apply(
     except Exception:
         pass
 
+    # Wipe prior staging first — one overwrite slot, not a growing stack of versions.
+    _clear_staging(data_dir)
     staging_root = os.path.join(data_dir, STAGING_DIRNAME)
     os.makedirs(staging_root, exist_ok=True)
-    zip_path = os.path.join(staging_root, f"TrafficDeployer-{info.latest}.zip")
-    extract_dir = os.path.join(staging_root, f"extracted-{info.latest}")
+    zip_path = os.path.join(staging_root, STAGING_ZIP_NAME)
+    extract_dir = os.path.join(staging_root, STAGING_EXTRACT_NAME)
 
     try:
-        if os.path.isdir(extract_dir):
-            shutil.rmtree(extract_dir)
         _download(info.download_url, zip_path)
         if info.sha256:
             digest = _sha256_file(zip_path)
             if digest.lower() != info.sha256.lower():
                 raise RuntimeError("Download checksum mismatch — update rejected.")
         bundle_root = _extract_zip(zip_path, extract_dir)
+        # Drop zip after extract — keep only extracted until staged to update_ready.
+        try:
+            if os.path.isfile(zip_path):
+                os.remove(zip_path)
+        except OSError:
+            pass
         # Pending until helper bat writes tds_data/.update_applied — not "done" yet.
         state = _read_state(data_dir)
         state["last_latest"] = info.latest
@@ -517,6 +539,7 @@ def check_and_apply(
         result.relaunch = True
         result.message = f"Update v{info.latest} downloaded. Applying and restarting…"
         # Does not return — process exits so Windows can replace the exe.
+        # stage_bundle_for_apply clears update_staging after copy to update_ready.
         schedule_apply_and_exit(bundle_root, app_dir, data_dir, info.latest)
     except SystemExit:
         raise
@@ -524,12 +547,6 @@ def check_and_apply(
         result.error = str(exc)
         result.message = f"Update failed: {exc}"
         return result
-    finally:
-        try:
-            if os.path.isfile(zip_path):
-                os.remove(zip_path)
-        except OSError:
-            pass
 
     return result
 
@@ -561,6 +578,7 @@ def _clear_pending_if_current(current_version: str, data_dir: str) -> None:
                 shutil.rmtree(ready)
             except OSError:
                 pass
+        _clear_staging(data_dir)
         try:
             if os.path.isfile(applied_marker):
                 os.remove(applied_marker)

@@ -303,10 +303,13 @@
   ];
 
   // White numerals centered inside colored dots — high contrast in sunlight.
+  // Dot radii sit just above road line width (~3–7px); hit pad keeps taps easy.
+  var DOT_R = ['interpolate', ['linear'], ['zoom'], 10, 6, 14, 8, 16, 10];
+  var DOT_R_HI = ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 10, 16, 12];
   var DOT_LABEL_FONT = ['Noto Sans Regular'];
   var DOT_LABEL_LAYOUT = {
     'text-font': DOT_LABEL_FONT,
-    'text-size': ['interpolate', ['linear'], ['zoom'], 10, 11, 14, 15, 16, 17],
+    'text-size': ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 9, 16, 10],
     'text-allow-overlap': true,
     'text-ignore-placement': true,
     'text-anchor': 'center'
@@ -559,19 +562,19 @@
       map.addLayer({ id: 'site-begin', type: 'circle', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'begin'],
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 16, 24],
+          'circle-radius': DOT_R,
           'circle-color': '#1565c0',
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2.5,
+          'circle-stroke-width': 1.5,
           'circle-opacity': 0.95
         } });
       map.addLayer({ id: 'site-end', type: 'circle', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'end'],
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 16, 24],
+          'circle-radius': DOT_R,
           'circle-color': '#c62828',
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2.5,
+          'circle-stroke-width': 1.5,
           'circle-opacity': 0.95
         } });
       var siteLabelLayout = Object.assign({}, DOT_LABEL_LAYOUT, {
@@ -592,12 +595,12 @@
         paint: {
           'circle-radius': [
             'case', ['boolean', ['get', 'highlight'], false],
-            ['interpolate', ['linear'], ['zoom'], 10, 22, 14, 28, 16, 32],
-            ['interpolate', ['linear'], ['zoom'], 10, 18, 14, 24, 16, 28]
+            DOT_R_HI,
+            DOT_R
           ],
           'circle-color': STOP_STATUS_COLOR,
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 3,
+          'circle-stroke-width': 1.5,
           'circle-opacity': 0.96
         } });
       map.addLayer({ id: 'stop-label', type: 'symbol', source: 'stop-markers',
@@ -605,8 +608,8 @@
           'text-field': ['to-string', ['get', 'seq']],
           'text-size': [
             'case', ['boolean', ['get', 'highlight'], false],
-            ['interpolate', ['linear'], ['zoom'], 10, 13, 14, 17, 16, 19],
-            ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 15, 16, 17]
+            ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 10, 16, 11],
+            ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 9, 16, 10]
           ]
         }),
         paint: DOT_LABEL_PAINT });
@@ -616,17 +619,17 @@
       map.addSource('pick-targets', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'pick-target-circle', type: 'circle', source: 'pick-targets',
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 16, 14, 22, 15, 26],
+          'circle-radius': DOT_R,
           'circle-color': '#f57c00',
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 3,
+          'circle-stroke-width': 1.5,
           'circle-opacity': 0.96
         } });
       map.addLayer({ id: 'pick-target-label', type: 'symbol', source: 'pick-targets',
         layout: {
           'text-field': ['get', 'label'],
           'text-font': ['Noto Sans Regular'],
-          'text-size': ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 15, 15, 16],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 9, 16, 10],
           'text-allow-overlap': true,
           'text-ignore-placement': true
         },
@@ -637,14 +640,14 @@
       map.addSource('install-pts', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'install-pts', type: 'circle', source: 'install-pts',
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 16, 14, 22, 16, 26],
+          'circle-radius': DOT_R,
           'circle-color': [
             'case',
             ['==', ['get', 'source'], 'manual'], '#e65100',
             '#1565c0'
           ],
           'circle-stroke-color': '#fff',
-          'circle-stroke-width': 3
+          'circle-stroke-width': 1.5
         } });
       map.addLayer({ id: 'install-pts-label', type: 'symbol', source: 'install-pts',
         layout: Object.assign({}, DOT_LABEL_LAYOUT, {
@@ -657,7 +660,6 @@
 
   function applyMapMode(mode, lean) {
     var drive = mode === 'drive';
-    var pick = mode === 'pick';
     lean = !!lean;
     _leanDrive = lean;
     setBasemapLabels(!drive && !lean);
@@ -666,10 +668,8 @@
       ? ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2.5]
       : ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4];
     var ptR = drive
-      ? ['interpolate', ['linear'], ['zoom'], 10, 12, 14, 16]
-      : pick
-        ? ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 16, 24]
-        : ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 20, 16, 24];
+      ? ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 7]
+      : DOT_R;
     var casingW = drive
       ? ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 11]
       : ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 12];

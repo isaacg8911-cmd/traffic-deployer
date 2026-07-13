@@ -640,7 +640,7 @@ class MapSyncControllerMixin:
                 )
                 return
             self._route_pick_add(uid, side=side)
-            self._zoom_to_stop_click(stop, side)
+            self._zoom_to_stop_click(by_uid[uid], side)
             return
         idx, stop = self._stop_by_uid(uid)
         if stop is None:

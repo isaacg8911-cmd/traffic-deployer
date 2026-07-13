@@ -67,6 +67,7 @@ def test_python_pick_flow() -> None:
             self._map_js_ready = True
             self._gps_follow = False
             self._map_follow = False
+            self.bridge = type("B", (), {"fly_to": lambda *_a, **_k: None})()
             self.pages = type("P", (), {"currentIndex": lambda _s: 1})()
             self.statusBar = lambda: self._status
             self._status = QStatusBar()
@@ -109,6 +110,8 @@ def test_python_pick_flow() -> None:
     win = PickWin()
     win.state = type("S", (), {})()
     win.state.stops = list(stops)
+    win.state.index_of = lambda uid, _stops=win.state.stops: next(
+        (i for i, s in enumerate(_stops) if str(s.get("uid") or "") == str(uid)), -1)
     win.state.home = job.home
     win.state.route = {"polyline": [], "miles": 0.0, "graph": False}
     win.state.map_day_filter = "All days"
@@ -162,6 +165,98 @@ def test_python_pick_flow() -> None:
         "bogus uid message", win._status.currentMessage())
 
     _ = app
+
+
+def test_left_list_click_no_install_jump() -> None:
+    """Clicking a stop in the left list while picking must add it — never jump to Install."""
+    section("Left-list click during pick (no Install jump)")
+    from PySide6.QtWidgets import QApplication, QListWidget, QStatusBar
+
+    from core import ingest
+    from field_job_fixtures import resolve_field_job
+    from ui.controllers.map_sync import MapSyncControllerMixin
+    from ui.controllers.route import RouteControllerMixin
+
+    class ListWin(MapSyncControllerMixin, RouteControllerMixin):
+        def __init__(self) -> None:
+            self._route_pick_mode = True
+            self._route_pick_uids: list[str] = []
+            self._route_pick_sides: dict[str, str] = {}
+            self._pick_side_mode = "auto"
+            self._route_pick_dialog = None
+            self._manual_grab_mode = False
+            self._map_preview_stops: list[dict] = []
+            self._map_js_ready = True
+            self.pages = type("P", (), {"currentIndex": lambda _s: 1})()
+            self.statusBar = lambda: self._status
+            self._status = QStatusBar()
+            self.list_route = QListWidget()
+            self.go_page_calls: list[int] = []
+
+        def _push_state(self, fit: bool = False) -> None:
+            _ = fit
+
+        def _go_page(self, i: int) -> None:
+            self.go_page_calls.append(i)
+
+        def _center_current(self) -> None:
+            self.go_page_calls.append(-99)  # would only run on the install path
+
+        def _refresh_route_list(self) -> None:
+            return
+
+        def _refresh_route_pick_ui(self, *, sync_dialog: bool = True) -> None:
+            _ = sync_dialog
+
+        def _sync_pick_side_buttons(self) -> None:
+            return
+
+    job = resolve_field_job()
+    sites = ingest.parse_excel_sites([job.xls])
+    cfgs = [{"path": p, "label": label} for p, label in job.ests]
+    stops = ingest.match_est_files(cfgs, sites, job.home)
+    if len(stops) < 2:
+        fail("need >=2 stops", str(len(stops)))
+        return
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    win = ListWin()
+    win.state = type("S", (), {})()
+    win.state.stops = list(stops)
+    win.state.home = job.home
+    win.state.route = {"polyline": [], "miles": 0.0, "graph": False}
+
+    uid0 = str(stops[0]["uid"])
+    item = _mk_item(uid0)
+
+    win._route_item_clicked(item)
+    ok("left-list click adds stop") if win._route_pick_uids == [uid0] else fail(
+        "left-list click adds stop", str(win._route_pick_uids))
+    ok("no jump to Install") if 2 not in win.go_page_calls else fail(
+        "no jump to Install", str(win.go_page_calls))
+
+    # Begin mode: locked side must stick for Install (cross_lat on begin end).
+    win._pick_side_mode = "begin"
+    win._route_pick_uids = []
+    win._route_pick_sides = {}
+    win._route_item_clicked(item)
+    stop0 = next(s for s in win.state.stops if str(s["uid"]) == uid0)
+    ok("begin lock on list pick") if (
+        win._route_pick_sides.get(uid0) == "begin"
+        and stop0.get("pick_cross_locked")
+        and float(stop0["cross_lat"]) == float(stop0["begin_lat"])
+    ) else fail("begin lock on list pick", str(win._route_pick_sides))
+
+    _ = app
+
+
+def _mk_item(uid: str):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidgetItem
+
+    it = QListWidgetItem(f"stop {uid}")
+    it.setData(Qt.ItemDataRole.UserRole, uid)
+    return it
 
 
 def test_drag_reorder_commit() -> None:
@@ -266,6 +361,7 @@ def main() -> int:
     print("ROUTE PICK CLICK STRESS\n")
     test_js_assets()
     test_python_pick_flow()
+    test_left_list_click_no_install_jump()
     test_drag_reorder_commit()
     print("\n" + "=" * 50)
     if FAILURES:

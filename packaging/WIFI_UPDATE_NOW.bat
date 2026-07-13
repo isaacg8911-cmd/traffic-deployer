@@ -2,8 +2,28 @@
 REM Wi-Fi update NOW — no USB, no app UI. Downloads from home PC and installs.
 setlocal EnableExtensions EnableDelayedExpansion
 
-set "HOME=http://192.168.1.30:8765"
-set "INSTALL="
+set "HOME="
+REM Try LAN first, then Tailscale (works when Wi-Fi blocks device-to-device).
+for %%U in (http://192.168.1.30:8765 http://100.93.14.32:8765) do (
+  if not defined HOME (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "try { $r=Invoke-WebRequest -Uri '%%U/version.json' -UseBasicParsing -TimeoutSec 4; if ($r.StatusCode -ge 200) { Set-Content -LiteralPath $env:TEMP\td_home_ok.txt -Value '%%U' -Encoding ascii; exit 0 }; exit 1 } catch { exit 1 }"
+    if not errorlevel 1 if exist "%TEMP%\td_home_ok.txt" (
+      set /p HOME=<"%TEMP%\td_home_ok.txt"
+    )
+  )
+)
+if not defined HOME (
+  echo FAIL: cannot reach home PC on Wi-Fi OR Tailscale.
+  echo Tried:
+  echo   http://192.168.1.30:8765
+  echo   http://100.93.14.32:8765
+  echo.
+  echo On HOME PC: keep update server running.
+  echo On LAPTOP: same Wi-Fi, or install Tailscale and log into same account.
+  pause
+  exit /b 1
+)
 
 echo.
 echo Traffic Deployer — WIFI UPDATE NOW

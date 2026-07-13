@@ -45,7 +45,12 @@ def main() -> int:
     _copytree(internal, os.path.join(STAGE, "_internal"))
     _copytree(internal_web, os.path.join(STAGE, "web"))
 
-    for name in ("OPEN_APP.bat", "APP_UPDATE.txt"):
+    for name in (
+        "OPEN_APP.bat",
+        "APP_UPDATE.txt",
+        "APPLY_UPDATE.bat",
+        "FINISH_UPDATE.bat",
+    ):
         src = os.path.join(ROOT, "packaging", name)
         if os.path.isfile(src):
             shutil.copy2(src, os.path.join(STAGE, name))
@@ -70,6 +75,8 @@ def main() -> int:
     )
     with open(os.path.join(STAGE, "READ_ME_FIRST.txt"), "w", encoding="utf-8") as f:
         f.write(readme)
+    with open(os.path.join(STAGE, "VERSION.txt"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(f"{APP_VERSION}\n")
 
     exe_mb = os.path.getsize(os.path.join(STAGE, "TrafficDeployer.exe")) / (1024 * 1024)
     total_mb = sum(

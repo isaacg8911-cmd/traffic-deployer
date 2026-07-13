@@ -1,0 +1,27 @@
+APP UPDATE ONLY — map and shift data stay on this laptop
+==========================================================
+
+This folder does NOT include california.pmtiles or your shift files.
+Use it when Traffic Deployer is already installed and you only need a new app version.
+
+FROM ZIP (recommended)
+  1. Close Traffic Deployer.
+  2. Unzip TrafficDeployer-AppUpdate.zip to a local folder, e.g. C:\TDUpdate\
+  3. Run APPLY_UPDATE.bat (from USB / C:\TDReleases):
+       Install folder = your real app (e.g. C:\TrafficDeployer)
+       Update folder  = unzipped TrafficDeployer folder
+  4. Or: if Wi-Fi already downloaded, run FINISH_UPDATE.bat in the install folder
+     (uses tds_data\update_ready — no re-copy from zip).
+  5. Double-click OPEN_APP.bat in the INSTALL folder. Title must show the new version.
+
+OPEN_APP.bat alone does NOT upgrade — it only launches the installed exe.
+
+FROM USB FOLDER (no zip)
+  Copy dist\TrafficDeployer-AppUpdate\TrafficDeployer from home PC — same replace steps as above.
+
+IF YOU SEE "Offline map missing"
+  You need a FULL install from home (BUILD_WORK_LAPTOP.bat), not this update.
+
+NEED FULL INSTALL INSTEAD?
+  First install, new laptop, or missing tds_data\california.pmtiles
+  -> home PC: BUILD_WORK_LAPTOP.bat -> TrafficDeployer-WorkLaptop.zip (~1.6 GB)

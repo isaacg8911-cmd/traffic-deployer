@@ -1,0 +1,42 @@
+WI-FI AUTO-UPDATE — Traffic Deployer (free, home network)
+=========================================================
+
+One-time setup, then each release is: build -> publish -> serve -> open app on laptop.
+
+HOME PC (this machine)
+----------------------
+1. BUILD_WIFI_UPDATE.bat     (or BUILD_APP_UPDATE.bat then PUBLISH_APP_UPDATE.bat)
+2. Double-click C:\TDReleases\SERVE_RELEASES.bat — leave it running
+3. Note your home PC IP (printed by PUBLISH, or run ipconfig)
+
+WORK LAPTOP (one time only)
+---------------------------
+Copy this file from home PC:
+  C:\TDReleases\update_channel.json
+To work laptop install:
+  C:\TrafficDeployer\tds_data\update_channel.json
+(Keep tds_data\ — do not delete map or shift files.)
+
+HOW UPDATE RUNS
+---------------
+- Work laptop on home Wi-Fi, NOT in field mode (online / "I'm online")
+- Open Traffic Deployer (or tap I'm online on Setup)
+- App reads version.json, downloads zip, replaces exe + _internal + web
+- tds_data\ is never touched; app restarts on new version
+
+EACH NEW RELEASE
+----------------
+1. Home: BUILD_WIFI_UPDATE.bat
+2. Home: SERVE_RELEASES.bat (if not already running)
+3. Laptop: open app on Wi-Fi — auto-applies
+
+TROUBLESHOOT
+------------
+- "No update channel" -> copy update_channel.json into tds_data\
+- "Could not reach update server" -> SERVE_RELEASES.bat running? same Wi-Fi? firewall?
+- Field mode -> tap I'm online first; updates skip in field mode
+- Wrong IP after router change -> re-run PUBLISH_APP_UPDATE.bat, recopy update_channel.json
+
+USB STILL WORKS
+---------------
+dist\TrafficDeployer-AppUpdate.zip manual copy — see APP_UPDATE.txt

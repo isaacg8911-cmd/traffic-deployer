@@ -38,6 +38,9 @@ TROUBLESHOOT
 ------------
 - "No update channel" -> copy update_channel.json into tds_data\
 - "Could not reach update server" -> SERVE_RELEASES.bat running? same Wi-Fi? firewall?
+- "version.json missing download_url" -> home version.json has UTF-8 BOM (do not
+  edit with Notepad/Set-Content -Encoding utf8). Re-run PUBLISH_APP_UPDATE.bat, then
+  re-download wifi_update_now.ps1 from http://HOME:8765/ (not an old Downloads copy).
 - Field mode -> tap I'm online first; updates skip in field mode
 - Wrong IP after router change -> re-run PUBLISH_APP_UPDATE.bat, recopy update_channel.json
 

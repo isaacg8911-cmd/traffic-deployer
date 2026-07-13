@@ -83,6 +83,8 @@ $sha256 = (Get-FileHash -Path (Join-Path $ReleasesDir $StableZipName) -Algorithm
 
 $manifestPath = Join-Path $ReleasesDir "version.json"
 $channelPath = Join-Path $ReleasesDir "update_channel.json"
+# Write UTF-8 *without* BOM. Windows PowerShell Set-Content -Encoding utf8 adds BOM
+# and breaks wifi_update_now.ps1 Invoke-RestMethod on the work laptop.
 & $Py -c @"
 import json, pathlib
 from datetime import datetime, timezone
@@ -93,10 +95,17 @@ manifest = {
     'notes': 'App update v$AppVersion (map + tds_data stay on laptop)',
     'published': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
 }
-pathlib.Path(r'$manifestPath').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+def write_utf8_no_bom(path, text):
+    pathlib.Path(path).write_bytes(text.encode('utf-8'))
+write_utf8_no_bom(r'$manifestPath', json.dumps(manifest, indent=2) + '\n')
 channel = {'version_url': '$BaseUrl/version.json'}
-pathlib.Path(r'$channelPath').write_text(json.dumps(channel, indent=2) + '\n', encoding='utf-8')
+write_utf8_no_bom(r'$channelPath', json.dumps(channel, indent=2) + '\n')
 "@ | Out-Null
+$bom = [System.IO.File]::ReadAllBytes($manifestPath)[0..2]
+if ($bom[0] -eq 0xEF -and $bom[1] -eq 0xBB -and $bom[2] -eq 0xBF) {
+    Write-Host "FAIL: version.json has UTF-8 BOM (breaks work-laptop WIFI_UPDATE_NOW)."
+    exit 1
+}
 
 $exampleSrc = Join-Path (Join-Path $Root "packaging") "update_channel.example.json"
 if (Test-Path $exampleSrc) {

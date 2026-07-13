@@ -74,16 +74,39 @@ Write-Host "Closing app if open..."
 Get-Process -Name "TrafficDeployer" -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 
+# Windows PowerShell 5.x: Invoke-RestMethod + UTF-8 BOM version.json returns a
+# bare string (Length only) — $manifest.download_url is then empty. Parse ourselves.
+function Read-TdManifest([string]$Url) {
+    $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 20
+    $text = [string]$resp.Content
+    if ($text.Length -gt 0 -and [int][char]$text[0] -eq 0xFEFF) {
+        $text = $text.Substring(1)
+    }
+    try {
+        return ($text | ConvertFrom-Json)
+    } catch {
+        throw ("version.json is not valid JSON from " + $Url + ": " + $_.Exception.Message)
+    }
+}
+
 Write-Host "Fetching version.json ..."
-$manifest = Invoke-RestMethod -Uri ($homeBase + "/version.json") -TimeoutSec 20
+$manifest = Read-TdManifest ($homeBase + "/version.json")
+if ($manifest -is [string]) {
+    throw "version.json did not parse to an object (BOM/encoding?). Re-run PUBLISH_APP_UPDATE.bat on home PC."
+}
 $latest = [string]$manifest.version
 $zipUrl = [string]$manifest.download_url
 $sha = [string]$manifest.sha256
-if (-not $zipUrl) { throw "version.json missing download_url" }
+if (-not $latest) { throw "version.json missing version" }
 
 # Always pull zip from the reachable home base (LAN IP in manifest may be blocked).
-$zipName = ($zipUrl -split "/")[-1]
-if (-not $zipName) { $zipName = "TrafficDeployer-AppUpdate.zip" }
+$zipName = "TrafficDeployer-AppUpdate.zip"
+if ($zipUrl) {
+    $fromUrl = ($zipUrl -split "/")[-1]
+    if ($fromUrl) { $zipName = $fromUrl }
+} else {
+    Write-Host "WARN: download_url missing in version.json — using $zipName"
+}
 $zipUrl = $homeBase + "/" + $zipName
 
 Write-Host "Latest : v$latest"

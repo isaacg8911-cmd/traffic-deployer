@@ -113,11 +113,20 @@ if (Test-Path $guide) {
     Copy-Item -Force $guide (Join-Path $ReleasesDir "WIFI_AUTO_UPDATE.txt")
 }
 
+$indexSrc = Join-Path (Join-Path $Root "packaging") "wifi_update_index.html"
+if (Test-Path $indexSrc) {
+    Copy-Item -Force $indexSrc (Join-Path $ReleasesDir "index.html")
+}
+
+# Base URL for OPEN_APP seed (also written into AppUpdate at pack time).
+Set-Content -Path (Join-Path $ReleasesDir "wifi_update_home.txt") -Value $BaseUrl -Encoding ascii
+
 Write-Host ""
 Write-Host "PUBLISH OK - Wi-Fi auto-update channel ready"
 Write-Host "  Folder : $ReleasesDir"
 Write-Host "  Version: v$AppVersion"
 Write-Host "  LAN IP : $LanIp"
+Write-Host "  Setup  : $BaseUrl/"
 Write-Host "  Manifest: $manifestPath"
 Write-Host "  Zip    : $(Join-Path $ReleasesDir $StableZipName)"
 Write-Host "  (overwrites previous - one zip on the update server)"
@@ -125,10 +134,10 @@ Write-Host ""
 Write-Host "HOME PC - start server (leave running while laptop updates):"
 Write-Host "  $ReleasesDir\SERVE_RELEASES.bat"
 Write-Host ""
-Write-Host "WORK LAPTOP - one-time (copy file, keep tds_data\):"
-Write-Host "  Copy  $channelPath"
-Write-Host "    to  INSTALL\tds_data\update_channel.json"
-Write-Host "  Example install: C:\TrafficDeployer\tds_data\update_channel.json"
+Write-Host "WORK LAPTOP - first time (Wi-Fi only, no USB):"
+Write-Host "  1. Open Edge/Chrome to $BaseUrl/"
+Write-Host "  2. Download update_channel.json into C:\TrafficDeployer\tds_data\"
+Write-Host "  3. OPEN_APP.bat while ONLINE"
 Write-Host ""
 Write-Host "TEST: on work laptop at home Wi-Fi, open app (online mode)."
 Write-Host "  App checks $BaseUrl/version.json and applies if newer."

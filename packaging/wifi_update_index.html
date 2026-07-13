@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Traffic Deployer Wi-Fi update</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.45; color: #1f2430; }
+    h1 { font-size: 1.4rem; }
+    .step { background: #f4f7fb; border: 1px solid #c5d0de; border-radius: 10px; padding: 1rem 1.1rem; margin: 1rem 0; }
+    .step strong { display: block; margin-bottom: 0.35rem; }
+    a.btn { display: inline-block; margin-top: 0.5rem; padding: 0.7rem 1.1rem; background: #0d5c4b; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 700; }
+    code { background: #e8edf3; padding: 0.1rem 0.35rem; border-radius: 4px; }
+    .warn { color: #9a3412; }
+  </style>
+</head>
+<body>
+  <h1>Traffic Deployer — Wi-Fi update setup</h1>
+  <p>Do this <strong>once</strong> on the work laptop (same home Wi-Fi as the home PC). No USB.</p>
+
+  <div class="step">
+    <strong>Step 1 — Download the channel file</strong>
+    Tap the green button. Save the file as<br/>
+    <code>C:\TrafficDeployer\tds_data\update_channel.json</code><br/>
+    (If Windows asks, choose Save As and go to that folder.)
+    <br/>
+    <a class="btn" href="update_channel.json" download="update_channel.json">Download update_channel.json</a>
+  </div>
+
+  <div class="step">
+    <strong>Step 2 — Open the app online</strong>
+    Close Traffic Deployer if it is open.<br/>
+    Open <code>C:\TrafficDeployer</code> → double-click <code>OPEN_APP.bat</code>.<br/>
+    At the top of the app, make sure it says <strong>ONLINE</strong>
+    (if it says OFFLINE, tap <strong>I'm online</strong>).
+  </div>
+
+  <div class="step">
+    <strong>Step 3 — Wait for the popup</strong>
+    A box should say an update was found (~300 MB).<br/>
+    Wait — the app closes, updates, and reopens.<br/>
+    Window title must show the new version (not 1.0.12).
+  </div>
+
+  <p class="warn">Home PC must leave the update server running. If this page will not load, the home PC server is off.</p>
+</body>
+</html>

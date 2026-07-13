@@ -82,6 +82,24 @@ def main() -> int:
         if os.path.isfile(src):
             shutil.copy2(src, os.path.join(STAGE, name))
 
+    # Bake LAN home URL so OPEN_APP can seed update_channel.json over Wi-Fi.
+    lan_ip = os.environ.get("TD_RELEASES_HOST", "").strip()
+    if not lan_ip:
+        try:
+            import socket
+
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+            s.close()
+        except OSError:
+            lan_ip = "192.168.1.30"
+    port = os.environ.get("TD_RELEASES_PORT", "8765").strip() or "8765"
+    home_url = f"http://{lan_ip}:{port}"
+    with open(os.path.join(STAGE, "wifi_update_home.txt"), "w", encoding="ascii", newline="\n") as f:
+        f.write(home_url + "\n")
+    print(f"  OK  wifi_update_home.txt -> {home_url}")
+
     from version import APP_NAME, APP_TAGLINE, APP_VERSION
 
     try:

@@ -25,7 +25,7 @@ from core.setup_checklist import route_summary as build_route_summary
 from core.state import RouteState
 from ui.counter_ui import apply_counter_panel_connected, apply_volt_check, battery_cell_text
 from ui.page_indices import PAGE_INVENTORY
-from ui.paths import APP_DIR, DATA_DIR, LAUNCH_HINT
+from ui.paths import APP_DIR, DATA_DIR, IS_PORTABLE, LAUNCH_HINT
 from ui.setup_wizard import SetupWizard
 from ui.simple_mode import BUILD_LABEL, COMPACT_UI
 from ui.status_style import apply_status
@@ -368,8 +368,9 @@ class SetupControllerMixin:
 
     def _on_mode_online(self):
         if not self.state.offline_mode:
-            self.statusBar().showMessage("Already online — home setup (Wi‑Fi tools enabled).", 5000)
+            self.statusBar().showMessage("Already online — checking for app updates…", 5000)
             self._refresh_mode_bar()
+            QTimer.singleShot(200, lambda: self._maybe_auto_update(force=True))
             return
         self._resume_online()
 
@@ -418,6 +419,12 @@ class SetupControllerMixin:
             )
         except Exception as exc:  # noqa: BLE001
             crash_log.log_error(exc, context="auto_update")
+            QMessageBox.warning(
+                self,
+                "Wi-Fi update",
+                f"Update check crashed:\n\n{exc}\n\n"
+                "Stay ONLINE on home Wi-Fi. Home PC must be serving C:\\TDReleases.",
+            )
             return
         if result.relaunch:
             self._info(result.message)
@@ -430,6 +437,28 @@ class SetupControllerMixin:
             elif not IS_PORTABLE:
                 msg += " — run BUILD_APP_UPDATE on home PC for work laptop"
             self.statusBar().showMessage(msg[:200], 12000)
+            QMessageBox.warning(self, "Wi-Fi update", msg)
+            return
+        if result.error:
+            # Pop up — status bar alone is easy to miss on the work laptop.
+            err = (result.error or result.message or "Update check failed.").strip()
+            hint = ""
+            if "No update channel" in err:
+                hint = (
+                    "\n\nFix (Wi-Fi, no USB):\n"
+                    "1. On this laptop open Edge/Chrome\n"
+                    "2. Go to http://192.168.1.30:8765/\n"
+                    "3. Tap Download update_channel.json\n"
+                    "4. Save as C:\\TrafficDeployer\\tds_data\\update_channel.json\n"
+                    "5. Close app, run OPEN_APP.bat again, stay ONLINE"
+                )
+            elif "Could not reach" in err:
+                hint = (
+                    "\n\nHome PC update server is off or wrong Wi-Fi.\n"
+                    "On home PC run C:\\TDReleases\\SERVE_RELEASES.bat and leave it open."
+                )
+            QMessageBox.warning(self, "Wi-Fi update", err + hint)
+            self.statusBar().showMessage(err[:200], 12000)
             return
         if result.checked and result.message:
             self.statusBar().showMessage(result.message[:200], 6000)

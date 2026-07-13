@@ -51,6 +51,27 @@ if not exist "_internal\web\index.html" (
 if not exist "tds_data\" mkdir "tds_data"
 if not exist "tds_data\counter_downloads\" mkdir "tds_data\counter_downloads"
 
+REM One-time Wi-Fi channel seed (no USB). Needs home PC update server on same Wi-Fi.
+if not exist "tds_data\update_channel.json" (
+    set "TD_HOME="
+    if exist "wifi_update_home.txt" set /p TD_HOME=<"wifi_update_home.txt"
+    if defined TD_UPDATE_URL set "TD_HOME=%TD_UPDATE_URL%"
+    if defined TD_HOME (
+        echo.
+        echo First Wi-Fi update setup — fetching update_channel.json ...
+        echo Home: %TD_HOME%
+        powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+          "$u='%TD_HOME%'.Trim().TrimEnd('/'); if ($u -match 'version\.json$') { $u = $u -replace '/version\.json$','/update_channel.json' } elseif ($u -notmatch 'update_channel\.json$') { $u = $u + '/update_channel.json' }; try { Invoke-WebRequest -Uri $u -OutFile 'tds_data\update_channel.json' -UseBasicParsing -TimeoutSec 12; Write-Host 'Channel OK' } catch { Write-Host ('Channel fetch failed: ' + $_.Exception.Message); Write-Host 'On laptop browser open the home PC update page and download update_channel.json into tds_data\' }"
+        echo.
+    ) else (
+        echo.
+        echo NOTE: tds_data\update_channel.json missing — Wi-Fi auto-update will not run.
+        echo On this laptop open Edge/Chrome to the home PC update page and download
+        echo update_channel.json into C:\TrafficDeployer\tds_data\
+        echo.
+    )
+)
+
 REM Stalled Wi-Fi download — finish file swap before launching old exe.
 if exist "tds_data\update_ready\TrafficDeployer.exe" (
     echo.

@@ -1,120 +1,127 @@
 @echo off
-REM Work laptop entry — run this from the INSTALL folder (not Downloads).
-REM AppUpdate replaces exe + _internal + web; this bat is refreshed each update.
-cd /d "%~dp0"
+REM Traffic Deployer — work laptop launcher (Wi-Fi update aware).
+REM OK to keep a copy in Downloads: this finds the real install and runs from there.
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "TDS_WORK_LAPTOP=1"
+REM Home PC Wi-Fi update server (same home network). Change if your home IP changes.
+set "TD_UPDATE_HOME=http://192.168.1.30:8765"
+set "TD_UPDATE_URL=%TD_UPDATE_HOME%/version.json"
+
+echo.
+echo Traffic Deployer - work laptop
+echo ==============================
+echo.
+
+REM Prefer a real install (exe + offline map). Never treat Downloads alone as install.
+set "INSTALL="
+if exist "C:\TrafficDeployer\TrafficDeployer.exe" if exist "C:\TrafficDeployer\tds_data\california.pmtiles" set "INSTALL=C:\TrafficDeployer"
+if not defined INSTALL if exist "D:\TrafficDeployer\TrafficDeployer.exe" if exist "D:\TrafficDeployer\tds_data\california.pmtiles" set "INSTALL=D:\TrafficDeployer"
+if not defined INSTALL if exist "%USERPROFILE%\TrafficDeployer\TrafficDeployer.exe" if exist "%USERPROFILE%\TrafficDeployer\tds_data\california.pmtiles" set "INSTALL=%USERPROFILE%\TrafficDeployer"
+if not defined INSTALL if exist "%USERPROFILE%\Desktop\TrafficDeployer\TrafficDeployer.exe" if exist "%USERPROFILE%\Desktop\TrafficDeployer\tds_data\california.pmtiles" set "INSTALL=%USERPROFILE%\Desktop\TrafficDeployer"
+
+REM If this bat already lives inside a valid install, use that.
+if not defined INSTALL (
+  if exist "%~dp0TrafficDeployer.exe" if exist "%~dp0tds_data\california.pmtiles" set "INSTALL=%~dp0"
+)
+
+if defined INSTALL (
+  rem strip trailing backslash for clean cd
+  if "!INSTALL:~-1!"=="\" set "INSTALL=!INSTALL:~0,-1!"
+)
+
+if not defined INSTALL (
+  echo ERROR: Could not find your Traffic Deployer install.
+  echo.
+  echo Looking for a folder that has BOTH:
+  echo   TrafficDeployer.exe
+  echo   tds_data\california.pmtiles
+  echo.
+  echo Usual location: C:\TrafficDeployer
+  echo.
+  echo This bat is in: %~dp0
+  echo Running from Downloads alone will not work until the full app
+  echo is installed ^(TrafficDeployer-WorkLaptop.zip extracted once^).
+  echo.
+  set /p "INSTALL=Type install folder ^(e.g. C:\TrafficDeployer^): "
+  set "INSTALL=!INSTALL:"=!"
+)
+
+if not exist "!INSTALL!\TrafficDeployer.exe" (
+  echo FAIL: no TrafficDeployer.exe in:
+  echo   !INSTALL!
+  pause
+  exit /b 1
+)
+
+cd /d "!INSTALL!"
+echo Install folder: %CD%
 
 set "TD_VER="
-if exist "READ_ME_FIRST.txt" (
-    for /f "tokens=2" %%v in ('findstr /I /C:"Version " READ_ME_FIRST.txt 2^>nul') do (
-        if not defined TD_VER set "TD_VER=%%v"
-    )
-)
 if exist "VERSION.txt" set /p TD_VER=<VERSION.txt
-
-echo.
-echo Traffic Deployer — work laptop
-echo ==============================
-if defined TD_VER (
-    echo Bundle label: v%TD_VER%
-) else (
-    echo Bundle label: ^(see window title after launch^)
+if not defined TD_VER if exist "READ_ME_FIRST.txt" (
+  for /f "tokens=2" %%v in ('findstr /I /C:"Version " READ_ME_FIRST.txt 2^>nul') do (
+    if not defined TD_VER set "TD_VER=%%v"
+  )
 )
-echo Install folder: %CD%
+if defined TD_VER echo Bundle label: v%TD_VER%
 echo.
-
-if not exist "TrafficDeployer.exe" (
-    echo ERROR: TrafficDeployer.exe not found in this folder.
-    echo Run OPEN_APP.bat from your install ^(e.g. C:\TrafficDeployer\^),
-    echo not from Downloads or the unzip staging folder.
-    pause
-    exit /b 1
-)
 
 if not exist "_internal\" (
-    echo ERROR: _internal folder missing.
-    echo Re-run APPLY_UPDATE into this install, or re-extract the AppUpdate zip.
-    pause
-    exit /b 1
-)
-
-if not exist "_internal\web\index.html" (
-    if not exist "web\index.html" (
-        echo ERROR: Map UI missing ^(_internal\web / web^).
-        echo Apply a fresh AppUpdate into this install folder.
-        pause
-        exit /b 1
-    )
+  echo ERROR: _internal folder missing in install.
+  echo Apply an AppUpdate into this folder, or re-extract WorkLaptop zip.
+  pause
+  exit /b 1
 )
 
 if not exist "tds_data\" mkdir "tds_data"
 if not exist "tds_data\counter_downloads\" mkdir "tds_data\counter_downloads"
 
-REM One-time Wi-Fi channel seed (no USB). Needs home PC update server on same Wi-Fi.
-if not exist "tds_data\update_channel.json" (
-    set "TD_HOME="
-    if exist "wifi_update_home.txt" set /p TD_HOME=<"wifi_update_home.txt"
-    if defined TD_UPDATE_URL set "TD_HOME=%TD_UPDATE_URL%"
-    if defined TD_HOME (
-        echo.
-        echo First Wi-Fi update setup — fetching update_channel.json ...
-        echo Home: %TD_HOME%
-        powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-          "$u='%TD_HOME%'.Trim().TrimEnd('/'); if ($u -match 'version\.json$') { $u = $u -replace '/version\.json$','/update_channel.json' } elseif ($u -notmatch 'update_channel\.json$') { $u = $u + '/update_channel.json' }; try { Invoke-WebRequest -Uri $u -OutFile 'tds_data\update_channel.json' -UseBasicParsing -TimeoutSec 12; Write-Host 'Channel OK' } catch { Write-Host ('Channel fetch failed: ' + $_.Exception.Message); Write-Host 'On laptop browser open the home PC update page and download update_channel.json into tds_data\' }"
-        echo.
-    ) else (
-        echo.
-        echo NOTE: tds_data\update_channel.json missing — Wi-Fi auto-update will not run.
-        echo On this laptop open Edge/Chrome to the home PC update page and download
-        echo update_channel.json into C:\TrafficDeployer\tds_data\
-        echo.
-    )
-)
+REM Always refresh Wi-Fi channel from home PC when online (safe overwrite).
+echo Checking Wi-Fi update channel from home PC...
+echo   %TD_UPDATE_HOME%
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$homeUrl='%TD_UPDATE_HOME%'.Trim().TrimEnd('/'); $dest='tds_data\update_channel.json'; $channel=$homeUrl+'/update_channel.json'; try { Invoke-WebRequest -Uri $channel -OutFile $dest -UseBasicParsing -TimeoutSec 12; Write-Host '  Channel OK -> tds_data\update_channel.json' } catch { Write-Host ('  WARN: could not reach home PC: ' + $_.Exception.Message); Write-Host '  Open Edge on this laptop to '+$homeUrl+'/ and download update_channel.json into tds_data\' }"
+echo.
 
 REM Stalled Wi-Fi download — finish file swap before launching old exe.
 if exist "tds_data\update_ready\TrafficDeployer.exe" (
-    echo.
-    echo Stalled update found in tds_data\update_ready
-    echo Finishing install before launch...
-    echo.
-    if exist "%~dp0FINISH_UPDATE.bat" (
-        call "%~dp0FINISH_UPDATE.bat" auto
-        if errorlevel 1 (
-            echo FINISH_UPDATE failed. Close the app in Task Manager and retry.
-            pause
-            exit /b 1
-        )
-        REM Refresh label after apply
-        set "TD_VER="
-        if exist "VERSION.txt" set /p TD_VER=<VERSION.txt
-        if defined TD_VER echo Bundle label now: v%TD_VER%
-    ) else (
-        echo FINISH_UPDATE.bat missing — copy it from USB / C:\TDReleases then re-run OPEN_APP.bat
-        pause
-        exit /b 1
+  echo Stalled update found — finishing before launch...
+  if exist "FINISH_UPDATE.bat" (
+    call "FINISH_UPDATE.bat" auto
+    if errorlevel 1 (
+      echo FINISH_UPDATE failed. Close TrafficDeployer.exe in Task Manager and retry.
+      pause
+      exit /b 1
     )
-)
-
-set "MAP=tds_data\california.pmtiles"
-if not exist "%MAP%" (
-    echo ERROR: Offline map missing ^(tds_data\california.pmtiles^).
-    echo First install needs TrafficDeployer-WorkLaptop.zip from home PC.
-    echo App-only updates do not include the map — keep tds_data\.
+    set "TD_VER="
+    if exist "VERSION.txt" set /p TD_VER=<VERSION.txt
+    if defined TD_VER echo Bundle label now: v%TD_VER%
+  ) else (
+    echo FINISH_UPDATE.bat missing in install folder.
+    echo On laptop browser open %TD_UPDATE_HOME%/ then retry, or copy FINISH_UPDATE.bat into install.
     pause
     exit /b 1
+  )
+)
+
+if not exist "tds_data\california.pmtiles" (
+  echo ERROR: Offline map missing ^(tds_data\california.pmtiles^).
+  echo First install needs TrafficDeployer-WorkLaptop.zip — keep tds_data\.
+  pause
+  exit /b 1
 )
 
 if not exist ".unblock_done" (
-    echo First launch — unblocking app files...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "Unblock-File -LiteralPath '%CD%\TrafficDeployer.exe','%CD%\OPEN_APP.bat' -ErrorAction SilentlyContinue" 2>nul
-    echo done> ".unblock_done"
+  echo First launch — unblocking app files...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "Unblock-File -LiteralPath '%CD%\TrafficDeployer.exe','%CD%\OPEN_APP.bat' -ErrorAction SilentlyContinue" 2>nul
+  echo done> ".unblock_done"
 )
 
 echo Map OK. Starting app...
-echo Window title must match the new version ^(proof of update^).
-echo First map load may take a few minutes — wait, do not close.
+echo Stay ONLINE ^(tap I'm online if it says OFFLINE^) for Wi-Fi updates.
+echo Window title must show the new version after an update.
 echo.
-start "" "%~dp0TrafficDeployer.exe"
+start "" "%CD%\TrafficDeployer.exe"
 exit /b 0

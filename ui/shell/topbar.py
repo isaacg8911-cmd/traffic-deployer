@@ -28,6 +28,11 @@ from ui.spacing import TOPBAR_CLUSTER_GAP, TOPBAR_PAD_H, TOPBAR_PAD_V
 from ui.threads import SmokeTestThread
 from version import APP_NAME, APP_VERSION, APP_TAGLINE
 
+try:
+    from version import APP_BUILD_STAMP
+except ImportError:  # pragma: no cover
+    APP_BUILD_STAMP = ""
+
 
 class ShellTopbarMixin:
     def _build_topbar(self) -> QWidget:
@@ -130,9 +135,10 @@ class ShellTopbarMixin:
     def _show_about(self):
         maps = "Yes" if os.path.isfile(os.path.join(DATA_DIR, "california.pmtiles")) else "No — run setup_maps.py"
         roads = "Yes" if road_router.has_graph(DATA_DIR) else "No — download in Setup"
+        stamp = f"<br><b>Build:</b> {APP_BUILD_STAMP}" if APP_BUILD_STAMP else ""
         QMessageBox.information(
             self, APP_NAME,
-            f"<b>{APP_NAME} v{APP_VERSION}</b><br><br>"
+            f"<b>{APP_NAME} v{APP_VERSION}</b>{stamp}<br><br>"
             f"{APP_TAGLINE}<br><br>"
             f"<b>Offline basemap:</b> {maps}<br>"
             f"<b>Road routing graph:</b> {roads}<br><br>"

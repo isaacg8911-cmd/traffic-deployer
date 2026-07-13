@@ -27,8 +27,10 @@ HOW UPDATE RUNS
 EACH NEW RELEASE
 ----------------
 1. Home: BUILD_WIFI_UPDATE.bat
+   (auto-bumps APP_VERSION, e.g. 1.0.10 -> 1.0.11 — proof of progression)
 2. Home: SERVE_RELEASES.bat (if not already running)
 3. Laptop: open app on Wi-Fi — auto-applies
+4. Laptop title bar must show the new version number
 
 TROUBLESHOOT
 ------------

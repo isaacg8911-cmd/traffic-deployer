@@ -1,8 +1,8 @@
-"""Week 17: EST with drop/install pins + HTML labeled by site number.
+"""Week 17: EST drop/install pins + HTML with begin / end / install pins.
 
-Writes into the week 17 work folder:
-  - Week 17 Map 1_DROP_PINS.est  (pushpins moved to TFC LAT/LON)
-  - Week 17 Install Pins.html    (Leaflet map, site number on each pin)
+Writes into the week 17 work folder (no backups / report junk):
+  - Week 17 Map 1.est           (pushpins at TFC LAT/LON; optional re-patch)
+  - Week 17 Install Pins.html   (begin + end + install, site numbers)
 """
 from __future__ import annotations
 
@@ -15,15 +15,16 @@ import openpyxl
 APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP))
 
+from core import ingest  # noqa: E402
 from core.est_field_gps import apply_field_gps_to_est  # noqa: E402
 from core.est_viewer import pushpins_from_est  # noqa: E402
+from core.est_viewer import COLOR_BEGIN, COLOR_END, COLOR_FIELD  # noqa: E402
 
 WORK = Path(r"C:\Users\isaac\Downloads\week 17 ig\week 17 ig")
 TFC = WORK / "Week 17 IG TFC.xlsx"
+XLS = Path(r"C:\Users\isaac\Downloads\Week 17 Isaacx.xls")
 EST = WORK / "Week 17 Map 1.est"
-EST_OUT = WORK / "Week 17 Map 1_DROP_PINS.est"
 HTML_OUT = WORK / "Week 17 Install Pins.html"
-REPORT = WORK / "week17_install_pins_report.txt"
 
 
 def _mark(v) -> bool:
@@ -40,8 +41,9 @@ def _site_str(v) -> str:
     return str(v).strip()
 
 
-def load_install_rows(path: Path) -> list[dict]:
-    wb = openpyxl.load_workbook(path, data_only=True)
+def load_install_rows(tfc_path: Path, xls_path: Path) -> list[dict]:
+    excel = ingest.parse_excel_sites([str(xls_path)]) if xls_path.is_file() else {}
+    wb = openpyxl.load_workbook(tfc_path, data_only=True)
     ws = wb[wb.sheetnames[0]]
     rows: list[dict] = []
     for i, row in enumerate(ws.iter_rows(values_only=True), 1):
@@ -52,20 +54,32 @@ def load_install_rows(path: Path) -> list[dict]:
         if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
             continue
         if not (_mark(row[6]) or _mark(row[7])):
-            # still allow GPS rows for map; prefer install/skip markings
             if not _mark(row[6]):
                 continue
         status = "skipped" if _mark(row[7]) else "installed"
         dirs = str(row[3] or "").strip()
-        rows.append({
+        ex = excel.get(site) or {}
+        begin_lat = ex.get("begin_lat")
+        begin_lon = ex.get("begin_lon")
+        end_lat = ex.get("end_lat")
+        end_lon = ex.get("end_lon")
+        street = str(ex.get("street") or dirs or f"Site {site}").strip()
+        rec = {
             "site": site,
-            "street": dirs or f"Site {site}",
+            "street": street,
             "install_lat": float(lat),
             "install_lon": float(lon),
             "status": status,
             "serial": _site_str(row[2]) if row[2] is not None else "",
             "notes": str(row[5] or "").strip(),
-        })
+        }
+        if begin_lat is not None and begin_lon is not None:
+            rec["begin_lat"] = round(float(begin_lat), 6)
+            rec["begin_lon"] = round(float(begin_lon), 6)
+        if end_lat is not None and end_lon is not None:
+            rec["end_lat"] = round(float(end_lat), 6)
+            rec["end_lon"] = round(float(end_lon), 6)
+        rows.append(rec)
     rows.sort(key=lambda r: (len(r["site"]), r["site"]))
     return rows
 
@@ -74,6 +88,7 @@ def write_clickable_html(path: Path, rows: list[dict]) -> None:
     data = json.dumps(rows)
     avg_lat = sum(r["install_lat"] for r in rows) / len(rows)
     avg_lon = sum(r["install_lon"] for r in rows) / len(rows)
+    with_seg = sum(1 for r in rows if "begin_lat" in r and "end_lat" in r)
     path.write_text(
         f"""<!DOCTYPE html>
 <html lang="en">
@@ -93,8 +108,12 @@ def write_clickable_html(path: Path, rows: list[dict]) -> None:
     }}
     .panel {{
       position: absolute; left: 12px; top: 12px; z-index: 500;
-      background: #fff; padding: 10px 12px; border-radius: 10px;
-      box-shadow: 0 2px 12px #0003; font: 14px system-ui, sans-serif; max-width: 280px;
+      background: rgba(255,255,255,0.96); padding: 10px 12px; border-radius: 10px;
+      box-shadow: 0 2px 12px #0003; font: 13px/1.45 system-ui, sans-serif; max-width: 300px;
+    }}
+    .legend span {{
+      display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+      margin-right: 4px; vertical-align: middle; border: 1px solid rgba(0,0,0,0.15);
     }}
   </style>
 </head>
@@ -102,9 +121,13 @@ def write_clickable_html(path: Path, rows: list[dict]) -> None:
   <div id="map"></div>
   <div class="panel">
     <b>Week 17 Install Pins</b><br>
-    {len(rows)} pins with site numbers.<br>
-    Green = installed · Gray = skipped.<br>
-    Click a pin for GPS + directions.
+    {len(rows)} sites · {with_seg} with begin/end.<br>
+    <span class="legend">
+      <span style="background:{COLOR_BEGIN}"></span>Begin
+      <span style="background:{COLOR_END}; margin-left:8px"></span>End
+      <span style="background:{COLOR_FIELD}; margin-left:8px"></span>Install
+    </span><br>
+    Site number sits on the install pin. Click any point for details.
   </div>
   <script>
     const rows = {data};
@@ -114,25 +137,34 @@ def write_clickable_html(path: Path, rows: list[dict]) -> None:
       attribution: '&copy; OpenStreetMap'
     }}).addTo(map);
     const bounds = [];
+    function popup(r, label, lat, lon) {{
+      return '<b>Site ' + r.site + '</b> — ' + (r.street || '') +
+        '<br><b>' + label + ':</b> ' + Number(lat).toFixed(6) + ', ' + Number(lon).toFixed(6) +
+        (r.serial ? '<br>Serial: ' + r.serial : '') +
+        (r.notes ? '<br>Notes: ' + r.notes : '') +
+        '<br><a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' +
+        lat + ',' + lon + '">Google Maps</a>';
+    }}
+    function addDot(lat, lon, color, r, label, radius) {{
+      const m = L.circleMarker([lat, lon], {{
+        radius: radius, color: '#fff', weight: 2, fillColor: color, fillOpacity: 0.95
+      }}).addTo(map);
+      m.bindPopup(popup(r, label, lat, lon));
+      bounds.push([lat, lon]);
+    }}
     for (const r of rows) {{
-      const ll = [r.install_lat, r.install_lon];
-      bounds.push(ll);
-      const color = r.status === 'skipped' ? '#78909c' : '#2e7d32';
-      L.circleMarker(ll, {{
-        radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 0.95
-      }})
-        .bindPopup(
-          '<b>Site ' + r.site + '</b><br>' +
-          (r.street || '') + '<br>' +
-          'Install GPS: ' + Number(r.install_lat).toFixed(6) + ', ' +
-          Number(r.install_lon).toFixed(6) +
-          (r.serial ? '<br>Serial: ' + r.serial : '') +
-          (r.notes ? '<br>Notes: ' + r.notes : '') +
-          '<br><a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' +
-          r.install_lat + ',' + r.install_lon + '">Google Maps</a>'
-        )
-        .addTo(map);
-      L.marker(ll, {{
+      const hasSeg = r.begin_lat != null && r.end_lat != null;
+      if (hasSeg) {{
+        L.polyline(
+          [[r.begin_lat, r.begin_lon], [r.end_lat, r.end_lon]],
+          {{ color: '#90a4ae', weight: 2, opacity: 0.7, dashArray: '4 5' }}
+        ).addTo(map);
+        addDot(r.begin_lat, r.begin_lon, '{COLOR_BEGIN}', r, 'Begin', 6);
+        addDot(r.end_lat, r.end_lon, '{COLOR_END}', r, 'End', 6);
+      }}
+      const installColor = r.status === 'skipped' ? '#78909c' : '{COLOR_FIELD}';
+      addDot(r.install_lat, r.install_lon, installColor, r, 'Install', 8);
+      L.marker([r.install_lat, r.install_lon], {{
         icon: L.divIcon({{
           className: 'site-label',
           html: r.site,
@@ -150,60 +182,48 @@ def write_clickable_html(path: Path, rows: list[dict]) -> None:
     )
 
 
-def main() -> int:
-    lines: list[str] = ["=== Week 17 install / drop pin exports ==="]
+def main(argv: list[str]) -> int:
+    html_only = "--html-only" in argv
 
     if not TFC.is_file():
         print(f"Missing TFC: {TFC}", file=sys.stderr)
         return 2
-    if not EST.is_file():
+    if not html_only and not EST.is_file():
         print(f"Missing EST: {EST}", file=sys.stderr)
         return 2
+    if not XLS.is_file():
+        print(f"Missing Excel: {XLS}", file=sys.stderr)
+        return 2
 
-    rows = load_install_rows(TFC)
+    rows = load_install_rows(TFC, XLS)
     if not rows:
         print("No install rows with LAT/LON in TFC", file=sys.stderr)
         return 3
 
-    updates = {r["site"]: (r["install_lat"], r["install_lon"]) for r in rows}
-    patch = apply_field_gps_to_est(EST, updates, EST_OUT)
+    with_seg = sum(1 for r in rows if "begin_lat" in r and "end_lat" in r)
     write_clickable_html(HTML_OUT, rows)
+    print(f"Install pins: {len(rows)}  begin/end: {with_seg}")
+    print(f"Wrote: {HTML_OUT}")
 
-    # verify patched EST reads back near TFC coords
+    if html_only:
+        return 0
+
+    updates = {r["site"]: (r["install_lat"], r["install_lon"]) for r in rows}
+    # Patch in place — no backup / DROP_PINS copy
+    patch = apply_field_gps_to_est(EST, updates, EST)
     verify_ok = 0
-    verify_miss: list[str] = []
-    if EST_OUT.is_file():
-        pinned = {p["site"]: p for p in pushpins_from_est(EST_OUT)}
-        for site, (lat, lon) in updates.items():
-            p = pinned.get(site)
-            if not p:
-                verify_miss.append(site)
-                continue
-            if abs(p["lat"] - lat) < 0.001 and abs(p["lon"] - lon) < 0.001:
-                verify_ok += 1
-            else:
-                verify_miss.append(
-                    f"{site}(est={p['lat']:.5f},{p['lon']:.5f} tfc={lat:.5f},{lon:.5f})"
-                )
-
-    lines.append(f"Install/skip pins from TFC: {len(rows)}")
-    lines.append(
+    pinned = {p["site"]: p for p in pushpins_from_est(EST)}
+    for site, (lat, lon) in updates.items():
+        p = pinned.get(site)
+        if p and abs(p["lat"] - lat) < 0.001 and abs(p["lon"] - lon) < 0.001:
+            verify_ok += 1
+    print(
         f"EST patch: {patch['sites_patched']}/{patch['sites_requested']} "
-        f"format={patch['format']} pins_touched={patch['pins_patched']}"
+        f"verify {verify_ok}/{len(updates)}"
     )
-    if patch["missing_in_est"]:
-        lines.append("Missing in EST: " + ", ".join(patch["missing_in_est"]))
-    lines.append(f"Verify EST~TFC: {verify_ok}/{len(updates)}")
-    if verify_miss:
-        lines.append("Verify misses: " + ", ".join(verify_miss[:15]))
-    lines.append(f"Wrote: {EST_OUT}")
-    lines.append(f"Wrote: {HTML_OUT}")
-
-    REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    for line in lines:
-        print(line.encode("ascii", "replace").decode("ascii"))
-    return 0 if patch["sites_patched"] and verify_ok else 1
+    print(f"Wrote: {EST}")
+    return 0 if patch["sites_patched"] and verify_ok == len(updates) else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

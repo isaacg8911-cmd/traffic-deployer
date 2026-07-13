@@ -1,15 +1,17 @@
 @echo off
-REM Finish a stalled Wi-Fi update OR apply from an unzipped AppUpdate folder.
-REM Run from / point at your INSTALL folder (has tds_data\ + TrafficDeployer.exe).
+REM Finish a stalled Wi-Fi update OR apply from zip / unzipped AppUpdate.
 REM
 REM Cases:
-REM   A) Wi-Fi already downloaded: tds_data\update_ready\TrafficDeployer.exe exists
-REM   B) USB unzip: pass install + update folders (same as APPLY_UPDATE.bat)
+REM   A) tds_data\update_ready\TrafficDeployer.exe (stalled Wi-Fi)
+REM   B) Menu / Browse: TrafficDeployer-AppUpdate-VERSION.zip or folder
 
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 set "INSTALL=%~1"
 set "SRC=%~2"
 set "AUTO=%~1"
+set "PICKER=%~dp0select_app_update.ps1"
+set "PICKOUT=%TEMP%\td_finish_pick.txt"
+set "UNPACK="
 
 if /I "%AUTO%"=="auto" (
     set "INSTALL=%~dp0"
@@ -50,7 +52,6 @@ if not errorlevel 1 (
     exit /b 1
 )
 
-REM Prefer stalled Wi-Fi stage
 if exist "%INSTALL%\tds_data\update_ready\TrafficDeployer.exe" (
     set "SRC=%INSTALL%\tds_data\update_ready"
     echo Found stalled download: tds_data\update_ready
@@ -58,29 +59,66 @@ if exist "%INSTALL%\tds_data\update_ready\TrafficDeployer.exe" (
 )
 
 if "%SRC%"=="" (
-    if /I not "%AUTO%"=="auto" (
+    if /I "%AUTO%"=="auto" (
+        echo FAIL: no tds_data\update_ready — run APPLY_UPDATE or FORCE_UPDATE with a versioned zip.
+        pause
+        exit /b 1
+    )
+    if exist "%PICKER%" (
         echo.
-        echo No tds_data\update_ready found. Enter unzipped UPDATE folder
-        echo ^(e.g. C:\TDUpdate\TrafficDeployer^):
-        set /p "SRC=Update folder: "
+        echo No stalled Wi-Fi stage. Pick AppUpdate zip or folder...
+        if exist "%PICKOUT%" del /f /q "%PICKOUT%" >nul 2>&1
+        powershell -NoProfile -ExecutionPolicy Bypass -File "%PICKER%" -Kind auto -SearchDir "%CD%" -Title "FINISH UPDATE — pick AppUpdate zip or folder" -OutFile "%PICKOUT%"
+        if errorlevel 1 (
+            echo Cancelled.
+            pause
+            exit /b 1
+        )
+        if exist "%PICKOUT%" set /p SRC=<"%PICKOUT%"
+    ) else (
+        echo.
+        echo Enter UPDATE folder or zip ^(e.g. TrafficDeployer-AppUpdate-1.0.12.zip^):
+        set /p "SRC=Update source: "
     )
 )
 
 if "%SRC%"=="" (
-    echo FAIL: no update_ready and no update folder given.
-    echo Unzip TrafficDeployer-AppUpdate.zip, then run:
-    echo   APPLY_UPDATE.bat "%INSTALL%" "C:\TDUpdate\TrafficDeployer"
+    echo FAIL: no update_ready and no update source given.
     pause
     exit /b 1
 )
 
 set "SRC=%SRC:"=%"
 if "%SRC:~-1%"=="\" set "SRC=%SRC:~0,-1%"
+
+if /I "%SRC:~-4%"==".zip" (
+    if not exist "%SRC%" (
+        echo FAIL: zip not found: %SRC%
+        pause
+        exit /b 1
+    )
+    set "UNPACK=%TEMP%\td_finish_unpack_%RANDOM%"
+    mkdir "!UNPACK!" || goto :fail
+    echo Unzipping...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "Expand-Archive -LiteralPath '%SRC%' -DestinationPath '!UNPACK!' -Force"
+    if errorlevel 1 goto :fail
+    set "SRC=!UNPACK!\TrafficDeployer"
+    if not exist "!SRC!\TrafficDeployer.exe" (
+        for /f "delims=" %%E in ('dir /s /b "!UNPACK!\TrafficDeployer.exe" 2^>nul') do (
+            set "SRC=%%~dpE"
+            if "!SRC:~-1!"=="\" set "SRC=!SRC:~0,-1!"
+            goto :src_ok
+        )
+    )
+)
+
+:src_ok
 if not exist "%SRC%\TrafficDeployer.exe" (
     if exist "%SRC%\TrafficDeployer\TrafficDeployer.exe" set "SRC=%SRC%\TrafficDeployer"
 )
 if not exist "%SRC%\TrafficDeployer.exe" (
-    echo FAIL: no TrafficDeployer.exe in update folder:
+    echo FAIL: no TrafficDeployer.exe in:
     echo   %SRC%
     pause
     exit /b 1
@@ -90,7 +128,7 @@ if not exist "%SRC%\TrafficDeployer.exe" (
 echo.
 echo INSTALL: %INSTALL%
 echo SOURCE : %SRC%
-echo Closing gap — copying into install. tds_data\ is kept.
+echo tds_data\ is kept.
 echo.
 
 cd /d "%INSTALL%" || (
@@ -111,13 +149,19 @@ if exist "%SRC%\APP_UPDATE.txt" copy /y "%SRC%\APP_UPDATE.txt" "APP_UPDATE.txt" 
 
 echo done> "tds_data\.update_applied" 2>nul
 if exist "tds_data\.update_state.json" del /f /q "tds_data\.update_state.json" >nul 2>&1
+if defined UNPACK if exist "%UNPACK%" rmdir /s /q "%UNPACK%" >nul 2>&1
 
 echo.
-echo DONE. Run OPEN_APP.bat — title must show v1.0.12 ^(or newer^).
+echo DONE. Run OPEN_APP.bat — title must match VERSION.txt.
+if exist "VERSION.txt" (
+    set /p VER=<VERSION.txt
+    echo VERSION.txt: !VER!
+)
 if /I not "%AUTO%"=="auto" pause
 exit /b 0
 
 :fail
+if defined UNPACK if exist "%UNPACK%" rmdir /s /q "%UNPACK%" >nul 2>&1
 echo FAIL during copy. App closed? Paths correct?
 pause
 exit /b 1

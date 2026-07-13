@@ -76,6 +76,7 @@ def main() -> int:
         "FINISH_UPDATE.bat",
         "FORCE_UPDATE.bat",
         "WHERE_AM_I.bat",
+        "select_app_update.ps1",
     ):
         src = os.path.join(ROOT, "packaging", name)
         if os.path.isfile(src):

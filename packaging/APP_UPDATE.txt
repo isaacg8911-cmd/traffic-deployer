@@ -8,14 +8,21 @@ FROM ZIP (recommended)
   1. Close Traffic Deployer.
   2. Unzip TrafficDeployer-AppUpdate-VERSION.zip (e.g. ...-1.0.12.zip)
      to a local folder, e.g. C:\TDUpdate\
+     Or keep the zip and let APPLY_UPDATE / FORCE_UPDATE Browse to it.
   3. Run APPLY_UPDATE.bat (from USB / C:\TDReleases):
        Install folder = your real app (e.g. C:\TrafficDeployer)
-       Update folder  = unzipped TrafficDeployer folder
+       Update source  = menu pick / Browse zip or unzipped TrafficDeployer folder
   4. Or: if Wi-Fi already downloaded, run FINISH_UPDATE.bat in the install folder
      (uses tds_data\update_ready — no re-copy from zip).
   5. Double-click OPEN_APP.bat in the INSTALL folder. Title must show the new version.
 
 OPEN_APP.bat alone does NOT upgrade — it only launches the installed exe.
+
+Zip naming (each release is unique):
+  TrafficDeployer-AppUpdate-1.0.12.zip
+  TrafficDeployer-AppUpdate-1.0.13.zip
+  ...
+Bats look for TrafficDeployer-AppUpdate-*.zip and let you pick or Browse.
 
 FROM USB FOLDER (no zip)
   Copy dist\TrafficDeployer-AppUpdate\TrafficDeployer from home PC — same replace steps as above.

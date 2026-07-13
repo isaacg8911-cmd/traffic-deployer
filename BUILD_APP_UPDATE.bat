@@ -34,8 +34,9 @@ if %RC%==0 (
 )
 if %RC%==0 (
     echo.
-    echo DONE. Copy dist\TrafficDeployer-AppUpdate.zip to USB (or the TrafficDeployer folder).
-    echo On work laptop: unzip over existing install — keep tds_data\
+    echo DONE. Copy dist\TrafficDeployer-AppUpdate-VERSION.zip to USB
+    echo ^(name includes the version, e.g. TrafficDeployer-AppUpdate-1.0.12.zip^).
+    echo On work laptop: unzip / FORCE_UPDATE into existing install — keep tds_data\
     echo Optional: run VERIFY_WORK_LAPTOP.bat or user_stress_handoff.py for deeper UI stress.
 ) else (
     echo.

@@ -41,4 +41,5 @@ TROUBLESHOOT
 
 USB STILL WORKS
 ---------------
-dist\TrafficDeployer-AppUpdate.zip manual copy — see APP_UPDATE.txt
+dist\TrafficDeployer-AppUpdate-VERSION.zip manual copy — see APP_UPDATE.txt
+(example: TrafficDeployer-AppUpdate-1.0.12.zip)

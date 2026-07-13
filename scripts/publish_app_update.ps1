@@ -7,13 +7,6 @@ Set-Location $Root
 
 $ReleasesDir = if ($env:TD_RELEASES_DIR) { $env:TD_RELEASES_DIR.Trim() } else { "C:\TDReleases" }
 $Port = if ($env:TD_RELEASES_PORT) { [int]$env:TD_RELEASES_PORT } else { 8765 }
-$ZipName = "TrafficDeployer-AppUpdate.zip"
-$ZipSrc = Join-Path (Join-Path $Root "dist") $ZipName
-
-if (-not (Test-Path $ZipSrc)) {
-    Write-Host "FAIL: $ZipSrc missing - run BUILD_APP_UPDATE.bat first."
-    exit 1
-}
 
 $Py = Join-Path $Root ".venv\Scripts\python.exe"
 if (-not (Test-Path $Py)) {
@@ -25,6 +18,21 @@ $AppVersion = $AppVersion.Trim()
 if (-not $AppVersion) {
     Write-Host "FAIL: could not read APP_VERSION from version.py"
     exit 1
+}
+
+$ZipName = "TrafficDeployer-AppUpdate-$AppVersion.zip"
+$ZipSrc = Join-Path (Join-Path $Root "dist") $ZipName
+if (-not (Test-Path $ZipSrc)) {
+    # Legacy unversioned zip from older builds
+    $Legacy = Join-Path (Join-Path $Root "dist") "TrafficDeployer-AppUpdate.zip"
+    if (Test-Path $Legacy) {
+        Write-Host "WARN: versioned zip missing - using legacy TrafficDeployer-AppUpdate.zip"
+        $ZipSrc = $Legacy
+        $ZipName = "TrafficDeployer-AppUpdate-$AppVersion.zip"
+    } else {
+        Write-Host "FAIL: $ZipSrc missing - run BUILD_APP_UPDATE.bat first."
+        exit 1
+    }
 }
 
 function Get-LanIp {

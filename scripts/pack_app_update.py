@@ -1,6 +1,7 @@
 """Stage app-only update folder (exe + _internal + web). No map — work laptop keeps tds_data."""
 from __future__ import annotations
 
+import glob
 import os
 import shutil
 import subprocess
@@ -13,13 +14,36 @@ if ROOT not in sys.path:
 DIST = os.path.join(ROOT, "dist", "TrafficDeployer")
 HANDOFF_ROOT = os.path.join(ROOT, "dist", "TrafficDeployer-AppUpdate")
 STAGE = os.path.join(HANDOFF_ROOT, "TrafficDeployer")
-ZIP_PATH = os.path.join(ROOT, "dist", "TrafficDeployer-AppUpdate.zip")
+
+
+def zip_basename(version: str) -> str:
+    """Unique release name — never overwrite an older AppUpdate by accident."""
+    return f"TrafficDeployer-AppUpdate-{version}.zip"
+
+
+def zip_path_for(version: str) -> str:
+    return os.path.join(ROOT, "dist", zip_basename(version))
 
 
 def _copytree(src: str, dst: str) -> None:
     if os.path.isdir(dst):
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
+
+
+def _clear_stale_zips(keep: str) -> None:
+    """Remove unversioned + other versioned AppUpdate zips in dist/ (keep current)."""
+    dist_dir = os.path.join(ROOT, "dist")
+    keep_abs = os.path.normcase(os.path.abspath(keep))
+    for pat in ("TrafficDeployer-AppUpdate.zip", "TrafficDeployer-AppUpdate-*.zip"):
+        for path in glob.glob(os.path.join(dist_dir, pat)):
+            if os.path.normcase(os.path.abspath(path)) == keep_abs:
+                continue
+            try:
+                os.remove(path)
+                print(f"  removed stale zip: {os.path.basename(path)}")
+            except OSError:
+                pass
 
 
 def main() -> int:
@@ -50,6 +74,8 @@ def main() -> int:
         "APP_UPDATE.txt",
         "APPLY_UPDATE.bat",
         "FINISH_UPDATE.bat",
+        "FORCE_UPDATE.bat",
+        "WHERE_AM_I.bat",
     ):
         src = os.path.join(ROOT, "packaging", name)
         if os.path.isfile(src):
@@ -70,6 +96,7 @@ def main() -> int:
         f"{APP_TAGLINE}\n\n"
         "This folder updates an existing work-laptop install.\n"
         "Your offline map and shift data in tds_data\\ are NOT included.\n\n"
+        f"Ship as: {zip_basename(APP_VERSION)}\n"
         "Steps: read APP_UPDATE.txt in this folder.\n"
         "Title bar must show this version after update — proof of progression.\n"
     )
@@ -84,14 +111,17 @@ def main() -> int:
         for r, _, files in os.walk(STAGE)
         for f in files
     ) / (1024 * 1024)
-    print(f"  OK  staged app update ({total_mb:.0f} MB total, exe {exe_mb:.1f} MB)")
+    print(f"  OK  staged app update v{APP_VERSION} ({total_mb:.0f} MB total, exe {exe_mb:.1f} MB)")
     print(f"\nFOLDER: {STAGE}")
 
-    if os.path.isfile(ZIP_PATH):
-        os.remove(ZIP_PATH)
-    shutil.make_archive(ZIP_PATH[:-4], "zip", HANDOFF_ROOT, "TrafficDeployer")
-    zip_mb = os.path.getsize(ZIP_PATH) / (1024 * 1024)
-    print(f"\nZIP: {ZIP_PATH} ({zip_mb:.0f} MB)")
+    out_zip = zip_path_for(APP_VERSION)
+    _clear_stale_zips(out_zip)
+    if os.path.isfile(out_zip):
+        os.remove(out_zip)
+    shutil.make_archive(out_zip[:-4], "zip", HANDOFF_ROOT, "TrafficDeployer")
+    zip_mb = os.path.getsize(out_zip) / (1024 * 1024)
+    print(f"\nZIP: {out_zip} ({zip_mb:.0f} MB)")
+    print(f"  Copy that file to USB — name includes v{APP_VERSION} so releases do not collide.")
 
     py = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
     print("\nApp update gate (mandatory — creator laptop trial)...")
@@ -100,7 +130,7 @@ def main() -> int:
         print("\nAPP UPDATE PACK FAIL — fix build and re-run BUILD_APP_UPDATE.bat")
         return proc.returncode
 
-    print("\nAPP UPDATE PACK OK — copy zip or folder to field laptop")
+    print("\nAPP UPDATE PACK OK — copy versioned zip or folder to field laptop")
     print("Unzip over existing install — keep tds_data\\ (map + shift data)")
     return 0
 

@@ -6,7 +6,8 @@ Use it when Traffic Deployer is already installed and you only need a new app ve
 
 FROM ZIP (recommended)
   1. Close Traffic Deployer.
-  2. Unzip TrafficDeployer-AppUpdate.zip to a local folder, e.g. C:\TDUpdate\
+  2. Unzip TrafficDeployer-AppUpdate-VERSION.zip (e.g. ...-1.0.12.zip)
+     to a local folder, e.g. C:\TDUpdate\
   3. Run APPLY_UPDATE.bat (from USB / C:\TDReleases):
        Install folder = your real app (e.g. C:\TrafficDeployer)
        Update folder  = unzipped TrafficDeployer folder

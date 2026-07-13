@@ -24,8 +24,10 @@
   // D6: fan overlapping site dots so badges stay readable.
   var COLLOC_THRESHOLD_M = 28;
   var COLLOC_FAN_RADIUS_M = 22;
-  // D1: sites, GPS, and pins only — no route/segment/drive-leg polylines.
+  // D1: no route / drive-leg polylines (work-laptop GPU). Short begin↔end
+  // dashed chords stay on — same look as Install Pins HTML, ~2 verts/site.
   var SHOW_TRACE_LINES = false;
+  var SHOW_SEGMENT_CHORDS = true;
 
   var map = new maplibregl.Map({
     container: 'map',
@@ -294,17 +296,25 @@
     BASE_LABEL_LAYERS.forEach(function (id) { setLayerVis(id, on); });
   }
 
+  // Install Pins HTML palette (core/est_viewer.py) — color-only, no extra layers.
+  var COLOR_BEGIN = '#1565c0';
+  var COLOR_END = '#c62828';
+  var COLOR_INSTALL = '#43a047';
+  var COLOR_INSTALL_MANUAL = '#e65100';
+  var COLOR_SKIPPED = '#78909c';
+  var COLOR_SEGMENT = '#90a4ae';
+
   var STOP_STATUS_COLOR = [
     'case',
-    ['==', ['get', 'status'], 'installed'], '#1b5e20',
-    ['==', ['get', 'status'], 'skipped'], '#b71c1c',
-    ['==', ['get', 'status'], 'picked_up'], '#0d47a1',
+    ['==', ['get', 'status'], 'installed'], COLOR_INSTALL,
+    ['==', ['get', 'status'], 'skipped'], COLOR_SKIPPED,
+    ['==', ['get', 'status'], 'picked_up'], COLOR_BEGIN,
     '#c45f14'
   ];
 
-  // White numerals centered inside colored dots — high contrast in sunlight.
-  // Dot radii sit just above road line width (~3–7px); hit pad keeps taps easy.
-  var DOT_R = ['interpolate', ['linear'], ['zoom'], 10, 6, 14, 8, 16, 10];
+  // Begin/end slightly smaller than install (HTML: r6 vs r8). Hit pad unchanged.
+  var DOT_R = ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 6, 16, 7];
+  var DOT_R_INSTALL = ['interpolate', ['linear'], ['zoom'], 10, 6, 14, 8, 16, 10];
   var DOT_R_HI = ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 10, 16, 12];
   var DOT_LABEL_FONT = ['Noto Sans Regular'];
   var DOT_LABEL_LAYOUT = {
@@ -314,10 +324,25 @@
     'text-ignore-placement': true,
     'text-anchor': 'center'
   };
+  // White-in-dot for begin/end pick letters + stop badges (sunlight).
   var DOT_LABEL_PAINT = {
     'text-color': '#ffffff',
     'text-halo-color': 'rgba(15, 39, 68, 0.9)',
     'text-halo-width': 1.5
+  };
+  // HTML-style site number beside install pin (dark + white halo).
+  var PIN_SIDE_LABEL_LAYOUT = {
+    'text-font': DOT_LABEL_FONT,
+    'text-size': ['interpolate', ['linear'], ['zoom'], 10, 11, 14, 12, 16, 13],
+    'text-allow-overlap': true,
+    'text-ignore-placement': true,
+    'text-anchor': 'left',
+    'text-offset': [1.05, 0]
+  };
+  var PIN_SIDE_LABEL_PAINT = {
+    'text-color': '#102a43',
+    'text-halo-color': '#ffffff',
+    'text-halo-width': 2.2
   };
 
   // Legacy alias — road pick labels on pale halos.
@@ -549,12 +574,12 @@
     if (!map.getSource('segments')) {
       map.addSource('segments', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'segments-line', type: 'line', source: 'segments',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        layout: { 'line-cap': 'butt', 'line-join': 'round' },
         paint: {
-          'line-color': '#5e35b1',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 3.5, 15, 4.5],
-          'line-opacity': 0.88,
-          'line-dasharray': [3, 2]
+          'line-color': COLOR_SEGMENT,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2, 16, 2.5],
+          'line-opacity': 0.7,
+          'line-dasharray': [1.5, 1.8]
         } });
     }
     if (!map.getSource('site-pts')) {
@@ -563,20 +588,21 @@
         filter: ['==', ['get', 'kind'], 'begin'],
         paint: {
           'circle-radius': DOT_R,
-          'circle-color': '#1565c0',
+          'circle-color': COLOR_BEGIN,
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 1.5,
+          'circle-stroke-width': 2,
           'circle-opacity': 0.95
         } });
       map.addLayer({ id: 'site-end', type: 'circle', source: 'site-pts',
         filter: ['==', ['get', 'kind'], 'end'],
         paint: {
           'circle-radius': DOT_R,
-          'circle-color': '#c62828',
+          'circle-color': COLOR_END,
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 1.5,
+          'circle-stroke-width': 2,
           'circle-opacity': 0.95
         } });
+      // Begin/end numerals only during pick (HTML leaves them unmarked).
       var siteLabelLayout = Object.assign({}, DOT_LABEL_LAYOUT, {
         'text-field': ['to-string', ['get', 'seq']]
       });
@@ -640,20 +666,22 @@
       map.addSource('install-pts', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'install-pts', type: 'circle', source: 'install-pts',
         paint: {
-          'circle-radius': DOT_R,
+          'circle-radius': DOT_R_INSTALL,
           'circle-color': [
             'case',
-            ['==', ['get', 'source'], 'manual'], '#e65100',
-            '#1565c0'
+            ['==', ['get', 'status'], 'skipped'], COLOR_SKIPPED,
+            ['==', ['get', 'source'], 'manual'], COLOR_INSTALL_MANUAL,
+            COLOR_INSTALL
           ],
           'circle-stroke-color': '#fff',
-          'circle-stroke-width': 1.5
+          'circle-stroke-width': 2,
+          'circle-opacity': 0.95
         } });
       map.addLayer({ id: 'install-pts-label', type: 'symbol', source: 'install-pts',
-        layout: Object.assign({}, DOT_LABEL_LAYOUT, {
+        layout: Object.assign({}, PIN_SIDE_LABEL_LAYOUT, {
           'text-field': ['to-string', ['get', 'seq']]
         }),
-        paint: DOT_LABEL_PAINT });
+        paint: PIN_SIDE_LABEL_PAINT });
       bindStopClicks();
     }
   }
@@ -665,11 +693,14 @@
     setBasemapLabels(!drive && !lean);
     LEAN_BASE_LAYERS.forEach(function (id) { setLayerVis(id, !lean); });
     var segW = drive
-      ? ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2.5]
-      : ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4];
+      ? ['interpolate', ['linear'], ['zoom'], 10, 1.2, 14, 1.8]
+      : ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 2, 16, 2.5];
     var ptR = drive
-      ? ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 7]
+      ? ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 5]
       : DOT_R;
+    var installR = drive
+      ? ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 7]
+      : DOT_R_INSTALL;
     var casingW = drive
       ? ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 11]
       : ['interpolate', ['linear'], ['zoom'], 10, 5, 14, 12];
@@ -679,6 +710,7 @@
     if (map.getLayer('segments-line')) map.setPaintProperty('segments-line', 'line-width', segW);
     if (map.getLayer('site-begin')) map.setPaintProperty('site-begin', 'circle-radius', ptR);
     if (map.getLayer('site-end')) map.setPaintProperty('site-end', 'circle-radius', ptR);
+    if (map.getLayer('install-pts')) map.setPaintProperty('install-pts', 'circle-radius', installR);
     if (map.getLayer('route-casing')) map.setPaintProperty('route-casing', 'line-width', casingW);
     if (map.getLayer('route-line')) map.setPaintProperty('route-line', 'line-width', lineW);
   }
@@ -902,13 +934,8 @@
     (state.stops || []).forEach(function (s, i) {
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
       if (bLat == null || bLon == null || eLat == null || eLon == null) return;
-      var path = s.segment_path;
-      var coords;
-      if (path && path.length >= 2) {
-        coords = path.map(function (p) { return [p[1], p[0]]; });
-      } else {
-        coords = [[bLon, bLat], [eLon, eLat]];
-      }
+      // Cheap 2-point chords only (not long road-snapped segment_path).
+      var coords = [[bLon, bLat], [eLon, eLat]];
       var dotLabel = siteDotLabel(s, i, picking, pickLetters);
       var alreadyPicked = picking && pickIdx[s.uid];
       segs.push({ type: 'Feature', properties: { seq: picking ? dotLabel : (s.seq || (i + 1)) },
@@ -937,13 +964,15 @@
           state.current_uid && s.uid === state.current_uid && state.on_install;
         if (!hideForDrag) {
           var installSeq = picking ? dotLabel : stopSeqLabel(s, i, picking, pickIdx);
+          var instStatus = stopStatus(s);
           registerFanAnchor(s.field_lat, s.field_lon, function (la, lo) {
             installs.push(pt(la, lo, {
               uid: s.uid,
               source: fsrc,
               seq: installSeq,
               site_id: siteIdLabel(s, i),
-              kind: 'install'
+              kind: 'install',
+              status: instStatus
             }));
           });
         }
@@ -985,11 +1014,12 @@
 
     var hasSites = (state.stops || []).length > 0;
     paintRouteLayer(state);
-    setLayerVis('segments-line', false);
+    setLayerVis('segments-line', SHOW_SEGMENT_CHORDS && hasSites);
     setLayerVis('site-begin', hasSites);
     setLayerVis('site-end', hasSites);
-    setLayerVis('site-begin-label', hasSites);
-    setLayerVis('site-end-label', hasSites);
+    // Begin/end numerals only while picking (HTML leaves them unmarked).
+    setLayerVis('site-begin-label', hasSites && picking);
+    setLayerVis('site-end-label', hasSites && picking);
     var showPickTargets = picking && pickTargets.length > 0;
     setLayerVis('pick-target-circle', showPickTargets);
     setLayerVis('pick-target-label', showPickTargets);

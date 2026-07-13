@@ -294,6 +294,8 @@ def test_web_assets():
     check("stop marker source", "stop-markers" in appjs)
     check("numbered stop layers", "stop-label" in appjs and "stop-circle" in appjs)
     check("numbered site begin/end dots", "site-begin-label" in appjs and "site-end-label" in appjs)
+    check("install pins palette", "COLOR_INSTALL" in appjs and "COLOR_SEGMENT" in appjs)
+    check("segment chords not route traces", "SHOW_SEGMENT_CHORDS" in appjs and "SHOW_TRACE_LINES = false" in appjs)
     check("pick route map banner", "pick-banner" in idx and "pick_prompt" in appjs)
     check("drive route map banner", "drive-banner" in idx and "resolveRouteLine" in appjs)
     check("plan mode tour polyline", "paintRouteLayer" in appjs)
@@ -454,7 +456,7 @@ def test_web_assets():
     check("export counter columns", "CounterUnitID" in export._EXPORT_COLS)
     from core import map_display
     check("map_display manual order", hasattr(map_display, "apply_manual_order"))
-    check("segment path on map", "segment_path" in appjs)
+    check("segment chords on map", "SHOW_SEGMENT_CHORDS" in appjs and "COLOR_SEGMENT" in appjs)
     check("drive leg trace", "next_leg" in appjs and "build_site_legs" in open(os.path.join(ROOT, "core", "routing.py")).read())
     check("drive highlight", "__tdSetDriveHighlight" in appjs and "_next_leg_payload" in main_src)
     check("gps follow mode", "_gps_follow" in main_src and "btn_drive_arrived" in main_src)

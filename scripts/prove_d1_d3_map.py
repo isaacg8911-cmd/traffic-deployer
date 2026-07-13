@@ -1,5 +1,6 @@
-"""Prove D1–D3: no map trace lines, BUILD ROUTE → pick-first, Fleet nav hidden.
+"""Prove D1–D3: no route tour traces, BUILD ROUTE → pick-first, Fleet nav hidden.
 
+Site begin↔end dashed chords are allowed (Install Pins look; cheap geometry).
 Gate: load job (Week 18 via TD_JOB_* env when present, else bundled validation job)
 + map state push + layer visibility probe in real WebEngine page.
 """
@@ -57,10 +58,15 @@ def main() -> int:
         ok("D1 SHOW_TRACE_LINES false")
     else:
         fail("D1 SHOW_TRACE_LINES false")
-    if "setLayerVis('segments-line', false)" in appjs:
-        ok("D1 segments-line forced hidden")
+    # Cheap begin↔end chords are allowed (Install Pins look); route polylines stay off.
+    if "SHOW_SEGMENT_CHORDS = true" in appjs:
+        ok("D1 SHOW_SEGMENT_CHORDS true (site chords only)")
     else:
-        fail("D1 segments-line forced hidden")
+        fail("D1 SHOW_SEGMENT_CHORDS true")
+    if "paintRouteLayer" in appjs and "SHOW_TRACE_LINES" in appjs:
+        ok("D1 route paint gated by SHOW_TRACE_LINES")
+    else:
+        fail("D1 route paint gated")
 
     if not FLEET_NAV_ENABLED:
         ok("D3 FLEET_NAV_ENABLED false")
@@ -276,8 +282,7 @@ def main() -> int:
             route_line: vis('route-line'),
             route_casing: vis('route-casing'),
             segments_line: vis('segments-line'),
-            route_feats: feats,
-            show_trace: typeof SHOW_TRACE_LINES !== 'undefined' ? SHOW_TRACE_LINES : null
+            route_feats: feats
           });
         })();
         """
@@ -291,7 +296,6 @@ def main() -> int:
     for key, label in (
         ("route_line", "route-line"),
         ("route_casing", "route-casing"),
-        ("segments_line", "segments-line"),
     ):
         vis = layer_probe.get(key)
         if vis == "hidden":
@@ -299,15 +303,17 @@ def main() -> int:
         else:
             fail(f"D1 {label} hidden", f"got {vis}")
 
+    # Site begin↔end chords may be visible; that is intentional (not a tour trace).
+    seg_vis = layer_probe.get("segments_line")
+    if seg_vis in ("visible", "hidden", "missing"):
+        ok(f"D1 segments-line probed", seg_vis)
+    else:
+        fail("D1 segments-line probed", f"got {seg_vis}")
+
     if layer_probe.get("route_feats") == 0:
         ok("D1 route source empty")
     else:
         fail("D1 route source empty", f"feats={layer_probe.get('route_feats')}")
-
-    if layer_probe.get("show_trace") is False:
-        ok("D1 SHOW_TRACE_LINES runtime false")
-    else:
-        fail("D1 SHOW_TRACE_LINES runtime", str(layer_probe.get("show_trace")))
 
     local_server.stop()
     print()

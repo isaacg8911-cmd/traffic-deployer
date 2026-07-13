@@ -1,36 +1,32 @@
 @echo off
-REM Wi-Fi update NOW — no USB, no app UI. Downloads from home PC and installs.
+REM Wi-Fi / Tailscale update NOW — no USB, no app UI.
 setlocal EnableExtensions EnableDelayedExpansion
-
-set "HOME="
-REM Try LAN first, then Tailscale (works when Wi-Fi blocks device-to-device).
-for %%U in (http://192.168.1.30:8765 http://100.93.14.32:8765) do (
-  if not defined HOME (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "try { $r=Invoke-WebRequest -Uri '%%U/version.json' -UseBasicParsing -TimeoutSec 4; if ($r.StatusCode -ge 200) { Set-Content -LiteralPath $env:TEMP\td_home_ok.txt -Value '%%U' -Encoding ascii; exit 0 }; exit 1 } catch { exit 1 }"
-    if not errorlevel 1 if exist "%TEMP%\td_home_ok.txt" (
-      set /p HOME=<"%TEMP%\td_home_ok.txt"
-    )
-  )
-)
-if not defined HOME (
-  echo FAIL: cannot reach home PC on Wi-Fi OR Tailscale.
-  echo Tried:
-  echo   http://192.168.1.30:8765
-  echo   http://100.93.14.32:8765
-  echo.
-  echo On HOME PC: keep update server running.
-  echo On LAPTOP: same Wi-Fi, or install Tailscale and log into same account.
-  pause
-  exit /b 1
-)
 
 echo.
 echo Traffic Deployer — WIFI UPDATE NOW
 echo ==================================
+echo.
+
+echo Finding home PC update server...
+del /f /q "%TEMP%\td_home_ok.txt" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$urls=@('http://100.93.14.32:8765','http://192.168.1.30:8765'); foreach($u in $urls){ try { $r=Invoke-WebRequest -Uri ($u.TrimEnd('/')+'/version.json') -UseBasicParsing -TimeoutSec 8; if($r.StatusCode -ge 200){ Set-Content -LiteralPath $env:TEMP\td_home_ok.txt -Value $u.TrimEnd('/') -Encoding ascii; Write-Host ('OK '+$u); exit 0 } } catch { Write-Host ('miss '+$u+' — '+$_.Exception.Message) } }; exit 1"
+if errorlevel 1 (
+  echo.
+  echo FAIL: cannot reach home PC.
+  echo Tried Tailscale and home Wi-Fi.
+  echo.
+  echo On HOME PC keep the update server running.
+  echo On LAPTOP: open Edge to http://100.93.14.32:8765/  ^(Tailscale^)
+  echo If that page loads, download a FRESH WIFI_UPDATE_NOW.bat from there.
+  pause
+  exit /b 1
+)
+set /p HOME=<"%TEMP%\td_home_ok.txt"
 echo Home server: %HOME%
 echo.
 
+set "INSTALL="
 if exist "C:\TrafficDeployer\TrafficDeployer.exe" if exist "C:\TrafficDeployer\tds_data\california.pmtiles" set "INSTALL=C:\TrafficDeployer"
 if not defined INSTALL if exist "D:\TrafficDeployer\TrafficDeployer.exe" if exist "D:\TrafficDeployer\tds_data\california.pmtiles" set "INSTALL=D:\TrafficDeployer"
 if not defined INSTALL if exist "%USERPROFILE%\TrafficDeployer\TrafficDeployer.exe" if exist "%USERPROFILE%\TrafficDeployer\tds_data\california.pmtiles" set "INSTALL=%USERPROFILE%\TrafficDeployer"
@@ -69,10 +65,9 @@ timeout /t 2 /nobreak >nul
 
 echo Fetching version.json ...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $home='%HOME%'.TrimEnd('/'); $v=Invoke-RestMethod -Uri ($home+'/version.json') -TimeoutSec 15; Write-Host ('Latest: v'+$v.version); Write-Host ('URL: '+$v.download_url); $v | ConvertTo-Json -Compress | Set-Content -LiteralPath $env:TEMP\td_ver.json -Encoding utf8; if (-not $v.download_url) { exit 2 }"
+  "$ErrorActionPreference='Stop'; $home='%HOME%'.TrimEnd('/'); $v=Invoke-RestMethod -Uri ($home+'/version.json') -TimeoutSec 20; Write-Host ('Latest: v'+$v.version); Write-Host ('URL: '+$v.download_url); $v | ConvertTo-Json -Compress | Set-Content -LiteralPath $env:TEMP\td_ver.json -Encoding utf8; if (-not $v.download_url) { exit 2 }"
 if errorlevel 1 (
-  echo FAIL: cannot reach home PC at %HOME%
-  echo Is this laptop on the SAME home Wi-Fi? Is SERVE_RELEASES running on home PC?
+  echo FAIL: version.json fetch failed from %HOME%
   pause
   exit /b 1
 )
@@ -80,6 +75,11 @@ if errorlevel 1 (
 for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-Content $env:TEMP\td_ver.json | ConvertFrom-Json).version"`) do set "LATEST=%%A"
 for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-Content $env:TEMP\td_ver.json | ConvertFrom-Json).download_url"`) do set "ZIPURL=%%A"
 for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-Content $env:TEMP\td_ver.json | ConvertFrom-Json).sha256"`) do set "SHA=%%A"
+
+REM If manifest still points at unreachable LAN IP, rewrite to the working HOME base.
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$home='%HOME%'.TrimEnd('/'); $j=Get-Content $env:TEMP\td_ver.json -Raw | ConvertFrom-Json; $u=[string]$j.download_url; if($u -and $u -notlike ($home+'*')){ $name=($u -split '/')[-1]; $j.download_url=($home+'/'+$name); $j | ConvertTo-Json -Compress | Set-Content $env:TEMP\td_ver.json -Encoding utf8; Write-Host ('Rewrote download URL to '+$j.download_url) }"
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-Content $env:TEMP\td_ver.json | ConvertFrom-Json).download_url"`) do set "ZIPURL=%%A"
 
 echo Latest : v%LATEST%
 echo Zip URL: %ZIPURL%
@@ -96,9 +96,9 @@ mkdir "%STAGING%" || goto :fail
 set "ZIP=%STAGING%\update.zip"
 set "UNPACK=%STAGING%\extracted"
 
-echo Downloading ~300 MB over Wi-Fi — keep this window open...
+echo Downloading ~300 MB — keep this window open (can take several minutes)...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $url='%ZIPURL%'; $out='%ZIP%'; $sha='%SHA%'; Write-Host ('GET '+$url); Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -TimeoutSec 600; if ($sha) { $h=(Get-FileHash -LiteralPath $out -Algorithm SHA256).Hash.ToLower(); if ($h -ne $sha.ToLower()) { throw ('checksum mismatch: '+$h) }; Write-Host 'Checksum OK' }; Write-Host ('Downloaded ' + [math]::Round((Get-Item $out).Length/1MB) + ' MB')"
+  "$ErrorActionPreference='Stop'; $url='%ZIPURL%'; $out='%ZIP%'; $sha='%SHA%'; Write-Host ('GET '+$url); Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -TimeoutSec 900; if ($sha) { $h=(Get-FileHash -LiteralPath $out -Algorithm SHA256).Hash.ToLower(); if ($h -ne $sha.ToLower()) { throw ('checksum mismatch: '+$h) }; Write-Host 'Checksum OK' }; Write-Host ('Downloaded ' + [math]::Round((Get-Item $out).Length/1MB) + ' MB')"
 if errorlevel 1 goto :fail
 
 echo Unzipping...

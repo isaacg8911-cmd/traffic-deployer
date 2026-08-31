@@ -64,7 +64,7 @@ flowchart TB
 **Modules:** `core/ingest.py`, `core/validate.py`
 
 1. **`parse_excel_sites`** reads each row’s **begin** and **end** coordinates (and street name). The midpoint is stored but routing treats the site as a **line to cross**, not only a dot.
-2. **`match_est_files`** joins Excel sites to symbols in each uploaded `.EST` (map day from filename, e.g. `Day5.EST` → `Day5`).
+2. **`match_est_files`** joins Excel sites to symbols in each uploaded `.EST` (map day from filename, e.g. `Day5.EST` → `Day5`). Two `.EST` files → two independent route sections (`core/route_sections.py`); cycle **Map** in the top bar.
 3. Each stop dict carries `begin_lat/lon`, `end_lat/lon`, `lat/lon` (midpoint), `street`, `map_day`, etc.
 
 Validation (`validate.validate_build`) blocks builds with missing coords or empty matches before any routing runs.

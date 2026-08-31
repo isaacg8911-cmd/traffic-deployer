@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer
 
 from core import crash_log, geo, ingest
+from core import route_sections
 from ui.map_helpers import (
     coords_moved,
     display_route_for_map,
@@ -118,16 +119,24 @@ class MapSyncControllerMixin:
         self._push_state(fit=True)
 
     def _display_route(self) -> dict:
+        if self._route_section_active() and not self._day_filter_active():
+            return display_route_for_map(route_sections.empty_route())
         return display_route_for_map(self.state.route)
 
+    def _section_stops_for_legs(self) -> list[dict]:
+        if self._day_filter_active():
+            return self._stops_matching_day_filter()
+        return list(self.state.stops)
+
     def _ensure_site_legs(self) -> None:
-        if not self.state.stops:
+        stops = self._section_stops_for_legs()
+        if not stops:
             return
         if self.state.route.get("site_legs"):
             return
         from core.routing import build_site_legs
         self.state.route["site_legs"] = build_site_legs(
-            self.state.stops, tuple(self.state.home), DATA_DIR)
+            stops, tuple(self.state.home), DATA_DIR)
 
     def _first_pending_index(self) -> int | None:
         vis = self._visible_stop_indices()
@@ -147,10 +156,15 @@ class MapSyncControllerMixin:
         idx = self._first_pending_index()
         if idx is None:
             return None
-        legs = route.get("site_legs") or []
-        if idx >= len(legs):
+        vis = self._visible_stop_indices()
+        try:
+            local = vis.index(idx)
+        except ValueError:
             return None
-        leg = legs[idx]
+        legs = route.get("site_legs") or []
+        if local >= len(legs):
+            return None
+        leg = legs[local]
         poly = leg.get("polyline") or []
         if len(poly) < 2:
             return None
@@ -246,10 +260,119 @@ class MapSyncControllerMixin:
         self._go_page(2)
         self._center_current()
 
-    def _on_day_filter_changed(self):
+    def _route_section_labels(self) -> list[str]:
+        return route_sections.section_labels(
+            self.state.stops, getattr(self.state, "active_files", None))
+
+    def _route_section_active(self) -> bool:
+        return route_sections.multi_section(
+            self.state.stops, getattr(self.state, "active_files", None))
+
+    def _ensure_routes_by_map(self) -> dict[str, dict]:
+        stored = getattr(self.state, "routes_by_map", None)
+        if not isinstance(stored, dict):
+            stored = {}
+            self.state.routes_by_map = stored
+        return stored
+
+    def _ensure_pick_by_map(self) -> dict[str, dict]:
+        saved = getattr(self, "_route_pick_by_map", None)
+        if not isinstance(saved, dict):
+            saved = {}
+            self._route_pick_by_map = saved
+        return saved
+
+    def _stash_route_section(self, label: str) -> None:
+        if route_sections.is_all_days(label):
+            return
+        stash = self._ensure_pick_by_map()
+        stash[label] = {
+            "uids": list(getattr(self, "_route_pick_uids", []) or []),
+            "sides": dict(getattr(self, "_route_pick_sides", {}) or {}),
+        }
+        if self._route_pick_mode:
+            return
+        route = getattr(self.state, "route", None)
+        if isinstance(route, dict) and (
+            route.get("polyline") or float(route.get("miles") or 0) > 0
+        ):
+            self._ensure_routes_by_map()[label] = dict(route)
+
+    def _restore_route_section(self, label: str) -> None:
+        saved = self._ensure_pick_by_map().get(label) or {}
+        if self._route_pick_mode:
+            self._route_pick_uids = list(saved.get("uids") or [])
+            self._route_pick_sides = dict(saved.get("sides") or {})
+        self._apply_section_route_to_state()
+
+    def _apply_section_route_to_state(self) -> None:
+        day = self._day_filter_value()
+        if route_sections.is_all_days(day):
+            if self._route_section_active():
+                self.state.route = route_sections.empty_route()
+            return
+        stored = self._ensure_routes_by_map().get(day)
+        if stored:
+            self.state.route = dict(stored)
+        elif self._route_pick_mode:
+            self.state.route = route_sections.empty_route()
+
+    def _set_route_section(self, label: str, *, persist: bool = True) -> None:
+        prev = getattr(self, "_day_filter_prev", None)
+        if prev and prev != label:
+            self._stash_route_section(prev)
+        self.state.map_day_filter = label
         if hasattr(self, "combo_day"):
-            self.state.map_day_filter = self.combo_day.currentText()
-            self.state.save()
+            idx = self.combo_day.findText(label)
+            if idx >= 0 and self.combo_day.currentIndex() != idx:
+                self.combo_day.blockSignals(True)
+                self.combo_day.setCurrentIndex(idx)
+                self.combo_day.blockSignals(False)
+        self._day_filter_prev = label
+        self._restore_route_section(label)
+        if persist:
+            try:
+                self.state.save()
+            except Exception:
+                pass
+
+    def _focus_route_section_for_pick(self) -> None:
+        labels = self._route_section_labels()
+        if len(labels) < 2 or self._day_filter_active():
+            return
+        self._set_route_section(labels[0], persist=False)
+
+    def _cycle_route_section(self, delta: int = 1) -> None:
+        labels = self._route_section_labels()
+        nxt = route_sections.cycle_label(labels, self._day_filter_value(), delta)
+        if not nxt:
+            return
+        self._set_route_section(nxt)
+        vis = self._visible_stop_indices()
+        if vis and self.current_index not in vis:
+            self.current_index = vis[0]
+        self._refresh_route_list()
+        if self._route_pick_mode:
+            self._refresh_route_pick_ui()
+        if self.pages.currentIndex() == 2:
+            self._refresh_install()
+        elif self.pages.currentIndex() == 3:
+            self._refresh_pickup()
+        self._push_state(fit=True)
+        n = labels.index(nxt) + 1 if nxt in labels else 1
+        self.statusBar().showMessage(
+            f"Map {n}/{len(labels)} — {nxt}. Route for this map only.", 8000)
+
+    def _cycle_map_prev(self) -> None:
+        self._cycle_route_section(-1)
+
+    def _cycle_map_next(self) -> None:
+        self._cycle_route_section(1)
+
+    def _on_day_filter_changed(self):
+        label = self.combo_day.currentText() if hasattr(self, "combo_day") else (
+            self.state.map_day_filter or DAY_FILTER_ALL)
+        self._set_route_section(label)
         vis = self._visible_stop_indices()
         if vis and self.current_index not in vis:
             self.current_index = vis[0]
@@ -257,26 +380,54 @@ class MapSyncControllerMixin:
         if items and self.pickup_index >= len(items):
             self.pickup_index = max(0, len(items) - 1)
         self._refresh_route_list()
+        if self._route_pick_mode:
+            self._refresh_route_pick_ui()
         if self.pages.currentIndex() == 2:
             self._refresh_install()
         elif self.pages.currentIndex() == 3:
             self._refresh_pickup()
-        self._push_state()
+        self._push_state(fit=True)
 
     def _day_filter_value(self) -> str:
-        if hasattr(self, "combo_day"):
+        if hasattr(self, "combo_day") and self.combo_day.count():
             return self.combo_day.currentText() or DAY_FILTER_ALL
-        return self.state.map_day_filter or DAY_FILTER_ALL
+        return getattr(self.state, "map_day_filter", None) or DAY_FILTER_ALL
 
     def _day_filter_active(self) -> bool:
+        return not route_sections.is_all_days(self._day_filter_value())
+
+    def _pick_pool_stops(self) -> list[dict]:
+        if not self.state.stops:
+            return []
+        if self._day_filter_active():
+            return self._stops_matching_day_filter()
+        if self._route_section_active():
+            labels = self._route_section_labels()
+            return route_sections.stops_for_section(self.state.stops, labels[0])
+        return list(self.state.stops)
+
+    def _pick_pool_total(self) -> int:
+        return len(self._pick_pool_stops())
+
+    def _section_pick_active(self) -> bool:
+        """True when the visible map is the one being picked (not just viewed)."""
+        if not getattr(self, "_route_pick_mode", False):
+            return False
+        if not self._route_section_active() or not self._day_filter_active():
+            return True
+        if self._route_pick_uids:
+            return True
         day = self._day_filter_value()
-        return bool(day) and day not in (DAY_FILTER_ALL, "All maps")
+        stored = self._ensure_routes_by_map().get(day) or {}
+        if stored.get("polyline") or float(stored.get("miles") or 0) > 0:
+            return False
+        return True
 
     def _visible_stop_indices(self) -> list[int]:
         if not self.state.stops:
             return []
         day = self._day_filter_value()
-        if day in (DAY_FILTER_ALL, "All maps", ""):
+        if route_sections.is_all_days(day):
             return list(range(len(self.state.stops)))
         return [i for i, s in enumerate(self.state.stops) if s.get("sheet") == day]
 
@@ -285,8 +436,8 @@ class MapSyncControllerMixin:
         if not base:
             return []
         day = self._day_filter_value()
-        if day in (DAY_FILTER_ALL, "All maps", ""):
-            return base
+        if route_sections.is_all_days(day):
+            return list(base)
         return [s for s in base if s.get("sheet") == day]
 
     def _refresh_day_filter(self):
@@ -298,21 +449,28 @@ class MapSyncControllerMixin:
         self.combo_day.blockSignals(True)
         self.combo_day.clear()
         self.combo_day.addItem(DAY_FILTER_ALL)
-        for label in self.state.active_files or sorted({s.get("sheet", "") for s in self.state.stops}):
+        for label in self._route_section_labels():
             if label and self.combo_day.findText(label) < 0:
                 self.combo_day.addItem(label)
         idx = self.combo_day.findText(cur)
         self.combo_day.setCurrentIndex(idx if idx >= 0 else 0)
         self.combo_day.blockSignals(False)
         self.state.map_day_filter = self.combo_day.currentText()
+        self._day_filter_prev = self.state.map_day_filter
         show = self.combo_day.count() > 2
         if hasattr(self, "_day_filter_wrap"):
             self._day_filter_wrap.setVisible(show)
+        if hasattr(self, "lbl_day_filter"):
+            self.lbl_day_filter.setText("Map" if show else "Sites")
+        for attr in ("btn_map_prev", "btn_map_next"):
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                btn.setVisible(show)
 
     def _stops_for_map(self) -> list[dict]:
         base = self.state.stops or getattr(self, "_map_preview_stops", []) or []
         filtered = self._stops_matching_day_filter(base)
-        if self._route_pick_mode:
+        if self._section_pick_active():
             return [dict(s) for s in filtered]
         return self._stops_with_seq(filtered)
 
@@ -331,20 +489,29 @@ class MapSyncControllerMixin:
     def _pick_site_letters(self) -> dict[str, str]:
         return {
             s["uid"]: self._site_letter(i)
-            for i, s in enumerate(self.state.stops)
+            for i, s in enumerate(self._pick_pool_stops())
             if s.get("uid")
         }
 
+    def _section_pick_tag(self) -> str:
+        if not self._route_section_active() or not self._day_filter_active():
+            return ""
+        labels = self._route_section_labels()
+        day = self._day_filter_value()
+        n = labels.index(day) + 1 if day in labels else 1
+        return f"Map {n}/{len(labels)} {day} — "
+
     def _pick_prompt_text(self) -> str:
         n = len(self._route_pick_uids)
-        total = len(self.state.stops)
+        total = self._pick_pool_total()
+        tag = self._section_pick_tag()
         if n >= total:
-            return f"All {total} sites chosen — tap Apply route"
-        return f"Click stop {n + 1} of {total} on the map"
+            return f"{tag}All {total} sites chosen — tap Apply route"
+        return f"{tag}Click stop {n + 1} of {total} on the map"
 
     def _pick_waiting_hint(self) -> str:
         n = len(self._route_pick_uids)
-        total = len(self.state.stops)
+        total = self._pick_pool_total()
         if n >= total:
             return "ready for Apply"
         return "waiting for your click — blue begin or red end"
@@ -470,7 +637,7 @@ class MapSyncControllerMixin:
     def _push_state_body(self, fit: bool = False):
         following = bool(self._gps_follow or self._map_follow)
         preview = bool(self._map_preview_stops) and not self.state.stops
-        picking = bool(self._route_pick_mode)
+        picking = bool(self._section_pick_active())
         manual_grab = bool(self._manual_grab_mode)
         nxt = None if manual_grab else self._next_leg_payload()
         if manual_grab:
@@ -516,13 +683,16 @@ class MapSyncControllerMixin:
             "drive_banner": self._follow_banner_text() if following else "",
         }
         self.bridge.send_state(st)
+        shown = self._stops_matching_day_filter() if self._day_filter_active() else self.state.stops
         miles = self.state.route.get("miles", 0.0)
         drive = (miles / 30.0) * 60 if miles else 0
-        self.status_route.setText(f"Stops: {len(self.state.stops)}   Route: {miles:.1f} mi   ~{drive:.0f} min")
+        tag = f"{self._day_filter_value()} · " if self._day_filter_active() else ""
+        self.status_route.setText(
+            f"{tag}Stops: {len(shown)}   Route: {miles:.1f} mi   ~{drive:.0f} min")
         if nxt and not following:
             self.status_route.setText(
                 f"Next: Site {nxt.get('to_id', '?')} — {nxt['miles']:.1f} mi"
-                f"   ({len(self.state.stops)} stops total)")
+                f"   ({len(shown)} stops this map)")
 
     @staticmethod
     def _stop_click_coords(stop: dict, side: str | None = None) -> tuple[float, float] | None:
@@ -570,7 +740,7 @@ class MapSyncControllerMixin:
         best_uid: str | None = None
         best_side: str | None = None
         best_d = max_m
-        for s in self.state.stops:
+        for s in self._pick_pool_stops():
             uid = str(s.get("uid") or "")
             if not uid or uid in picked:
                 continue
@@ -593,7 +763,7 @@ class MapSyncControllerMixin:
         if self._manual_grab_mode:
             self._manual_grab_at(lat, lon)
             return
-        if not self._route_pick_mode:
+        if not self._section_pick_active():
             return
         uid, side = self._nearest_unpicked_stop(lat, lon)
         if uid:
@@ -631,12 +801,20 @@ class MapSyncControllerMixin:
                     self._select_install_stop(idx)
             return
         uid, side = self._parse_stop_click(str(uid).strip())
-        if self._route_pick_mode:
+        if self._section_pick_active():
             by_uid = {str(s.get("uid") or ""): s for s in self.state.stops}
             if uid not in by_uid:
                 self.statusBar().showMessage(
                     "That site is not in this job — pick a blue or red dot on the map.",
                     5000,
+                )
+                return
+            pool = {str(s.get("uid") or "") for s in self._pick_pool_stops()}
+            if uid not in pool:
+                sheet = by_uid[uid].get("sheet") or "the other map"
+                self.statusBar().showMessage(
+                    f"That site is on {sheet} — cycle Map to pick that route.",
+                    7000,
                 )
                 return
             self._route_pick_add(uid, side=side)

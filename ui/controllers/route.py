@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QLabel, QListWidgetItem, QMessageBox, QProgressDia
 
 import road_router
 from core import crash_log, ingest, routing, validate
+from core import route_sections
 from ui.paths import DATA_DIR
 from ui.route_pick_dialog import RoutePickOrderDialog
 from ui.setup_wizard import SetupWizard
@@ -99,18 +100,35 @@ class RouteControllerMixin:
             self.statusBar().showMessage(
                 f"Re-build: kept install/pickup data on {kept} site(s).", 6000)
 
-        self.state.stops = merged
+        rebuild_sheet = None
+        if route_sections.multi_section(merged, self.state.active_files):
+            cur = getattr(self.state, "map_day_filter", "") or ""
+            if not route_sections.is_all_days(cur) and cur in self.state.active_files:
+                rebuild_sheet = cur
+        self.state.stops = route_sections.preserve_other_section_orders(
+            list(old_by_uid.values()), merged, rebuild_sheet=rebuild_sheet)
+        keep = set(self.state.active_files)
+        stored = getattr(self.state, "routes_by_map", None) or {}
+        self.state.routes_by_map = {k: v for k, v in stored.items() if k in keep}
+        if rebuild_sheet:
+            self.state.routes_by_map.pop(rebuild_sheet, None)
+        elif not route_sections.multi_section(self.state.stops, self.state.active_files):
+            self.state.routes_by_map = {}
         self._map_preview_stops = []
-        self.state.route = {"polyline": [], "miles": 0.0, "graph": False}
+        self.state.route = route_sections.empty_route()
         self._persist_shift(quiet=True)
         self.current_index = min(self.current_index, max(0, len(self.state.stops) - 1))
         self._update_right(force_map=True)
         self._go_page(1)
-        self._refresh_route_list()
         self._refresh_day_filter()
+        if rebuild_sheet:
+            self._set_route_section(rebuild_sheet, persist=False)
+        elif route_sections.multi_section(self.state.stops, self.state.active_files):
+            self._focus_route_section_for_pick()
+        self._refresh_route_list()
         self._push_state(fit=True)
         self._restore_build_button_if_idle()
-        self._begin_route_pick(merged)
+        self._begin_route_pick(self.state.stops)
 
     def _start_pick_route_from_route_tab(self) -> None:
         """Manual pick order — alternative to auto-optimize BUILD ROUTE."""
@@ -187,11 +205,18 @@ class RouteControllerMixin:
         self._end_manual_grab(silent=True)
         from core.map_display import enrich_segment_paths
 
+        self.state.stops = list(stops)
+        self._focus_route_section_for_pick()
+        section = self._day_filter_value() if self._day_filter_active() else ""
+        if section:
+            self._ensure_pick_by_map().pop(section, None)
+            self._ensure_routes_by_map().pop(section, None)
+            self.state.route = route_sections.empty_route()
+        elif not self._route_section_active():
+            self.state.route = route_sections.empty_route()
         self._route_pick_mode = True
         self._route_pick_uids = []
         self._route_pick_sides = {}
-        self.state.stops = list(stops)
-        self.state.route = {"polyline": [], "miles": 0.0, "graph": False}
         if self.chk_show_segments.isChecked():
             enrich_segment_paths(self.state.stops, DATA_DIR)
         self._go_page(1)
@@ -200,17 +225,21 @@ class RouteControllerMixin:
         self._show_route_pick_dialog()
         self._refresh_route_list()
         self._push_state(fit=True)
+        extra = ""
+        if self._route_section_active():
+            extra = " Cycle Map for the other .EST — that route stays as you left it."
         self.statusBar().showMessage(
             f"Pick route on map — {self._pick_prompt_text()}. "
-            "Blue = begin, red = end. Order list is on the right.",
-            12000)
+            f"Blue = begin, red = end.{extra}",
+            14000)
 
     def _refresh_route_pick_ui(self, *, sync_dialog: bool = True) -> None:
         if not hasattr(self, "lbl_pick_status"):
             return
         n = len(self._route_pick_uids)
-        total = len(self.state.stops)
-        on = self._route_pick_mode
+        total = self._pick_pool_total()
+        session = self._route_pick_mode
+        on = self._section_pick_active()
         if hasattr(self, "sec_pick") and self.sec_pick is not None and SIMPLE_MODE:
             self.sec_pick.setVisible(on)
         self.btn_pick_apply.setEnabled(on and n > 0 and n >= total)
@@ -233,25 +262,33 @@ class RouteControllerMixin:
             self._exit_pick_map_focus()
         self._refresh_pick_site_combo()
         if not on:
-            apply_active(
-                self.lbl_pick_status,
-                False,
-                "Route applied. Numbers on the map match drive order. "
-                f"Re-plan with {BUILD_LABEL} on Setup.",
-            )
+            if session and self._route_section_active():
+                day = self._day_filter_value()
+                apply_active(
+                    self.lbl_pick_status,
+                    False,
+                    f"{day} route is applied. Cycle Map to keep picking the other .EST.",
+                )
+            else:
+                apply_active(
+                    self.lbl_pick_status,
+                    False,
+                    "Route applied. Numbers on the map match drive order. "
+                    f"Re-plan with {BUILD_LABEL} on Setup.",
+                )
             if sync_dialog:
                 self._hide_route_pick_dialog()
             return
         letters = self._pick_site_letters()
         if n >= total:
-            pick_text = f"All {total} stops picked on the map. Tap Apply route."
+            pick_text = f"{self._section_pick_tag()}All {total} stops picked on the map. Tap Apply route."
         else:
             pick_text = (
                 f"{self._pick_prompt_text()} — pick Begin/End below or tap dots on map. "
                 f"Order updates in the popup.")
         apply_active(self.lbl_pick_status, True, pick_text)
         if sync_dialog and on and self._route_pick_dialog is not None:
-            by_uid = {s["uid"]: s for s in self.state.stops}
+            by_uid = {s["uid"]: s for s in self._pick_pool_stops()}
             self._route_pick_dialog.sync_from_parent(
                 uids=list(self._route_pick_uids),
                 stops_by_uid=by_uid,
@@ -267,8 +304,8 @@ class RouteControllerMixin:
         if not hasattr(self, "combo_pick_site"):
             return
         n = len(self._route_pick_uids)
-        total = len(self.state.stops)
-        on = self._route_pick_mode
+        total = self._pick_pool_total()
+        on = self._section_pick_active()
         self.combo_pick_site.blockSignals(True)
         self.combo_pick_site.clear()
         if not on:
@@ -288,7 +325,7 @@ class RouteControllerMixin:
         self.lbl_pick_slot.setText(f"Stop {n + 1}:")
         self.combo_pick_site.setEnabled(True)
         self.combo_pick_site.addItem("— choose site —", None)
-        for s in self.state.stops:
+        for s in self._pick_pool_stops():
             if s["uid"] in picked:
                 continue
             letter = letters.get(s["uid"], "?")
@@ -379,6 +416,12 @@ class RouteControllerMixin:
             self.statusBar().showMessage(
                 "Unknown site — pick a blue or red dot on the map.", 5000)
             return
+        pool_uids = {str(s.get("uid") or "") for s in self._pick_pool_stops()}
+        if uid not in pool_uids:
+            sheet = stop.get("sheet") or "the other map"
+            self.statusBar().showMessage(
+                f"That site is on {sheet} — cycle Map to pick that route.", 7000)
+            return
         if stop and side in ("begin", "end"):
             if lock_side is None:
                 lock_side = True
@@ -389,7 +432,7 @@ class RouteControllerMixin:
                 self._route_pick_sides.pop(uid, None)
         self._route_pick_uids.append(uid)
         n = len(self._route_pick_uids)
-        total = len(self.state.stops)
+        total = self._pick_pool_total()
         self._refresh_route_pick_ui()
         self._refresh_route_list()
         self._push_state()
@@ -409,7 +452,7 @@ class RouteControllerMixin:
             return
         self._route_pick_uids = []
         self._route_pick_sides = {}
-        for s in self.state.stops:
+        for s in self._pick_pool_stops():
             s.pop("pick_cross_locked", None)
             for key in ("cross_lat", "cross_lon", "cross_side"):
                 s.pop(key, None)
@@ -429,9 +472,10 @@ class RouteControllerMixin:
             self.statusBar().showMessage(
                 "No road map — Suggest order uses straight-line miles. "
                 "Download road map on Setup for Dijkstra routing.", 9000)
-        by_uid = {s["uid"]: s for s in self.state.stops}
+        pool = self._pick_pool_stops()
+        by_uid = {s["uid"]: s for s in pool}
         picked = [by_uid[u] for u in self._route_pick_uids if u in by_uid]
-        remaining = [s for s in self.state.stops if s["uid"] not in self._route_pick_uids]
+        remaining = [s for s in pool if s["uid"] not in self._route_pick_uids]
         ordered = auto_finish_order(tuple(self.state.home), picked, remaining, DATA_DIR)
         self._route_pick_uids = [s["uid"] for s in ordered]
         self._refresh_route_pick_ui()
@@ -456,14 +500,15 @@ class RouteControllerMixin:
             self._route_pick_uids = list(dlg_order)
 
     def _route_pick_apply(self) -> None:
-        total = len(self.state.stops)
+        pool = self._pick_pool_stops()
+        total = len(pool)
         self._sync_pick_order_from_dialog()
         if not self._route_pick_mode or not self._route_pick_uids:
             self._warn("Pick stop 1 on the map (blue or red dot) or from the dropdown.")
             return
         if len(self._route_pick_uids) < total:
             self._warn(
-                f"Pick all {total} stops before Apply "
+                f"Pick all {total} stops on this map before Apply "
                 f"({len(self._route_pick_uids)} chosen so far).")
             return
         if self._route_thread is not None and self._route_thread.isRunning():
@@ -489,7 +534,7 @@ class RouteControllerMixin:
         thread = RouteApplyPickThread(
             tuple(self.state.home),
             list(self._route_pick_uids),
-            list(self.state.stops),
+            list(pool),
             DATA_DIR,
             dict(self._route_pick_sides),
         )
@@ -504,7 +549,7 @@ class RouteControllerMixin:
         def _restore_apply_btn():
             if self._route_pick_mode:
                 n = len(self._route_pick_uids)
-                total_st = len(self.state.stops)
+                total_st = self._pick_pool_total()
                 enabled = n > 0 and n >= total_st
                 self.btn_pick_apply.setEnabled(enabled)
                 if self._route_pick_dialog is not None:
@@ -523,8 +568,13 @@ class RouteControllerMixin:
                 if res.get("trace"):
                     print(res["trace"])
                 return
-            self.state.stops = res["order"]
+            section = self._day_filter_value() if self._day_filter_active() else ""
+            self.state.stops = route_sections.merge_section_order(
+                self.state.stops, res["order"])
             self.state.route = res["route"]
+            if section:
+                self._ensure_routes_by_map()[section] = dict(res["route"])
+                self._ensure_pick_by_map().pop(section, None)
             self._route_pick_mode = False
             self._route_pick_uids = []
             self._route_pick_sides = {}
@@ -538,19 +588,26 @@ class RouteControllerMixin:
             self._push_state(fit=True)
             miles = res["route"].get("miles", 0.0)
             route_res = res["route"]
+            applied_n = len(res["order"])
             if route_res.get("graph_uncovered"):
                 trace_note = "(straight-line — road map does not cover this job area)"
             elif route_res.get("graph"):
                 trace_note = "(street-traced sites)"
             else:
                 trace_note = "(straight-line — download road map on Setup)"
+            other = ""
+            if self._route_section_active():
+                labels = self._route_section_labels()
+                rest = [x for x in labels if x != section]
+                if rest:
+                    other = f" Cycle Map to {rest[0]} — that route is unchanged."
             self.statusBar().showMessage(
-                f"Route applied: {len(self.state.stops)} stops, {miles:.1f} mi {trace_note}",
-                10000,
+                f"Route applied: {applied_n} stops, {miles:.1f} mi {trace_note}.{other}",
+                12000,
             )
             if route_res.get("graph_uncovered"):
                 self.statusBar().showMessage(
-                    f"Route applied: {len(self.state.stops)} stops, {miles:.1f} mi "
+                    f"Route applied: {applied_n} stops, {miles:.1f} mi "
                     "(straight-line — saved road map is for a different job). "
                     "Setup → Download roads with this job loaded, then Build again for real streets.",
                     14000)
@@ -741,8 +798,9 @@ class RouteControllerMixin:
             self._retrace_timer.start(350)
             return
         enrich = hasattr(self, "chk_show_segments") and self.chk_show_segments.isChecked()
+        section_stops = self._section_stops_for_legs()
         thread = RouteRetraceThread(
-            list(self.state.stops),
+            list(section_stops),
             tuple(self.state.home),
             DATA_DIR,
             enrich_segments=enrich,
@@ -760,6 +818,9 @@ class RouteControllerMixin:
                     self._warn(err)
                 return
             self.state.route = res["route"]
+            section = self._day_filter_value() if self._day_filter_active() else ""
+            if section:
+                self._ensure_routes_by_map()[section] = dict(res["route"])
             self._persist_shift(quiet=True)
             self._refresh_route_list()
             if select_row is not None:
@@ -797,17 +858,24 @@ class RouteControllerMixin:
     def _nudge_stop(self, delta: int):
         if not self.state.stops:
             return
-        idx = self.list_route.currentRow()
-        if idx < 0:
-            idx = self.current_index
-        j = idx + delta
-        if j < 0 or j >= len(self.state.stops):
+        visible = self._visible_stop_indices()
+        if not visible:
             return
+        row = self.list_route.currentRow()
+        if row < 0:
+            try:
+                row = visible.index(self.current_index)
+            except ValueError:
+                row = 0
+        j_row = row + delta
+        if j_row < 0 or j_row >= len(visible):
+            return
+        i, j = visible[row], visible[j_row]
         stops = list(self.state.stops)
-        stops[idx], stops[j] = stops[j], stops[idx]
+        stops[i], stops[j] = stops[j], stops[i]
         self.state.stops = stops
         self.current_index = j
-        self._retrace_route_only(select_row=j)
+        self._retrace_route_only(select_row=j_row)
 
     def _reset_route(self):
         if QMessageBox.question(
@@ -827,6 +895,9 @@ class RouteControllerMixin:
         self._route_pick_mode = False
         self._route_pick_uids = []
         self._route_pick_sides = {}
+        self._route_pick_by_map = {}
+        if hasattr(self.state, "routes_by_map"):
+            self.state.routes_by_map = {}
         self._exit_pick_map_focus()
         self._hide_route_pick_dialog()
         self._undo_stack.clear()
@@ -857,11 +928,11 @@ class RouteControllerMixin:
     # --------------------------------------------------------- Route list UI
     def _refresh_route_list(self):
         self.list_route.clear()
-        letters = self._pick_site_letters() if self._route_pick_mode else {}
+        letters = self._pick_site_letters() if self._section_pick_active() else {}
         day_tag = ""
         if self._day_filter_active():
             day_tag = f" · {self._day_filter_value()}"
-        if self._route_pick_mode:
+        if self._section_pick_active():
             by_uid = {s["uid"]: s for s in self.state.stops}
             for i, uid in enumerate(self._route_pick_uids):
                 s = by_uid.get(uid)
@@ -875,7 +946,7 @@ class RouteControllerMixin:
                 item.setData(Qt.ItemDataRole.UserRole, str(uid))
                 self.list_route.addItem(item)
             picked_set = set(self._route_pick_uids)
-            for s in self.state.stops:
+            for s in self._pick_pool_stops():
                 if s["uid"] in picked_set:
                     continue
                 sheet = f" · {s.get('sheet')}" if s.get("sheet") else ""
@@ -934,7 +1005,7 @@ class RouteControllerMixin:
     def _route_item_clicked(self, item):
         # While picking a route, the left list mirrors the map dots. Clicking a
         # row must build the pick order — never jump to Install (P: field bug).
-        if self._route_pick_mode:
+        if self._section_pick_active():
             uid = item.data(Qt.ItemDataRole.UserRole)
             uid = str(uid) if uid else ""
             if not uid:
@@ -978,6 +1049,16 @@ class RouteControllerMixin:
         if not self.state.stops:
             self._warn("Build a route first.")
             return
+        if self._route_section_active() and not self._day_filter_active():
+            labels = self._route_section_labels()
+            stored = self._ensure_routes_by_map()
+            chosen = next(
+                (lb for lb in labels if float((stored.get(lb) or {}).get("miles") or 0) > 0),
+                labels[0] if labels else None,
+            )
+            if chosen:
+                self._set_route_section(chosen)
+                self._refresh_route_list()
         if not self._next_leg_payload():
             self._info("All stops are already done.")
             return

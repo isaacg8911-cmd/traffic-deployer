@@ -441,7 +441,7 @@ def test_web_assets():
     check("field crash log hook", "install_crash_logging" in main_src)
     check("map guide when following", '"show_guide": False' in main_src)
     check("no map trace lines", "SHOW_TRACE_LINES = false" in appjs)
-    check("pick-first build", '_begin_route_pick(merged)' in main_src)
+    check("pick-first build", "_begin_route_pick(" in main_src)
     check("fleet nav removed", "Fleet" not in open(os.path.join(ROOT, "ui", "shell", "main_layout.py"), encoding="utf-8").read())
     check("fleet nav flag off", "FLEET_NAV_ENABLED = False" in open(os.path.join(ROOT, "ui", "simple_mode.py")).read())
     check("D4 seq badge labels", "'text-field': ['to-string', ['get', 'seq']]" in appjs)
@@ -478,6 +478,10 @@ def test_web_assets():
     check("manual grab save helper", "_save_field_position" in main_src)
     check("install persist on commit", "_persist_shift(quiet=True)" in commit_src and "Tap Next" in commit_src)
     check("route on map plan", "_route_for_map(preview" in main_src)
+    from core import route_sections
+    check("two-map route sections", callable(route_sections.merge_section_order)
+          and callable(route_sections.preserve_other_section_orders))
+    check("map cycle controls", "_cycle_map_next" in main_src and "btn_map_next" in main_src)
     from ui.simple_mode import BUILD_LABEL, SIMPLE_MODE
     check("simple mode default", SIMPLE_MODE)
     check("simple build label", BUILD_LABEL == "Build")

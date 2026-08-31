@@ -1,13 +1,14 @@
-"""Prefix Week 24 Day 1 Cam 3 CSVs with TFC site numbers.
+"""Prefix Week 24 Day 1 Cam 3 CSVs with TFC site + direction.
 
 CSV names are Traficam serials (e.g. 001712-118.60min.csv). TFC Day 1 rows
-with Notes = cam 3 map serial -> site. Writes 3997-001712-118.60min.csv.
+with Notes = cam 3 map serial -> site + n/e. Writes 3997e-001712-118.60min.csv.
 
 Default folder: C:\\Users\\isaac\\Downloads\\WEEK 24 1
 Does not modify the source week-24-ig folder.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -30,40 +31,48 @@ def _cell_id(v) -> str:
 
 
 def load_cam3_serial_to_site(tfc: Path) -> dict[str, str]:
-    """serial string (as on TFC / filename) -> site id, Day 1 cam 3 only."""
+    """serial -> '{site}{n|e}' tag from Day 1 cam 3 TFC rows."""
     wb = openpyxl.load_workbook(tfc, data_only=True)
     if DAY1_SHEET not in wb.sheetnames:
         raise ValueError(f"missing sheet {DAY1_SHEET!r}; have {wb.sheetnames}")
     ws = wb[DAY1_SHEET]
     mapping: dict[str, str] = {}
+    missing_dir: list[str] = []
     for row in range(2, ws.max_row + 1):
         notes = str(ws.cell(row, 6).value or "").strip().lower()
         if "cam 3" not in notes:
             continue
         site = _cell_id(ws.cell(row, 2).value)
         serial = _cell_id(ws.cell(row, 3).value)
+        dirc = str(ws.cell(row, 4).value or "").strip().lower()[:1]
         if not site or not serial:
             continue
-        if serial in mapping and mapping[serial] != site:
-            raise ValueError(f"serial {serial} maps to both {mapping[serial]} and {site}")
-        mapping[serial] = site
+        if dirc not in {"n", "e"}:
+            missing_dir.append(f"site {site} serial {serial} dir={dirc!r}")
+            continue
+        tag = f"{site}{dirc}"
+        if serial in mapping and mapping[serial] != tag:
+            raise ValueError(f"serial {serial} maps to both {mapping[serial]} and {tag}")
+        mapping[serial] = tag
+    if missing_dir:
+        raise ValueError("cam 3 rows missing n/e direction: " + "; ".join(missing_dir))
     return mapping
 
 
 def file_serial(name: str) -> str | None:
-    """Leading serial from 001712-118.60min.csv or already-prefixed 3997-001712-...."""
-    stem = name
-    if stem.lower().endswith(".csv"):
-        stem = stem[:-4]
+    """Serial from 001712-…, 3997-001712-…, or 3997e-001712-…."""
+    stem = name[:-4] if name.lower().endswith(".csv") else name
     if not stem:
         return None
     first = stem.split("-", 1)[0]
     if first.isdigit() and len(first) >= 6:
         return first
-    # already prefixed: SITE-SERIAL-rest
-    parts = stem.split("-")
-    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit() and len(parts[1]) >= 6:
-        return parts[1]
+    m = re.match(r"^(\d{3,5})[nsew]?-(.+)$", stem, re.I)
+    if not m:
+        return None
+    rest_first = m.group(2).split("-", 1)[0]
+    if rest_first.isdigit() and len(rest_first) >= 6:
+        return rest_first
     return None
 
 
@@ -71,21 +80,15 @@ def dest_name(name: str, serial_to_site: dict[str, str]) -> str | None:
     serial = file_serial(name)
     if not serial:
         return None
-    site = serial_to_site.get(serial)
-    if not site:
+    tag = serial_to_site.get(serial)
+    if not tag:
         return None
-    prefix = f"{site}-"
+    prefix = f"{tag}-"
     if name.startswith(prefix):
         return name
-    # strip a wrong/old site prefix if present
-    parts = name.split("-", 1)
-    if (
-        len(parts) == 2
-        and parts[0].isdigit()
-        and len(parts[0]) <= 5
-        and parts[1].startswith(serial)
-    ):
-        return prefix + parts[1]
+    m = re.match(r"^\d{3,5}[nsew]?-(.+)$", name, re.I)
+    if m and m.group(1).startswith(serial):
+        return prefix + m.group(1)
     return prefix + name
 
 

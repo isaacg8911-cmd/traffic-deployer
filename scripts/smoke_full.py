@@ -299,6 +299,8 @@ def test_web_assets():
     check("numbered stop layers", "stop-label" in appjs and "stop-circle" in appjs)
     check("numbered site begin/end dots", "site-begin-label" in appjs and "site-end-label" in appjs)
     check("install pins palette", "COLOR_INSTALL" in appjs and "COLOR_SEGMENT" in appjs)
+    _fp = appjs.split("function fieldPinColor")[1].split("function clearFieldPinMarker")[0]
+    check("gps field pin green", "#43a047" in _fp and "#1565c0" not in _fp)
     check("segment chords not route traces", "SHOW_SEGMENT_CHORDS" in appjs and "SHOW_TRACE_LINES = false" in appjs)
     check("pick route map banner", "pick-banner" in idx and "pick_prompt" in appjs)
     check("drive route map banner", "drive-banner" in idx and "resolveRouteLine" in appjs)

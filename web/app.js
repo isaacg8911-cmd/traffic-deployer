@@ -190,7 +190,7 @@
   }
 
   function fieldPinColor(source) {
-    return source === 'manual' ? '#e65100' : '#1565c0';
+    return source === 'manual' ? '#e65100' : '#43a047';
   }
 
   function clearFieldPinMarker() {
@@ -208,23 +208,24 @@
       fieldPinMarker.remove();
       fieldPinMarker = null;
     }
-    if (!draggable) return;
     fieldPinMarker = new maplibregl.Marker({
       color: fieldPinColor(src),
-      draggable: true,
+      draggable: draggable,
       scale: 1.15
     }).setLngLat([lon, lat]).addTo(map);
     fieldPinMarker._tdLat = lat;
     fieldPinMarker._tdLon = lon;
     fieldPinMarker._tdSource = src;
-    fieldPinMarker._tdDraggable = true;
+    fieldPinMarker._tdDraggable = draggable;
     fieldPinMarker._tdUid = opts.uid || '';
     fieldPinMarker._tdSiteId = opts.siteId != null ? String(opts.siteId) : '';
-    fieldPinMarker.on('dragend', function () {
-      var ll = fieldPinMarker.getLngLat();
-      fieldPinMarker._tdLat = ll.lat;
-      fieldPinMarker._tdLon = ll.lng;
-    });
+    if (draggable) {
+      fieldPinMarker.on('dragend', function () {
+        var ll = fieldPinMarker.getLngLat();
+        fieldPinMarker._tdLat = ll.lat;
+        fieldPinMarker._tdLon = ll.lng;
+      });
+    }
     var el = fieldPinMarker.getElement();
     if (el && !el._tdClickBound) {
       el._tdClickBound = true;
@@ -255,13 +256,9 @@
     }
     var src = stop.field_coord_source || stop.field_source || 'gps';
     var draggable = state.map_mode === 'manual_grab';
-    if (!draggable) {
-      clearFieldPinMarker();
-      return;
-    }
     placeFieldPin(stop.field_lat, stop.field_lon, {
       source: src,
-      draggable: true,
+      draggable: draggable,
       uid: stop.uid,
       siteId: stop.id
     });
@@ -960,9 +957,8 @@
       }
       if (s.field_lat != null && s.field_lon != null) {
         var fsrc = s.field_coord_source || s.field_source || 'gps';
-        var hideForDrag = state.map_mode === 'manual_grab' &&
-          state.current_uid && s.uid === state.current_uid && state.on_install;
-        if (!hideForDrag) {
+        var hideForPin = state.on_install && state.current_uid && s.uid === state.current_uid;
+        if (!hideForPin) {
           var installSeq = picking ? dotLabel : stopSeqLabel(s, i, picking, pickIdx);
           var instStatus = stopStatus(s);
           registerFanAnchor(s.field_lat, s.field_lon, function (la, lo) {

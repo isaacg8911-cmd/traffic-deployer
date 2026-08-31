@@ -520,7 +520,7 @@ class InstallControllerMixin:
             self.lbl_grab.setText(f"Field GPS: {float(fl):.5f}, {float(fo):.5f}  ({sats} sats)")
             self.statusBar().showMessage(
                 f"Site {self.state.stops[self.current_index].get('id', '?')} "
-                f"GPS grabbed — blue pin on map (green dot is you driving).", 8000)
+                f"GPS grabbed — green pin on map (green dot is you driving).", 8000)
 
     def _commit_install(self, installed: bool):
         if not self.state.stops or self.current_index >= len(self.state.stops):

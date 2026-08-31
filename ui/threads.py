@@ -142,51 +142,6 @@ class MapSetupThread(QThread):
                 self.finished_result.emit({"ok": False, "error": str(exc)})
 
 
-class PicocountThread(QThread):
-    """PicoCount 2500 serial ops off the UI thread (paced protocol)."""
-    finished_result = Signal(dict)
-
-    def __init__(self, operation: str, **kwargs):
-        super().__init__()
-        self.operation = operation
-        self.kwargs = kwargs
-
-    def run(self):
-        if self.isInterruptionRequested():
-            return
-        from core import picocount
-        op = self.operation
-        port = self.kwargs.get("port")
-        try:
-            if op == "probe":
-                self.finished_result.emit(picocount.read_counter_status(port))
-            elif op == "serial":
-                self.finished_result.emit(picocount.read_serial_number(port))
-            elif op == "clear_configure":
-                self.finished_result.emit(
-                    picocount.clear_and_configure(
-                        self.kwargs["unit_id"], port=port))
-            elif op == "rename":
-                self.finished_result.emit(
-                    picocount.rename_unit_id(
-                        self.kwargs["unit_id"], port=port))
-            elif op == "memory":
-                self.finished_result.emit(picocount.read_counter_status(port))
-            elif op == "download":
-                self.finished_result.emit(
-                    picocount.download_study(
-                        self.kwargs["dest_path"],
-                        port=port,
-                        meta=self.kwargs.get("meta"),
-                    ))
-            else:
-                self.finished_result.emit(
-                    {"ok": False, "error": f"Unknown picocount op: {op}"})
-        except Exception as exc:  # noqa: BLE001
-            if not self.isInterruptionRequested():
-                self.finished_result.emit({"ok": False, "error": str(exc)})
-
-
 class RouteApplyPickThread(QThread):
     """Apply manual pick order + trace route off the UI thread."""
     finished_result = Signal(dict)

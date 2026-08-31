@@ -11,9 +11,9 @@ BUILD_LABEL = "Build" if SIMPLE_MODE else "PLAN ROUTE — pick stop order"
 
 # Field shell: after READY FOR OFFLINE, hide Setup (home-only tools).
 FIELD_SHELL = SIMPLE_MODE
-FIELD_NAV_INDICES = (1, 2, 3, 4)  # Route, Install, Pickup, Audit (Setup + Fleet are desk-only)
+FIELD_NAV_INDICES = (1, 2, 3, 4)  # Route, Install, Pickup, Audit (Setup is desk-only)
 
-# D3: hide Fleet nav until field basics are solid — code stays, tab not in main path.
+# D3: Fleet / counter-read tab removed — TrafficViewer owns counter USB.
 FLEET_NAV_ENABLED = False
 
 # Battery + bridge throttle (SwiftShader map is CPU-heavy — fewer JS pushes help).

@@ -12,19 +12,16 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QProgressDialog,
-    QTableWidgetItem,
 )
 
 import gps_reader
 import road_router
-from core import auto_updater, connectivity, counter_inventory, crash_log, field_alerts, geo, ingest, setup_network
+from core import auto_updater, connectivity, crash_log, field_alerts, geo, ingest, setup_network
 from core.field_ready import check_all
 from core.offline_gate import evaluate as offline_gate_eval
 from core.setup_checklist import evaluate as setup_checklist_eval
 from core.setup_checklist import route_summary as build_route_summary
 from core.state import RouteState
-from ui.counter_ui import apply_counter_panel_connected, apply_volt_check, battery_cell_text
-from ui.page_indices import PAGE_INVENTORY
 from ui.paths import APP_DIR, DATA_DIR, IS_PORTABLE, LAUNCH_HINT
 from ui.setup_wizard import SetupWizard
 from ui.simple_mode import BUILD_LABEL, COMPACT_UI
@@ -244,39 +241,18 @@ class SetupControllerMixin:
         self._refresh_field_strip_ui()
 
     def _refresh_field_alerts(self) -> None:
-        text = field_alerts.pickup_reminder_text(self.state.stops)
-        for attr in ("lbl_pickup_reminder", "lbl_download_reminder"):
-            lbl = getattr(self, attr, None)
-            if lbl is None:
-                continue
-            if text:
-                lbl.setText(text)
-                lbl.show()
-            else:
-                lbl.setText("")
-                lbl.hide()
+        return
 
     def _counter_auto_connect(self) -> None:
-        """One-shot connect when opening Install — skips if already live."""
-        if self.pages.currentIndex() != 2:
-            return
-        if self._counter_connected:
-            return
-        if self._picocount_thread and self._picocount_thread.isRunning():
-            return
-        if not self._counter_selected_port():
-            return
-        self._counter_refresh_and_connect()
+        """No-op — counter USB is handled in vendor software, not this app."""
+        return
 
     def _maybe_export_nudge(self) -> None:
         if self._export_nudge_shown or not field_alerts.shift_closed(self.state.stops):
             return
         self._export_nudge_shown = True
         total = len(self.state.stops)
-        dl = field_alerts.pending_download_count(self.state.stops)
         body = f"All {total} stops are installed or skipped."
-        if dl:
-            body += f"\n\n{dl} counter download(s) still pending — use Pickup tab."
         body += "\n\nExport shift handoff now?\n(IG TFC Excel + Map 1 & 2 .est)"
         box = QMessageBox(self)
         box.setWindowTitle("Shift complete")
@@ -577,78 +553,18 @@ class SetupControllerMixin:
 
     def _set_counter_connected_ui(self, connected: bool) -> None:
         self._counter_connected = connected
-        apply_counter_panel_connected(getattr(self, "counter_panel", None), connected)
-        if hasattr(self, "lbl_counter_connected"):
-            if connected:
-                self.lbl_counter_connected.show()
-            else:
-                self.lbl_counter_connected.hide()
-        if not connected and hasattr(self, "lbl_counter_volts"):
-            self.lbl_counter_volts.hide()
 
     def _refresh_counter_inventory(self) -> None:
-        if not hasattr(self, "table_counter_inventory"):
-            return
-        if self.pages.currentIndex() != PAGE_INVENTORY:
-            return
-        rows = counter_inventory.build_rows(self.state.stops)
-        summary = counter_inventory.inventory_summary(self.state.stops)
-        tbl = self.table_counter_inventory
-        tbl.setRowCount(len(rows))
-        for i, row in enumerate(rows):
-            mem = row.get("memory_label") or ""
-            if not mem and row.get("memory_bytes"):
-                mem = f"~{int(row['memory_bytes']):,} bytes"
-            vals = [
-                row.get("serial_number") or "—",
-                battery_cell_text(row.get("battery_volts")),
-                row.get("unit_id") or "—",
-                row.get("shift_status") or "In stock",
-                mem or "—",
-                row.get("last_seen_at") or row.get("shift_updated_at") or "—",
-            ]
-            for j, text in enumerate(vals):
-                tbl.setItem(i, j, QTableWidgetItem(str(text)))
-        parts = [f"{summary['total']} unit(s) tracked"]
-        if summary["deployed"]:
-            parts.append(f"{summary['deployed']} deployed")
-        if summary["needs_download"]:
-            parts.append(f"{summary['needs_download']} need download")
-        if summary["low_battery"]:
-            parts.append(f"{summary['low_battery']} low battery")
-        self.lbl_inventory_summary.setText(" · ".join(parts))
+        return
 
     def _counter_inventory_usb(self, res: dict, *, event: str = "usb") -> None:
-        rec = counter_inventory.record_usb(res, event=event)
-        if not rec:
-            return
-        counter_inventory.sync_from_shift(self.state.stops)
-        if self.pages.currentIndex() == PAGE_INVENTORY and hasattr(self, "lbl_inventory_live"):
-            apply_volt_check(
-                self.lbl_inventory_live,
-                rec.get("battery_volts"),
-                serial=str(rec.get("serial_number") or ""),
-            )
-            self._refresh_counter_inventory()
+        return
 
     def _counter_inventory_shift(self) -> None:
-        counter_inventory.sync_from_shift(self.state.stops)
-        if self.pages.currentIndex() == PAGE_INVENTORY:
-            self._refresh_counter_inventory()
+        return
 
     def _update_counter_volts(self, res: dict | None) -> None:
-        if not hasattr(self, "lbl_counter_volts"):
-            return
-        if not res or not res.get("ok"):
-            self.lbl_counter_volts.hide()
-            return
-        sn = str(res.get("serial_number") or "").strip()
-        apply_volt_check(
-            self.lbl_counter_volts,
-            res.get("battery_volts"),
-            serial=sn,
-        )
-        self.lbl_counter_volts.show()
+        return
 
     def _persist_shift(self, note: str = "", quiet: bool = False):
         self.state.current_index = self.current_index

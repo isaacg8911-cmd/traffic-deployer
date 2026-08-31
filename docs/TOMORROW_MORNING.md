@@ -21,23 +21,22 @@ One session (~45 min). Forge already ran **PROVE** overnight; you confirm on the
 | Route order window | Picks list updates; drag to reorder |
 | **READY FOR OFFLINE** | Checklist all green |
 
-## PicoCount (Install)
+## PicoCount (TrafficViewer — not this app)
 
-1. Plug USB download cable → **Refresh** ports → **Connect** (green status chip).
-2. **Read serial** → Serial # fills on form.
-3. **Clear & set ID** only when starting a **new** study at that site (confirms dialog).
-4. Complete **Grab GPS**, street, **INSTALL**.
+Connect, clear, and download counters in **TrafficViewer**. This app tracks the site (GPS, serial you type, INSTALL / SECURED).
+
+1. Type **Serial #** on the Install form (from the unit or TrafficViewer).
+2. **Grab GPS**, street, **INSTALL**.
 
 ## Drive + Pickup
 
 - **START DRIVING** — voice/banner, map follow.
-- **Pickup** — **SECURED** per site; **Download counter data** when study is done (needs counts in counter).
-- If download says empty: run a study on the counter first, or counter was cleared.
+- **Pickup** — **SECURED** per site. Download counts in **TrafficViewer**.
 
 ## Audit
 
-- **Refresh shift summary** — should mention PicoCount counts if configured.
-- **Export Excel** — columns include `CounterUnitID`, `CounterSerial`, `CounterCleared`, `CounterDownload`.
+- **Refresh shift summary**
+- **Export Excel** — install/pickup columns. Volume/count files come from TrafficViewer.
 
 ## Paste to Forge after field test
 

@@ -48,7 +48,7 @@ from another PC).
 On Route: colored **zones**, route summary, **Move stop up/down** + **Re-trace route only**,
 field strip with **next-stop distance**, **Recover map** if the canvas goes blank.
 Install tab: **Attach install photo** (saved under `tds_data/field_photos/`).
-Audit tab: **shift summary** + export (includes **PicoCount** columns in Excel).
+Audit tab: **shift summary** + export.
 
 **Before a field day:** see **[docs/TOMORROW_MORNING.md](docs/TOMORROW_MORNING.md)** for the 5 AM checklist.  
 **Proof overnight:** `PROVE.bat` (smoke + demo + golden + benchmark + optional counter sandbox).
@@ -70,12 +70,8 @@ Audit tab: **shift summary** + export (includes **PicoCount** columns in Excel).
    themes). Zoom to neighborhood level for street names. If labels are still sparse,
    re-run `python setup_maps.py` once (wifi) to refresh tiles at zoom 16 + fonts.
 4. **START DRIVING** - turn-by-turn banner + offline voice (female Windows guide). Light blue line to the next stop only.
-5. **Install tab** - per stop: **PicoCount 2500 (USB)** — **Connect**, **Read serial**
-   (auto-fills Serial # when empty), **Clear & set ID** (clears counter + sets Unit ID
-   like `1234nc1b` from site + N/E direction + `c1b`). Then **Grab GPS Here**, compass,
-   lanes, **INSTALL** or **SKIP**.
-6. **Pickup tab** - mark each site **SECURED**; **Download counter data** saves the study to
-   `tds_data/counter_downloads/<profile>/` (`.pcbin` + `.json` sidecar).
+5. **Install tab** — per stop: street, direction, lanes, **Serial #** (type it), **Grab GPS** / drop pin, then **INSTALL** or **SKIP**. Counter USB (connect, clear, download) is **TrafficViewer**, not this app.
+6. **Pickup tab** — mark each site **SECURED**. Download counts in **TrafficViewer**.
 7. **Audit tab** - it flags missing data, then exports the **Excel** (or CSV) report.
 
 ## Live GPS tracing

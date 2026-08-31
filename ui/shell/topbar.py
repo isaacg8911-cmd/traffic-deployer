@@ -17,12 +17,11 @@ from PySide6.QtWidgets import (
 )
 
 import road_router
-from core import counter_inventory
 from core.field_ready import check_all
 from ui import workflow as setup_workflow
-from ui.page_indices import NAV_PAGE_COUNT, PAGE_INVENTORY
+from ui.page_indices import NAV_PAGE_COUNT
 from ui.paths import APP_DIR, DATA_DIR, IS_PORTABLE
-from ui.simple_mode import COMPACT_UI, FIELD_NAV_INDICES, FIELD_SHELL, FLEET_NAV_ENABLED, HIDE_PANEL_THEMES, SIMPLE_MODE
+from ui.simple_mode import COMPACT_UI, FIELD_NAV_INDICES, FIELD_SHELL, HIDE_PANEL_THEMES, SIMPLE_MODE
 from ui.status_style import apply_status
 from ui.spacing import TOPBAR_CLUSTER_GAP, TOPBAR_PAD_H, TOPBAR_PAD_V
 from ui.threads import SmokeTestThread
@@ -147,8 +146,6 @@ class ShellTopbarMixin:
         )
 
     def _go_page(self, i: int):
-        if not FLEET_NAV_ENABLED and i == PAGE_INVENTORY:
-            return
         if FIELD_SHELL and self.state.offline_mode and i not in FIELD_NAV_INDICES:
             self.statusBar().showMessage(
                 "Field mode — Route, Install, Pickup, Audit. "
@@ -173,16 +170,11 @@ class ShellTopbarMixin:
         elif i == 1:
             self._refresh_route_list()
         elif i == 2:
-            self._counter_list_ports()
             self._refresh_install()
-            QTimer.singleShot(350, self._counter_auto_connect)
         elif i == 3:
             self._refresh_pickup()
         elif i == 4:
             self._refresh_audit()
-        elif i == PAGE_INVENTORY:
-            counter_inventory.sync_from_shift(self.state.stops)
-            self._refresh_counter_inventory()
         self._refresh_field_alerts()
         self._update_right()
         self._push_state()

@@ -83,13 +83,16 @@ def test_export_audit_counter():
         "id": 12,
         "installed": True,
         "picked_up": True,
-        "counter_unit_id": "1234nc1b",
         "serial": "x",
         "street": "Main",
     }]
     r = export.audit(stops)
-    check("audit flags missing counter download", not r["ok"])
-    check("audit counter download msg", any("download" in m.lower() for m in r["missing"]))
+    check("audit ok without counter download", r["ok"])
+    check("audit no download gap", not any("download" in m.lower() for m in r["missing"]))
+    r2 = export.audit([{
+        "id": 1, "installed": True, "street": "Main",
+    }])
+    check("audit flags missing serial", not r2["ok"] and any("serial" in m.lower() for m in r2["missing"]))
 
 
 def test_shift_summary():
@@ -99,10 +102,11 @@ def test_shift_summary():
     s = summarize([], None)
     check("empty shift", s["installed"] == 0 and "No stops" in s["text"])
     s2 = summarize(
-        [{"installed": True, "counter_unit_id": "1234nc1b", "counter_download_path": "x.pcbin"}],
+        [{"installed": True, "picked_up": True}],
         {"miles": 12.0},
     )
-    check("shift counter line", "PicoCount" in s2["text"])
+    check("shift no picocount read line", "PicoCount" not in s2["text"] and "download" not in s2["text"].lower())
+    check("shift pickup line", "Pickup" in s2["text"])
 
 
 def test_validate_merge():
@@ -388,9 +392,9 @@ def test_web_assets():
     from core.picocount import summarize_memory
     empty = summarize_memory({"page_size": 2048, "block_pages": 64, "block_ptr": 0, "page_ptr": 0, "buffer_ptr": 0})
     check("counter memory empty", empty.get("empty") and empty.get("bytes") == 0)
-    check("picocount UI autoname", "btn_counter_autoname" in main_src and "_counter_autoname" in main_src)
-    check("counter data label", "lbl_counter_data" in main_src and "_counter_show_memory" in main_src)
-    check("counter connected pill", "counterConnectedPill" in main_src and "_set_counter_connected_ui" in main_src)
+    check("picocount UI autoname removed", "btn_counter_autoname" not in main_src)
+    check("counter data label removed", "lbl_counter_data" not in main_src)
+    check("counter connected pill removed", "counterConnectedPill" not in main_src)
     check("install counter excel sync", "_sync_counter_fields" in main_src)
     from core.export import _row
     ex = _row({
@@ -404,7 +408,7 @@ def test_web_assets():
     from core import install_checklist as ic
     items = ic.checklist_for_stop({
         "field_lat": 33.0, "field_lon": -118.0,
-        "counter_cleared_at": "12:00", "serial": "PC99",
+        "serial": "PC99",
     })
     check("checklist all ready", ic.all_ready(items))
     dup = ic.find_duplicate_serial(
@@ -414,9 +418,9 @@ def test_web_assets():
     check("duplicate serial detect", dup is not None and dup["uid"] == "b")
     check("no install photo ui", "Attach photo" not in main_src and "_attach_install_photo" not in main_src)
     from core import field_alerts as fa
-    check("pickup reminder", fa.pending_download_count([
+    check("pickup reminder off", fa.pickup_reminder_text([
         {"installed": True, "counter_unit_id": "1234nc1b"},
-    ]) == 1)
+    ]) == "")
     check("shift closed", fa.shift_closed([{"installed": True}, {"skipped": True}]))
     from core import install_checklist as ic2
     check("install block reason", ic2.install_block_reason({}) is None)
@@ -425,9 +429,10 @@ def test_web_assets():
         "a", "1234nc1b",
     )
     check("duplicate unit id", uid_dup is not None and uid_dup["uid"] == "b")
-    check("auto counter connect", "_counter_auto_connect" in main_src)
+    check("auto counter connect noop", "_counter_auto_connect" in main_src)
     check("export nudge", "_maybe_export_nudge" in main_src)
-    check("pickup reminder ui", "lbl_pickup_reminder" in main_src)
+    check("pickup reminder ui gone", "lbl_pickup_reminder" not in main_src and "lbl_download_reminder" not in main_src)
+    check("volume csv ui gone", "Volume CSV" not in main_src and "_export_volume_csv" not in main_src)
     check("picocount protocol pdf", protocol_doc_present())
     check("picocount preferred port helper", callable(preferred_counter_port))
     check("picocount counter port filter", callable(counter_ports_labeled))
@@ -435,7 +440,8 @@ def test_web_assets():
     check("map guide when following", '"show_guide": False' in main_src)
     check("no map trace lines", "SHOW_TRACE_LINES = false" in appjs)
     check("pick-first build", '_begin_route_pick(merged)' in main_src)
-    check("fleet nav hidden", "FLEET_NAV_ENABLED = False" in open(os.path.join(ROOT, "ui", "simple_mode.py")).read())
+    check("fleet nav removed", "Fleet" not in open(os.path.join(ROOT, "ui", "shell", "main_layout.py"), encoding="utf-8").read())
+    check("fleet nav flag off", "FLEET_NAV_ENABLED = False" in open(os.path.join(ROOT, "ui", "simple_mode.py")).read())
     check("D4 seq badge labels", "'text-field': ['to-string', ['get', 'seq']]" in appjs)
     check("D5 site click zoom", "_zoom_to_stop_click" in open(os.path.join(ROOT, "ui", "controllers", "map_sync.py")).read())
     check("D6 collocated fan", "spreadCollocated" in appjs and "registerFanAnchor" in appjs)
@@ -448,10 +454,12 @@ def test_web_assets():
     check("counter skips gps in probe", "_is_gps_port" in pc_src and "not _is_gps_port" in pc_src)
     check("counter skips bluetooth in probe", "_is_bluetooth_port" in pc_src and "not _is_bluetooth_port" in pc_src)
     check("counter port helpers", callable(is_gps_port) and callable(is_counter_port) and callable(is_bluetooth_port))
-    check("picocount UI wired", "btn_counter_clear" in main_src and "PicocountThread" in main_src)
-    check("counter refresh connect", "btn_counter_refresh" in main_src and "_counter_refresh_and_connect" in main_src)
-    check("counter gps pause", "_counter_pause_gps" in main_src and "_counter_resume_gps" in main_src)
-    check("counter status chip", "counterStatus" in main_src and "apply_counter_status" in main_src)
+    check("picocount UI removed", "btn_counter_clear" not in main_src and "btn_counter_refresh" not in main_src)
+    check("counter download ui removed", "btn_counter_download" not in main_src)
+    check("picocount thread gone", "class PicocountThread" not in thr_src)
+    check("inventory page gone", "inventory_page" not in main_src)
+    check("counter gps pause helpers kept", "_counter_pause_gps" in main_src and "_counter_resume_gps" in main_src)
+    check("no counter status chip ui", "counterStatus" not in main_src)
     from core import export
     check("export counter columns", "CounterUnitID" in export._EXPORT_COLS)
     from core import map_display
@@ -563,7 +571,7 @@ def test_field_ready():
     check("field_ready score", r["score"] >= 82, f"score={r['score']}")
     check("basemap ok", any(i["id"] == "basemap" and i["ok"] for i in r["items"]))
     check("map server ok", any(i["id"] == "server" and i["ok"] for i in r["items"]))
-    check("picocount doc in readiness", any(i["id"] == "picocount_doc" for i in r["items"]))
+    check("counter usb note in readiness", any(i["id"] == "picocount" for i in r["items"]))
     ok(f"readiness {r['score']}/100 ({r['warn_count']} warn, {r['fail_count']} fail)")
 
 

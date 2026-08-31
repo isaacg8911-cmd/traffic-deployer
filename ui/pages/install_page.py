@@ -1,4 +1,4 @@
-"""Install tab — GPS grab, PicoCount, install capture."""
+"""Install tab — GPS grab, install capture (counter USB via TrafficViewer)."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -16,11 +16,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.counter_ui import apply_counter_status
 from ui.paths import DIRECTIONS
 from ui.simple_mode import COMPACT_UI
 from ui.spacing import apply_card_layout, apply_grid
-from ui.widgets import button_row, numbered_section, page_column, section_group, section_heading
+from ui.widgets import numbered_section, page_column, section_group
 
 
 def build_install_page(win) -> QWidget:
@@ -95,63 +94,7 @@ def build_install_page(win) -> QWidget:
         sec_compass.addLayout(row_comp)
 
     if COMPACT_UI:
-        sec_counter, _ = numbered_section(1, "PicoCount", v)
-        win.counter_panel = None
-    else:
-        sec_counter = section_group("PicoCount", v, object_name="counterPanel")
-        win.counter_panel = sec_counter.parentWidget()
-    win.lbl_counter_connected = QLabel("● CONNECTED")
-    win.lbl_counter_connected.setObjectName("counterConnectedPill")
-    win.lbl_counter_connected.hide()
-    if not COMPACT_UI:
-        sec_counter.addWidget(win.lbl_counter_connected)
-    row_cp = QHBoxLayout()
-    row_cp.addWidget(QLabel("Port"))
-    win.combo_counter_port = QComboBox()
-    win.combo_counter_port.setMinimumWidth(72)
-    row_cp.addWidget(win.combo_counter_port, 1)
-    win.btn_counter_refresh = QPushButton("Refresh")
-    win.btn_counter_refresh.setObjectName("secondary")
-    win.btn_counter_refresh.clicked.connect(win._counter_refresh_and_connect)
-    row_cp.addWidget(win.btn_counter_refresh)
-    win.btn_counter_read = QPushButton("Read serial")
-    win.btn_counter_read.setObjectName("secondary")
-    win.btn_counter_read.setToolTip("Read serial number from counter (USB must be connected)")
-    win.btn_counter_read.clicked.connect(lambda: win._counter_read_serial(auto=False))
-    row_cp.addWidget(win.btn_counter_read)
-    sec_counter.addLayout(row_cp)
-    win.lbl_counter_status = QLabel("Plug USB cable → Refresh")
-    win.lbl_counter_status.setObjectName(
-        "counterStatusCompact" if COMPACT_UI else "counterStatus")
-    win.lbl_counter_status.setWordWrap(True)
-    sec_counter.addWidget(win.lbl_counter_status)
-    win.lbl_counter_unit = QLabel("")
-    win.lbl_counter_unit.setObjectName("hint")
-    if not COMPACT_UI:
-        win.lbl_counter_unit.setWordWrap(True)
-        sec_counter.addWidget(win.lbl_counter_unit)
-    win.lbl_counter_data = QLabel("")
-    win.lbl_counter_data.setObjectName("counterData")
-    win.lbl_counter_data.setWordWrap(True)
-    sec_counter.addWidget(win.lbl_counter_data)
-    win.btn_counter_autoname = QPushButton("Auto-name")
-    win.btn_counter_autoname.setObjectName("secondary")
-    win.btn_counter_autoname.setToolTip("Unit ID only (Site# + n/e + c1b)")
-    win.btn_counter_autoname.clicked.connect(win._counter_autoname)
-    win.btn_counter_clear = QPushButton("Clear counter")
-    win.btn_counter_clear.setObjectName("primary")
-    win.btn_counter_clear.setToolTip("Zero memory + set Unit ID for this site")
-    win.btn_counter_clear.clicked.connect(win._counter_clear_configure)
-    if not COMPACT_UI:
-        button_row(sec_counter, win.btn_counter_autoname, win.btn_counter_clear)
-    else:
-        button_row(sec_counter, win.btn_counter_clear)
-    win._counter_list_ports()
-    apply_counter_status(
-        win.lbl_counter_status, "idle", "Plug USB cable → Refresh")
-
-    if COMPACT_UI:
-        sec_form, _ = numbered_section(2, "Site data", v)
+        sec_form, _ = numbered_section(1, "Site data", v)
     else:
         sec_form = section_group("Site data", v)
     win.txt_street = QLineEdit()
@@ -228,7 +171,7 @@ def build_install_page(win) -> QWidget:
     win.btn_clear_gps.clicked.connect(win._clear_field_gps)
     sec_form.addWidget(win.btn_clear_gps)
 
-    win.lbl_install_checklist = QLabel("○ GPS/pin   ○ Cleared   ○ Serial  (advisory)")
+    win.lbl_install_checklist = QLabel("○ GPS / pin   ○ Serial #  (advisory)")
     win.lbl_install_checklist.setObjectName("installChecklist")
     win.lbl_install_checklist.setWordWrap(True)
     v.addWidget(win.lbl_install_checklist)

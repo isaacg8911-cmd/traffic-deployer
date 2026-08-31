@@ -1,4 +1,4 @@
-"""Pickup page."""
+"""Pickup page — mark sites secured (counter download is TrafficViewer)."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -13,20 +13,13 @@ from PySide6.QtWidgets import (
 )
 
 from ui.simple_mode import COMPACT_UI
+from ui.spacing import apply_row
+from ui.widgets import page_column
 
 
 def build_pickup_page(win) -> QWidget:
-    w = QWidget()
-    v = QVBoxLayout(w)
-    pad = 8 if COMPACT_UI else 16
-    v.setContentsMargins(pad, pad, pad, pad)
-    v.setSpacing(6 if COMPACT_UI else 10)
+    w, v = page_column()
 
-    win.lbl_download_reminder = QLabel("")
-    win.lbl_download_reminder.setObjectName("pickupReminder")
-    win.lbl_download_reminder.setWordWrap(True)
-    win.lbl_download_reminder.hide()
-    v.addWidget(win.lbl_download_reminder)
     win.lbl_pickup_prog = QLabel("")
     win.lbl_pickup_prog.setObjectName("tabContextLine")
     v.addWidget(win.lbl_pickup_prog)
@@ -41,32 +34,17 @@ def build_pickup_page(win) -> QWidget:
     win.lbl_pickup_cur = QLabel("")
     win.lbl_pickup_cur.setObjectName("tabContextLine")
     v.addWidget(win.lbl_pickup_cur)
-    row_actions = QHBoxLayout()
-    row_actions.setSpacing(6)
     b_sec = QPushButton("SECURED")
     b_sec.setObjectName("primary")
     b_sec.clicked.connect(win._mark_pickup)
-    win.btn_counter_download = QPushButton("Download")
-    win.btn_counter_download.setObjectName("secondary")
-    win.btn_counter_download.setEnabled(False)
-    win.btn_counter_download.clicked.connect(win._counter_download_pickup)
-    win.btn_volume_csv = QPushButton("Volume CSV")
-    win.btn_volume_csv.setObjectName("secondary")
-    win.btn_volume_csv.clicked.connect(win._export_volume_csv_pickup)
-    row_actions.addWidget(b_sec, 1)
-    row_actions.addWidget(win.btn_counter_download, 1)
-    row_actions.addWidget(win.btn_volume_csv, 1)
-    v.addLayout(row_actions)
+    v.addWidget(b_sec)
     if COMPACT_UI:
         b_export = QPushButton("Export Excel")
         b_export.setObjectName("secondary")
         b_export.clicked.connect(win._export_excel_quick)
         v.addWidget(b_export)
-    win.lbl_counter_download = QLabel("")
-    win.lbl_counter_download.setObjectName("hint")
-    win.lbl_counter_download.setWordWrap(True)
-    v.addWidget(win.lbl_counter_download)
     row_pick = QHBoxLayout()
+    apply_row(row_pick)
     win.btn_undo_pickup = QPushButton("Undo")
     win.btn_undo_pickup.setEnabled(False)
     win.btn_undo_pickup.clicked.connect(win._undo_last_action)

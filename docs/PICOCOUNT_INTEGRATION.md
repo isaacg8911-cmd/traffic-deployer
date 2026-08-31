@@ -1,8 +1,10 @@
 # PicoCount 2500 — Traffic Deployer integration (spec)
 
+**App status (2026-08-31):** Traffic Deployer **does not** connect, read, or download PicoCount USB. Use **TrafficViewer** for counter USB. This file is historical protocol notes (`core/picocount.py` remains for desk scripts).
+
 **Hardware:** PicoCount 2500 via VehicleCounts USB download adapter (FTDI → COM port, typically **921600** baud).  
 **Protocol:** `docs/PicoCountSerialProtocol.pdf` (VehicleCounts developer PDF — in repo).  
-**Implementation:** `core/picocount.py` — no TrafficViewer Pro install required.
+**Implementation:** `core/picocount.py` — desk/sandbox only; not wired in the field app.
 
 ---
 

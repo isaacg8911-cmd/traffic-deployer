@@ -6,9 +6,9 @@ import os
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
-from core import export, handoff, volume_report
+from core import export, handoff
 from core.shift_summary import summarize as shift_summarize
-from ui.paths import COUNTER_DOWNLOAD_DIR, DATA_DIR
+from ui.paths import DATA_DIR
 
 
 class AuditControllerMixin:
@@ -51,8 +51,6 @@ class AuditControllerMixin:
                 "x" if s.get("installed") else "",
                 "x" if s.get("skipped") else "",
                 "x" if s.get("picked_up") else "",
-                str(s.get("counter_unit_id", "") or ""),
-                str(s.get("counter_serial", "") or ""),
                 gps,
             )
             for j, text in enumerate(cells):
@@ -163,71 +161,6 @@ class AuditControllerMixin:
             with open(path, "w", newline="", encoding="utf-8") as f:
                 f.write(text)
             self._info(f"CSV report saved.\n\n{path}")
-
-    def _export_volume_csv_pickup(self) -> None:
-        items = self._installed_stops()
-        if not items or self.pickup_index >= len(items):
-            self._warn("Select an installed site on Pickup first.")
-            return
-        s = items[self.pickup_index]
-        dl = str(s.get("counter_download_path") or "").strip()
-        if not dl or not os.path.isfile(dl):
-            self._warn(
-                "No counter download for this site.\n\n"
-                "Tap Download counter data first (or pick a .pcbin / .tvp file).")
-            path, _ = QFileDialog.getOpenFileName(
-                self,
-                "Open counter study file",
-                COUNTER_DOWNLOAD_DIR,
-                "Counter study (*.pcbin *.tvp);;All (*.*)",
-            )
-            if not path:
-                return
-            dl = path
-        unit = str(s.get("counter_unit_id") or os.path.splitext(os.path.basename(dl))[0])
-        default = volume_report.default_export_path(DATA_DIR, unit)
-        dest, _ = QFileDialog.getSaveFileName(
-            self, "Save volume CSV", default, "CSV (*.csv)")
-        if not dest:
-            return
-        res = volume_report.write_volume_csv(dl, dest, stop=s)
-        if not res.get("ok"):
-            self._warn(res.get("error", "Volume report failed."))
-            return
-        s["counter_volume_csv"] = res.get("path", dest)
-        self._persist_shift(quiet=True)
-        dirs = res.get("directions", ("", ""))
-        self._info(
-            f"Volume by Lane CSV saved.\n\n{res.get('path')}\n\n"
-            f"{res.get('vehicle_count', 0)} vehicles · {dirs[0]} / {dirs[1]}")
-
-    def _export_volume_csv_all(self) -> None:
-        results = volume_report.volume_reports_for_stops(self.state.stops, DATA_DIR)
-        if not results:
-            self._warn(
-                "No counter downloads on this route.\n\n"
-                "Pickup tab → Download counter data for each site first.")
-            return
-        ok = [r for r in results if r.get("ok")]
-        fail = [r for r in results if not r.get("ok")]
-        for r in ok:
-            for s in self.state.stops:
-                if s.get("id") == r.get("site_id"):
-                    s["counter_volume_csv"] = r.get("path", "")
-                    break
-        if ok:
-            self._persist_shift(quiet=True)
-        lines = [f"Volume CSVs → tds_data/exports/volume/"]
-        for r in ok:
-            lines.append(
-                f"  Site {r.get('site_id')}: {os.path.basename(r.get('path', ''))} "
-                f"({r.get('vehicle_count', 0)} vehicles)")
-        for r in fail:
-            lines.append(f"  Site {r.get('site_id')}: FAILED — {r.get('error')}")
-        if fail and not ok:
-            self._warn("\n".join(lines))
-        else:
-            self._info("\n".join(lines))
 
     def _export_csv_quick(self):
         text = export.to_csv_text(self.state.stops)

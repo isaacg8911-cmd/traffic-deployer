@@ -31,12 +31,6 @@ def build_route_page(win) -> QWidget:
     win.lbl_field_strip = QLabel("")
     win.lbl_field_strip.hide()
 
-    win.lbl_pickup_reminder = QLabel("")
-    win.lbl_pickup_reminder.setObjectName("pickupReminder")
-    win.lbl_pickup_reminder.setWordWrap(True)
-    win.lbl_pickup_reminder.hide()
-    v.addWidget(win.lbl_pickup_reminder)
-
     win.lbl_drive_banner = QLabel("")
     win.lbl_drive_banner.setWordWrap(True)
     win.lbl_drive_banner.setObjectName("driveBanner")

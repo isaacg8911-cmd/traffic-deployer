@@ -1,6 +1,7 @@
 """Week 24 data trim: Day 1 through Sat 2026-08-29 09:00; Day 2 window 8/25-8/28.
 
-Writes original filenames into C:\\Users\\isaac\\Downloads\\WEEK 24 1.
+Writes into C:\\Users\\isaac\\Downloads\\WEEK 24 1.
+Day 1 Cam 3 60min CSVs are prefixed with TFC site (3997-001712-....csv).
 Does not modify source files. TVP rewrite uses the proven method:
 patch stream length, patch PicoCount clocks, truncate (never zero-pad).
 """
@@ -15,9 +16,14 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1]
+SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP))
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 from core import picocount_hits  # noqa: E402
+from week24_rename_cam3 import dest_name as cam3_dest_name  # noqa: E402
+from week24_rename_cam3 import load_cam3_serial_to_site  # noqa: E402
 
 SRC = Path(r"C:\Users\isaac\Downloads\week 24 ig (2)\week 24 ig")
 OUT = Path(r"C:\Users\isaac\Downloads\WEEK 24 1")
@@ -765,16 +771,23 @@ def main() -> int:
     ]
     errors: list[str] = []
     n_ok = 0
+    tfc = SRC / "Week 24 IG TFC.xlsx"
+    cam3_map = load_cam3_serial_to_site(tfc) if tfc.is_file() else {}
     for src in sorted(SRC.iterdir()):
         if not src.is_file():
             continue
         kind = classify(src)
         if not kind:
             continue
-        dst = OUT / src.name
+        typ, day = kind
+        out_name = src.name
+        if typ == "csv60" and cam3_map:
+            prefixed = cam3_dest_name(src.name, cam3_map)
+            if prefixed:
+                out_name = prefixed
+        dst = OUT / out_name
         try:
-            typ, day = kind
-            print(f"processing {src.name} {typ} {day}", flush=True)
+            print(f"processing {src.name} {typ} {day} -> {out_name}", flush=True)
             if typ == "tvp":
                 process_tvp(src, dst, day, lines)
             elif typ == "csv60":

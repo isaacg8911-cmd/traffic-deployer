@@ -127,6 +127,11 @@ def test_validate_merge():
     m = ingest.merge_stop_progress(old, fresh)
     check("merge keeps install + field GPS", m["installed"] and m["field_lat"] == 33.776)
     check("merge keeps street name", m["street"] == "Main St")
+    cols = ["Site ID", "END LAT", "END LON", "LAT", "LON"]
+    b_lat = ingest._find_col(
+        cols, ("begin", "lat"), ("lat",), exclude_any=("end", "finish"))
+    e_lat = ingest._find_col(cols, ("end", "lat"))
+    check("begin col skips END LAT", b_lat == "LAT" and e_lat == "END LAT")
 
 
 def test_persistence():
@@ -255,6 +260,11 @@ def test_demo_data():
     cfgs = [{"path": demo_est, "label": "DemoDay"}]
     stops = ingest.match_est_files(cfgs, sites, (33.7715, -117.9431))
     check("demo est match", len(stops) >= 5, f"matched {len(stops)}")
+    s0 = next(iter(sites.values()))
+    check(
+        "demo begin != end",
+        abs(s0["begin_lat"] - s0["end_lat"]) > 1e-6 or abs(s0["begin_lon"] - s0["end_lon"]) > 1e-6,
+    )
 
 
 def test_web_assets():
@@ -298,6 +308,8 @@ def test_web_assets():
     check("stop marker source", "stop-markers" in appjs)
     check("numbered stop layers", "stop-label" in appjs and "stop-circle" in appjs)
     check("numbered site begin/end dots", "site-begin-label" in appjs and "site-end-label" in appjs)
+    check("pick beg/end labels", "picking ? 'beg'" in appjs and "picking ? 'end'" in appjs)
+    check("pick fan begin vs end", "uid) + ':begin'" in appjs and "uid) + ':end'" in appjs)
     check("install pins palette", "COLOR_INSTALL" in appjs and "COLOR_SEGMENT" in appjs)
     _fp = appjs.split("function fieldPinColor")[1].split("function clearFieldPinMarker")[0]
     check("gps field pin green", "#43a047" in _fp and "#1565c0" not in _fp)

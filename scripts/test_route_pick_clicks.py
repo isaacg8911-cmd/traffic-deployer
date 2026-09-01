@@ -41,6 +41,9 @@ def test_js_assets() -> None:
         "pickHitPad",
         "showPickTargets",
         "lastState.map_mode === 'pick'",
+        "picking ? 'beg'",
+        "picking ? 'end'",
+        "uid) + ':begin'",
     ):
         ok(needle) if needle in appjs else fail(f"missing {needle}")
 

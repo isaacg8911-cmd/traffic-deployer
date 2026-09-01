@@ -65,11 +65,13 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _find_col(cols, *needle_sets):
+def _find_col(cols, *needle_sets, exclude_any: tuple[str, ...] = ()):
     """Return the first column whose lowercased name contains ALL needles in any set."""
     low = [(c, str(c).lower()) for c in cols]
     for needles in needle_sets:
         for c, name in low:
+            if exclude_any and any(x in name for x in exclude_any):
+                continue
             if all(n in name for n in needles):
                 return c
     return None
@@ -121,8 +123,12 @@ def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
                 continue
             cols = list(df.columns)
             id_col = _find_col(cols, ("tds",), ("site",), ("id",)) or cols[0]
-            b_lat = _find_col(cols, ("begin", "lat"), ("start", "lat"), ("lat",))
-            b_lon = _find_col(cols, ("begin", "lon"), ("start", "lon"), ("lon",), ("lng",))
+            b_lat = _find_col(
+                cols, ("begin", "lat"), ("start", "lat"), ("beg", "lat"), ("lat",),
+                exclude_any=("end", "finish"))
+            b_lon = _find_col(
+                cols, ("begin", "lon"), ("start", "lon"), ("beg", "lon"), ("lon",), ("lng",),
+                exclude_any=("end", "finish"))
             e_lat = _find_col(cols, ("end", "lat"), ("finish", "lat"))
             e_lon = _find_col(cols, ("end", "lon"), ("finish", "lon"), ("end", "lng"))
             street_col = _find_col(cols, ("street",), ("road",), ("name",))

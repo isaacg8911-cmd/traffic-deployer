@@ -642,11 +642,15 @@
       map.addSource('pick-targets', { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: 'pick-target-circle', type: 'circle', source: 'pick-targets',
         paint: {
-          'circle-radius': DOT_R,
-          'circle-color': '#f57c00',
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 12, 16, 14],
+          'circle-color': [
+            'case',
+            ['==', ['get', 'kind'], 'end'], COLOR_END,
+            COLOR_BEGIN
+          ],
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 1.5,
-          'circle-opacity': 0.96
+          'circle-stroke-width': 2,
+          'circle-opacity': 0.2
         } });
       map.addLayer({ id: 'pick-target-label', type: 'symbol', source: 'pick-targets',
         layout: {
@@ -922,15 +926,26 @@
     var pickLetters = state.pick_letters || {};
     var segs = [], pts = [], stops = [], installs = [], pickTargets = [];
     var fanAnchors = {};
-    function registerFanAnchor(lat, lon, applyFn) {
+    function registerFanAnchor(lat, lon, applyFn, slot) {
       if (lat == null || lon == null) return;
-      var key = lat.toFixed(6) + ',' + lon.toFixed(6);
-      if (!fanAnchors[key]) fanAnchors[key] = { lat: lat, lon: lon, applies: [] };
+      // Slot keeps begin vs end as separate anchors even when Excel coords match
+      // (otherwise both applies share one lat/lon and you only see one dot).
+      var key = Number(lat).toFixed(6) + ',' + Number(lon).toFixed(6);
+      if (slot) key += '|' + slot;
+      if (!fanAnchors[key]) fanAnchors[key] = { lat: Number(lat), lon: Number(lon), applies: [] };
       fanAnchors[key].applies.push(applyFn);
     }
     (state.stops || []).forEach(function (s, i) {
       var bLat = s.begin_lat, bLon = s.begin_lon, eLat = s.end_lat, eLon = s.end_lon;
-      if (bLat == null || bLon == null || eLat == null || eLon == null) return;
+      if (bLat == null || bLon == null) {
+        bLat = s.lat;
+        bLon = s.lon;
+      }
+      if (eLat == null || eLon == null) {
+        eLat = bLat;
+        eLon = bLon;
+      }
+      if (bLat == null || bLon == null) return;
       // Cheap 2-point chords only (not long road-snapped segment_path).
       var coords = [[bLon, bLat], [eLon, eLat]];
       var dotLabel = siteDotLabel(s, i, picking, pickLetters);
@@ -938,21 +953,25 @@
       segs.push({ type: 'Feature', properties: { seq: picking ? dotLabel : (s.seq || (i + 1)) },
                   geometry: { type: 'LineString', coordinates: coords } });
       if (!alreadyPicked) {
-        var ptProps = { kind: 'begin', uid: s.uid, seq: dotLabel, site_id: siteIdLabel(s, i) };
+        var beginSlot = String(s.uid) + ':begin';
+        var endSlot = String(s.uid) + ':end';
+        var beginSeq = picking ? 'beg' : dotLabel;
+        var endSeq = picking ? 'end' : dotLabel;
+        var ptProps = { kind: 'begin', uid: s.uid, seq: beginSeq, site_id: siteIdLabel(s, i) };
         registerFanAnchor(bLat, bLon, function (la, lo) {
           pts.push(pt(la, lo, ptProps));
-        });
-        var endProps = Object.assign({}, ptProps, { kind: 'end' });
+        }, beginSlot);
+        var endProps = { kind: 'end', uid: s.uid, seq: endSeq, site_id: siteIdLabel(s, i) };
         registerFanAnchor(eLat, eLon, function (la, lo) {
           pts.push(pt(la, lo, endProps));
-        });
+        }, endSlot);
         if (picking) {
           registerFanAnchor(bLat, bLon, function (la, lo) {
-            pickTargets.push(pt(la, lo, { kind: 'begin', uid: s.uid, label: dotLabel }));
-          });
+            pickTargets.push(pt(la, lo, { kind: 'begin', uid: s.uid, label: 'beg' }));
+          }, beginSlot);
           registerFanAnchor(eLat, eLon, function (la, lo) {
-            pickTargets.push(pt(la, lo, { kind: 'end', uid: s.uid, label: dotLabel }));
-          });
+            pickTargets.push(pt(la, lo, { kind: 'end', uid: s.uid, label: 'end' }));
+          }, endSlot);
         }
       }
       if (s.field_lat != null && s.field_lon != null) {
@@ -1018,7 +1037,8 @@
     setLayerVis('site-end-label', hasSites && picking);
     var showPickTargets = picking && pickTargets.length > 0;
     setLayerVis('pick-target-circle', showPickTargets);
-    setLayerVis('pick-target-label', showPickTargets);
+    // Hit pad only — beg/end text lives on the blue/red site dots.
+    setLayerVis('pick-target-label', false);
     setLayerVis('stop-circle', (showStops || picking) && stops.length > 0);
     setLayerVis('stop-label', (showStops || picking) && stops.length > 0);
     setLayerVis('install-pts', installs.length > 0);

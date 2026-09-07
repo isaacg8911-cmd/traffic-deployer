@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QListWidgetItem, QMessageBox
 
 import gps_reader
@@ -129,12 +129,6 @@ class InstallControllerMixin:
         self._update_compass_labels(self.gps.latest())
         self._update_counter_labels()
         self._counter_show_memory()
-        if self.state.stops and self.current_index < len(self.state.stops):
-            s = self.state.stops[self.current_index]
-            uid = s.get("uid")
-            if uid != self._counter_serial_grab_uid and not str(s.get("serial", "")).strip():
-                self._counter_serial_grab_uid = uid
-                QTimer.singleShot(600, lambda: self._counter_read_serial(auto=True))
 
     def _on_install_dir_changed(self, *_):
         if self.state.stops and self.current_index < len(self.state.stops):
@@ -227,12 +221,19 @@ class InstallControllerMixin:
             return
         if idx == self.current_index:
             return
-        self._end_manual_grab(silent=True)
-        self._flush_install_form()
-        self._persist_shift(quiet=True)
-        self.current_index = idx
-        self._refresh_install()
-        self._center_current()
+
+        def _go() -> None:
+            self._flush_install_form()
+            self._persist_shift(quiet=True)
+            self.current_index = idx
+            self._refresh_install()
+            self._center_current()
+
+        if self._manual_grab_mode:
+            # Flush dragged pin coords before leaving this site (async JS read).
+            self._end_manual_grab(silent=True, then=_go)
+        else:
+            _go()
 
     def _manual_grab_prompt(self) -> str:
         if not self.state.stops or self.current_index >= len(self.state.stops):
@@ -248,9 +249,16 @@ class InstallControllerMixin:
         btn.setChecked(on)
         btn.setText("Cancel pin" if on else "Drop pin")
 
-    def _end_manual_grab(self, *, silent: bool = False) -> None:
-        if not self._manual_grab_mode:
-            return
+    def _apply_manual_pin_coords(self, raw) -> bool:
+        """Save lat/lon from map marker (after drag or confirm)."""
+        lat = lon = None
+        if isinstance(raw, dict):
+            lat, lon = raw.get("lat"), raw.get("lon")
+        if lat is None or lon is None:
+            return False
+        return self._save_field_position(float(lat), float(lon), source="manual")
+
+    def _finish_end_manual_grab(self, *, silent: bool = False) -> None:
         self._pin_persist_timer.stop()
         self._flush_pin_persist()
         self._manual_grab_mode = False
@@ -269,6 +277,28 @@ class InstallControllerMixin:
         self._push_state()
         if not silent:
             self.statusBar().showMessage("Drop pin cancelled.", 4000)
+
+    def _end_manual_grab(self, *, silent: bool = False, then=None) -> None:
+        if not self._manual_grab_mode:
+            if then:
+                then()
+            return
+
+        def _after_flush(raw) -> None:
+            self._apply_manual_pin_coords(raw)
+            self._finish_end_manual_grab(silent=silent)
+            if then:
+                then()
+
+        # Read final marker position (includes drag) before tearing down mode.
+        page = getattr(getattr(self, "view", None), "page", lambda: None)()
+        if page is not None and hasattr(page, "runJavaScript"):
+            page.runJavaScript(
+                "window.__tdConfirmDropPin ? window.__tdConfirmDropPin() : null",
+                _after_flush,
+            )
+        else:
+            _after_flush(None)
 
     def _begin_manual_grab(self) -> None:
         if not self.state.stops or self.current_index >= len(self.state.stops):
@@ -312,14 +342,10 @@ class InstallControllerMixin:
             return
 
         def _after_confirm(raw) -> None:
-            lat = lon = None
-            if isinstance(raw, dict):
-                lat, lon = raw.get("lat"), raw.get("lon")
-            if lat is None or lon is None:
+            if not self._apply_manual_pin_coords(raw):
                 self.statusBar().showMessage(
                     "Click the map first to drop an orange pin.", 6000)
                 return
-            self._save_field_position(float(lat), float(lon), source="manual")
             s = self.state.stops[self.current_index]
             self.statusBar().showMessage(
                 f"Site {s.get('id', '?')} pin re-saved after drag.", 6000)
@@ -513,16 +539,33 @@ class InstallControllerMixin:
             self._warn(gps_reader.no_fix_message(g))
             return
         lat, lon = fix
-        sats = g.get("satellites", 0) if g.get("fix") else 0
+        sats = int(g.get("satellites", 0) or 0) if g.get("fix") else 0
+        if sats and sats < 4:
+            self.statusBar().showMessage(
+                f"Weak GPS ({sats} sats) — wait for clearer sky, or Drop pin.", 8000)
         if self._save_field_position(lat, lon, source="gps") and hasattr(self, "lbl_grab"):
             s = self.state.stops[self.current_index]
             fl, fo = s.get("field_lat"), s.get("field_lon")
             self.lbl_grab.setText(f"Field GPS: {float(fl):.5f}, {float(fo):.5f}  ({sats} sats)")
+            weak = " — weak fix; Drop pin if off" if sats and sats < 4 else ""
             self.statusBar().showMessage(
                 f"Site {self.state.stops[self.current_index].get('id', '?')} "
-                f"GPS grabbed — green pin on map (green dot is you driving).", 8000)
+                f"GPS grabbed — green pin on map (green dot is you driving).{weak}", 8000)
 
     def _commit_install(self, installed: bool):
+        if not self.state.stops or self.current_index >= len(self.state.stops):
+            return
+
+        def _do_commit() -> None:
+            self._commit_install_body(installed)
+
+        if self._manual_grab_mode:
+            # Keep final dragged pin — do not let Install snap back to first click.
+            self._end_manual_grab(silent=True, then=_do_commit)
+        else:
+            _do_commit()
+
+    def _commit_install_body(self, installed: bool):
         if not self.state.stops or self.current_index >= len(self.state.stops):
             return
         s = self.state.stops[self.current_index]
@@ -604,7 +647,11 @@ class InstallControllerMixin:
             self.statusBar().showMessage("No GPS or pin saved for this site.", 5000)
             return
         if self._manual_grab_mode:
-            self._end_manual_grab(silent=True)
+            # Discard mode — do not flush/re-save the marker we are clearing.
+            self._pin_persist_timer.stop()
+            self._manual_grab_mode = False
+            self._sync_manual_grab_btn()
+            self.bridge.set_manual_grab(False)
         self.bridge.clear_field_pin()
         for key in (
             "field_lat", "field_lon", "field_coord_source",

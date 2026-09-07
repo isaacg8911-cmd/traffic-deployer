@@ -73,6 +73,8 @@ Audit tab: **shift summary** + export.
    re-run `python setup_maps.py` once (wifi) to refresh tiles at zoom 16 + fonts.
 4. **START DRIVING** - turn-by-turn banner + offline voice (female Windows guide). Light blue line to the next stop only.
 5. **Install tab** — per stop: street, direction, lanes, **Serial #** (type it), **Grab GPS** / drop pin, then **INSTALL** or **SKIP**. Counter USB (connect, clear, download) is **TrafficViewer**, not this app.
+   - **Drop pin:** click then drag the orange pin — the final spot is saved. Install / Next will not snap it back.
+   - **HTML pickup** (Route tab): links drive to each site’s **install GPS / pin**, not the Excel begin/end dots.
 6. **Pickup tab** — mark each site **SECURED**. Download counts in **TrafficViewer**.
 7. **Audit tab** - it flags missing data, then exports the **Excel** (or CSV) report.
 

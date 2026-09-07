@@ -103,6 +103,8 @@ def main() -> int:
     from main import MainWindow
 
     w = Win()
+    # Stub is not a MainWindow subclass — bind mixin body used by _commit_install.
+    w._commit_install_body = lambda installed: MainWindow._commit_install_body(w, installed)
     before = w.current_index
     MainWindow._commit_install(w, True)
     if w.current_index != before:

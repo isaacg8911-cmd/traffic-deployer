@@ -218,9 +218,13 @@ def ca_coords_plausible(lat: float, lon: float) -> bool:
 
 
 def snap_field_gps(
-    lat: float, lon: float, data_dir: str, *, max_m: float = 45.0,
+    lat: float, lon: float, data_dir: str, *, max_m: float = 12.0,
 ) -> tuple[float, float, bool]:
-    """Snap USB/phone field GPS onto the saved road graph when possible."""
+    """Snap USB/phone field GPS onto the saved road graph when close.
+
+    Keep max_m tight so noisy fixes correct slightly without yanking the
+    pin away from the pole toward a distant road centerline.
+    """
     try:
         import road_router
         return road_router.snap_coords_to_road(data_dir, lat, lon, max_m=max_m)

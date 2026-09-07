@@ -224,6 +224,27 @@ def test_maps_links():
     ]
     ordered = maps_links.pickup_sequence_stops(pickup_stops)
     check("pickup install order", ordered[0]["id"] == "2" and ordered[1]["id"] == "1")
+    # Pickup must navigate to exact install GPS, not begin/end cross pin.
+    field_stop = {
+        "uid": "f1", "id": "99", "installed": True, "exact_time": "2026-06-10 10:00:00",
+        "field_lat": 33.776543, "field_lon": -117.944321,
+        "cross_lat": 33.771000, "cross_lon": -117.941000,
+        "begin_lat": 33.770000, "begin_lon": -117.940000,
+        "end_lat": 33.772000, "end_lon": -117.942000,
+        "lat": 33.771000, "lon": -117.941000,
+    }
+    pickup_links, pickup_errs = maps_links.build_route_links(
+        maps_links.pickup_sequence_stops([field_stop])
+    )
+    check("pickup prefers field GPS", not pickup_errs and len(pickup_links) == 1)
+    check(
+        "pickup url is field GPS not cross",
+        "33.776543" in pickup_links[0]["url"] and "33.771000" not in pickup_links[0]["url"],
+    )
+    check(
+        "nav_coords field first",
+        maps_links.nav_coords(field_stop) == (33.776543, -117.944321),
+    )
     shortcuts_src = open(
         os.path.join(ROOT, "ui", "controllers", "shortcuts.py"), encoding="utf-8"
     ).read()
@@ -485,10 +506,22 @@ def test_web_assets():
     import main as main_mod
     grab_src = inspect.getsource(main_mod.MainWindow._grab_gps_here)
     commit_src = inspect.getsource(main_mod.MainWindow._commit_install)
+    commit_body = inspect.getsource(main_mod.MainWindow._commit_install_body)
     check("grab gps no blocking scan", "get_fix" not in grab_src and "fix_from_snapshot" in grab_src)
     check("manual grab map mode", "_manual_grab_mode" in main_src and "manual_grab" in appjs)
     check("manual grab save helper", "_save_field_position" in main_src)
-    check("install persist on commit", "_persist_shift(quiet=True)" in commit_src and "Tap Next" in commit_src)
+    check(
+        "manual pin drag persists",
+        "dragend" in appjs and "fireMapClick(ll.lat, ll.lng)" in appjs,
+    )
+    check(
+        "install persist on commit",
+        "_persist_shift(quiet=True)" in commit_body and "Tap Next" in commit_body,
+    )
+    check(
+        "install flushes pin before commit",
+        "_end_manual_grab" in commit_src and "_commit_install_body" in commit_src,
+    )
     check("route on map plan", "_route_for_map(preview" in main_src)
     from core import route_sections
     check("two-map route sections", callable(route_sections.merge_section_order)
@@ -788,6 +821,10 @@ def test_gps_only():
     check("grab gps no blocking scan", "get_fix" not in grab_src and "fix_from_snapshot" in grab_src)
     check("manual grab map mode", "_manual_grab_mode" in main_src and "manual_grab" in appjs)
     check("manual grab save helper", "_save_field_position" in main_src)
+    check(
+        "manual pin drag persists",
+        "dragend" in appjs and "fireMapClick(ll.lat, ll.lng)" in appjs,
+    )
     check("gps bridge in app.js", "pushGps" in appjs and "renderGps" in appjs)
 
     print("[field gps merge]")

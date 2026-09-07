@@ -224,6 +224,9 @@
         var ll = fieldPinMarker.getLngLat();
         fieldPinMarker._tdLat = ll.lat;
         fieldPinMarker._tdLon = ll.lng;
+        // Persist drag to Python immediately — otherwise Install / Next
+        // re-pushes state and the pin snaps back to the pre-drag click.
+        fireMapClick(ll.lat, ll.lng);
       });
     }
     var el = fieldPinMarker.getElement();

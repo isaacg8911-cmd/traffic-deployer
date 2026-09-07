@@ -9,7 +9,13 @@ from core.state import ca_now
 
 
 def nav_coords(stop: dict) -> tuple[float, float] | None:
-    """Drive-to point: road crossing if set, else site anchor."""
+    """Drive-to point: install GPS/pin if set, else road crossing, else site anchor.
+
+    Pickup HTML must use field_lat/lon (exact grab), not begin/end cross pins.
+    """
+    flat, flon = stop.get("field_lat"), stop.get("field_lon")
+    if flat is not None and flon is not None:
+        return float(flat), float(flon)
     clat, clon = stop.get("cross_lat"), stop.get("cross_lon")
     if clat is not None and clon is not None:
         return float(clat), float(clon)

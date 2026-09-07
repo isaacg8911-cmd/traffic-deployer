@@ -301,12 +301,14 @@ class SetupControllerMixin:
                 "Open Setup → Setup checklist for the full list.")
             return
         r = getattr(self, "_field_report", None) or check_all(APP_DIR, probe_gps=False, stop_server_after=False)
+        from core.state import RouteState
         gate = offline_gate_eval(
             r,
             has_stops=bool(self.state.stops),
             route_miles=float(self.state.route.get("miles", 0) or 0),
             graph_loaded=road_router.has_graph(DATA_DIR),
             route_graph_uncovered=bool(self.state.route.get("graph_uncovered")),
+            home_is_factory=RouteState.is_factory_home(*self.state.home),
         )
         if gate["blockers"]:
             body = "\n".join(f"• {b}" for b in gate["blockers"])

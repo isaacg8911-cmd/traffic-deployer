@@ -22,8 +22,12 @@ def road_map_covers_job(data_dir: str, stops: list[dict]) -> tuple[bool, str]:
 
 
 def _home_ok(home: tuple[float, float], default_home: tuple | None) -> bool:
-    ref = default_home if default_home is not None else home
-    return not RouteState.is_factory_home(ref[0], ref[1])
+    """Current session start must not be the factory demo coords.
+
+    Saved default alone is not enough — READY FOR OFFLINE uses ``home``.
+    """
+    _ = default_home  # kept for call-site compatibility
+    return not RouteState.is_factory_home(home[0], home[1])
 
 
 def evaluate(

@@ -732,8 +732,14 @@ class MapSyncControllerMixin:
         return None
 
     def _nearest_unpicked_stop(
-        self, lat: float, lon: float, *, max_m: float = 750.0,
+        self, lat: float, lon: float, *, max_m: float = 80_000.0,
     ) -> tuple[str | None, str | None]:
+        """Snap map click to nearest unpicked begin/end on the current map.
+
+        max_m defaults to 80 km so zoomed-out field taps still land (750 m
+        failed when a screen near-miss was 1–3 km away). Absurd clicks
+        (other continent) still miss.
+        """
         from road_router import _haversine_m
 
         picked = set(self._route_pick_uids)
@@ -751,6 +757,10 @@ class MapSyncControllerMixin:
             el, elo = s.get("end_lat"), s.get("end_lon")
             if el is not None and elo is not None:
                 candidates.append(((float(el), float(elo)), "end"))
+            if not candidates:
+                anchor = self._stop_anchor_coords(s)
+                if anchor is not None:
+                    candidates.append((anchor, None))
             for pt, side in candidates:
                 d = _haversine_m(lat, lon, pt[0], pt[1])
                 if d < best_d:
@@ -764,6 +774,12 @@ class MapSyncControllerMixin:
             self._manual_grab_at(lat, lon)
             return
         if not self._section_pick_active():
+            if getattr(self, "_route_pick_mode", False):
+                self.statusBar().showMessage(
+                    "This map already has a route — Cycle Map to pick the other, "
+                    "or Clear route on Route tab to re-pick.",
+                    7000,
+                )
             return
         uid, side = self._nearest_unpicked_stop(lat, lon)
         if uid:

@@ -149,6 +149,18 @@ def test_python_pick_flow() -> None:
     ok("near-miss map click adds stop 2") if win._route_pick_uids[-1] == uid1 else fail(
         "near-miss map click", f"got {win._route_pick_uids}")
 
+    # User: zoomed-out near-miss (~2.2 km) — old 750 m snap failed on the truck.
+    # Assert a new stop is added (exact uid depends on neighbor geometry).
+    before = list(win._route_pick_uids)
+    s2 = stops[2]
+    far_near_lat = float(s2["begin_lat"]) + 0.02
+    far_near_lon = float(s2["begin_lon"])
+    win._on_map_clicked(far_near_lat, far_near_lon)
+    added = win._route_pick_uids[-1] if win._route_pick_uids else None
+    ok("zoomed-out near-miss adds stop 3") if (
+        len(win._route_pick_uids) == 3 and added and added not in before
+    ) else fail("zoomed-out near-miss", f"got {win._route_pick_uids}")
+
     # User: empty map click far from sites
     win._on_map_clicked(0.0, 0.0)
     ok("far click feedback") if "near that click" in win._status.currentMessage().lower() else fail(

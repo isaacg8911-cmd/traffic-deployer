@@ -81,9 +81,20 @@ class RouteControllerMixin:
         if report["warnings"]:
             body = "; ".join(report["warnings"][:4])
             self.statusBar().showMessage(f"Build note: {body}", 12000)
-            if not SIMPLE_MODE and QMessageBox.question(
-                self, "Review before build",
-                "\n".join(report["warnings"]) + "\n\nBuild route anyway?",
+            from core.state import RouteState
+            factory = RouteState.is_factory_home(*self.state.home)
+            # SIMPLE_MODE used to skip this dialog — status bar alone was missed on the truck.
+            title = "Set starting point first" if factory else "Review before build"
+            prompt = "\n".join(report["warnings"])
+            if factory:
+                prompt += (
+                    "\n\nSet home on Setup (USB GPS, address search, or Save as my start), "
+                    "then BUILD again.\n\nBuild anyway with the wrong origin?"
+                )
+            else:
+                prompt += "\n\nBuild route anyway?"
+            if QMessageBox.question(
+                self, title, prompt,
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             ) != QMessageBox.Yes:
@@ -611,6 +622,15 @@ class RouteControllerMixin:
                     "(straight-line — saved road map is for a different job). "
                     "Setup → Download roads with this job loaded, then Build again for real streets.",
                     14000)
+                QMessageBox.warning(
+                    self,
+                    "Road map does not cover this job",
+                    f"Applied {applied_n} stops ({miles:.1f} mi) as straight-line only.\n\n"
+                    "The saved road_graph.graphml is for a different area — miles and "
+                    "street order will be wrong until you fix it.\n\n"
+                    "On Setup: Download road map while this Excel/.EST job is loaded, "
+                    "then Apply / Build again for real streets.",
+                )
             if hasattr(self, "btn_build"):
                 self.btn_build.setEnabled(True)
                 self.btn_build.setText(BUILD_LABEL)
@@ -736,6 +756,15 @@ class RouteControllerMixin:
                     "straight-line (saved road map is for a different job). "
                     "Setup → Download roads with these files loaded, then Build again for real streets.",
                     14000)
+                QMessageBox.warning(
+                    self,
+                    "Road map does not cover this job",
+                    f"Route built: {len(res['order'])} stops, {miles:.1f} mi "
+                    "(straight-line only).\n\n"
+                    "Saved road map is for a different job area. "
+                    "Setup → Download roads with these Excel/.EST files loaded, "
+                    "then Build again for real street miles.",
+                )
             elif not r.get("graph"):
                 self.statusBar().showMessage(
                     "Route built (straight-line miles). For real-street order and miles, "

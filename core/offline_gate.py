@@ -9,10 +9,17 @@ def evaluate(
     route_miles: float,
     graph_loaded: bool,
     route_graph_uncovered: bool = False,
+    home_is_factory: bool = False,
 ) -> dict:
     """Return {ok, blockers[], warns[]} for READY FOR OFFLINE."""
     blockers: list[str] = []
     warns: list[str] = []
+
+    if home_is_factory:
+        blockers.append(
+            "Starting point not set — Setup: USB GPS, address search, or Save as my start "
+            "(factory default is not a real home)."
+        )
 
     for item in field_report.get("items", []):
         if item.get("level") == "fail":

@@ -637,6 +637,8 @@ def test_offline_no_internet():
 def test_offline_gate():
     print("[offline gate]")
     from core.offline_gate import evaluate as offline_gate_eval
+    from core.setup_checklist import evaluate as setup_checklist_eval
+    from core.state import DEFAULT_HOME, RouteState
     r = {"items": [], "field_ready": True}
     g = offline_gate_eval(r, has_stops=True, route_miles=0, graph_loaded=True)
     check("offline gate blocks no route", not g["ok"] and g["blockers"])
@@ -645,9 +647,29 @@ def test_offline_gate():
     g3 = offline_gate_eval(
         r, has_stops=True, route_miles=12.5, graph_loaded=True, route_graph_uncovered=True)
     check("offline gate blocks wrong-area graph", not g3["ok"] and g3["blockers"])
+    g4 = offline_gate_eval(
+        r, has_stops=True, route_miles=12.5, graph_loaded=True, home_is_factory=True)
+    check("offline gate blocks factory home", not g4["ok"] and any("Starting point" in b for b in g4["blockers"]))
+    ck = setup_checklist_eval(
+        home=DEFAULT_HOME,
+        default_home=(34.2, -118.5),
+        excel_paths=["a.xlsx"],
+        est_paths=["b.est"],
+        has_graph=True,
+        route_miles=12.5,
+        stops=None,
+        data_dir="",
+    )
+    check("checklist requires current home not factory", not ck["ok"] and any("starting point" in b.lower() for b in ck["blockers"]))
+    check("factory home helper", RouteState.is_factory_home(*DEFAULT_HOME))
     from core.setup_checklist import road_map_covers_job
     check("road_map_covers_job helper", callable(road_map_covers_job))
     check("no voice module", not os.path.isfile(os.path.join(ROOT, "voice_nav.py")))
+    main_src = _shell_src()
+    appjs = open(os.path.join(ROOT, "web", "app.js"), encoding="utf-8").read()
+    check("pick snap 80km python", "80_000" in open(os.path.join(ROOT, "ui", "controllers", "map_sync.py"), encoding="utf-8").read())
+    check("pick snap 80km js", "80000" in appjs)
+    check("home_is_factory offline call", "home_is_factory" in main_src)
 
 
 def _shell_src() -> str:

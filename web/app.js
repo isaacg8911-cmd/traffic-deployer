@@ -381,9 +381,13 @@
   ];
   // Hit tolerance (px) so small begin/end dots are easy to tap on a touch /
   // high-DPI work laptop. A bare 1px hit test made the dots feel un-clickable.
+  // Grow with zoom-out: at z~10 a finger miss is tens of pixels from the dot.
   function pickHitPad() {
     var dpr = (window.devicePixelRatio && window.devicePixelRatio > 1) ? window.devicePixelRatio : 1;
-    return Math.round(14 + (dpr - 1) * 8);
+    var z = 11;
+    try { z = map.getZoom(); } catch (e) { /* map may not be ready */ }
+    var zoomPad = z < 12 ? Math.round((12 - z) * 6) : 0;
+    return Math.round(18 + (dpr - 1) * 8 + zoomPad);
   }
 
   function haversineM(lat1, lon1, lat2, lon2) {
@@ -467,7 +471,8 @@
   /** When layer hit-test misses, snap to nearest unpicked begin/end (mirrors Python). */
   function nearestPickAt(lat, lon, maxM) {
     if (!lastState || lastState.map_mode !== 'pick') return null;
-    maxM = maxM || 750;
+    // 80 km — zoomed-out field taps miss by km; (0,0) still rejected.
+    maxM = maxM || 80000;
     var stops = lastState.stops || [];
     var pickOrder = lastState.pick_order || [];
     var picked = {};
@@ -476,12 +481,15 @@
     stops.forEach(function (s) {
       var uid = s.uid != null ? String(s.uid) : '';
       if (!uid || picked[uid]) return;
-      [
+      var rows = [
         ['begin_lat', 'begin_lon', 'begin'],
         ['end_lat', 'end_lon', 'end']
-      ].forEach(function (row) {
+      ];
+      var anyEnd = false;
+      rows.forEach(function (row) {
         var la = s[row[0]], lo = s[row[1]];
         if (la == null || lo == null) return;
+        anyEnd = true;
         var d = haversineM(lat, lon, la, lo);
         if (d < bestD) {
           bestD = d;
@@ -489,6 +497,14 @@
           bestSide = row[2];
         }
       });
+      if (!anyEnd && s.lat != null && s.lon != null) {
+        var d2 = haversineM(lat, lon, s.lat, s.lon);
+        if (d2 < bestD) {
+          bestD = d2;
+          bestUid = uid;
+          bestSide = null;
+        }
+      }
     });
     if (!bestUid) return null;
     return bestSide ? (bestUid + '|' + bestSide) : bestUid;

@@ -172,11 +172,59 @@ def test_handoff():
     check("gps installed only", lat == 33.77 and lon == -117.94)
     lat2, lon2 = export._gps_pair(stops[1])
     check("gps skipped empty", lat2 is None and lon2 is None)
-    from core.est_viewer import sites_from_stops
+    from core.est_viewer import sites_from_stops, write_viewer_files
     sites = sites_from_stops(stops)
     check("handoff map sites", len(sites) == 2)
     check("installed has field", sites[0].get("field_lat") == 33.77)
     check("skipped no field", "field_lat" not in sites[1])
+    with tempfile.TemporaryDirectory() as td:
+        leftover = os.path.join(td, "Week 14 Map 1.html")
+        with open(leftover, "w", encoding="utf-8") as f:
+            f.write("<script src='https://unpkg.com/leaflet'></script>")
+        dummy_est = os.path.join(td, "Week 14 Map 1.est")
+        with open(dummy_est, "wb") as f:
+            f.write(b"not-a-real-est")
+        viewers = write_viewer_files(
+            dummy_est,
+            base_path=os.path.splitext(dummy_est)[0],
+            title="Week 14 Map 1.est",
+            stops=stops,
+            html=False,
+        )
+        check("office viewer strips leftover html", not os.path.isfile(leftover))
+        check("office viewer writes kml", bool(viewers.get("kml")) and os.path.isfile(viewers["kml"]))
+        kml = open(viewers["kml"], encoding="utf-8").read()
+        check("kml has installed site", "Site 7" in kml)
+        empty = handoff.export_shift_handoff([], [], data_dir=td, out_dir=td)
+        check(
+            "handoff empty errors",
+            (not empty["ok"]) and any("Nothing to export" in e for e in empty["errors"]),
+        )
+        missing_est = os.path.join(td, "missing.est")
+        try:
+            write_viewer_files(missing_est, html=False)
+            check("missing est raises", False, "expected FileNotFoundError")
+        except FileNotFoundError:
+            check("missing est raises", True)
+        local_dir = os.path.join(td, "local")
+        os.makedirs(local_dir)
+        local_est = os.path.join(local_dir, "local.est")
+        with open(local_est, "wb") as f:
+            f.write(b"x")
+        local = write_viewer_files(local_est, stops=stops)
+        check("local viewer still writes html", os.path.isfile(local["html"]))
+        readme = os.path.join(td, "HANDOFF_README.txt")
+        handoff._write_readme(
+            readme,
+            prefix="Week 14",
+            excel_name="Week 14 IG TFC.xlsx",
+            map_names=["Week 14 Map 1.est"],
+            no_gps=[],
+            conflict_lines=[],
+        )
+        readme_txt = open(readme, encoding="utf-8").read()
+        check("readme forbids email html", "Do not email .html" in readme_txt)
+        check("readme does not pitch zip html", "open the matching .html" not in readme_txt.lower())
 
 
 def test_export():

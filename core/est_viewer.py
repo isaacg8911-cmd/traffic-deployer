@@ -335,8 +335,14 @@ def write_viewer_files(
     base_path: str | Path | None = None,
     title: str = "",
     stops: list[dict] | None = None,
+    html: bool = True,
+    kml: bool = True,
 ) -> dict[str, str]:
-    """Write .html + .kml next to est. Pass stops for begin/end/installed/skipped."""
+    """Write map viewers next to est. Pass stops for begin/end/installed/skipped.
+
+    html=False for office handoff: email antivirus treats zip+HTML+JS as malware.
+    Leftover .html next to the same stem is deleted so it cannot be re-zipped.
+    """
     est_path = Path(est_path)
     stem = Path(base_path) if base_path else est_path.with_suffix("")
     title = title or stem.name
@@ -346,6 +352,13 @@ def write_viewer_files(
         sites = _sites_from_est_only(est_path)
     html_path = Path(f"{stem}.html")
     kml_path = Path(f"{stem}.kml")
-    html_path.write_text(to_html_map(sites, title=title), encoding="utf-8")
-    kml_path.write_text(to_kml(sites, title=title), encoding="utf-8")
-    return {"html": str(html_path), "kml": str(kml_path), "count": str(len(sites))}
+    out: dict[str, str] = {"count": str(len(sites)), "html": "", "kml": ""}
+    if html:
+        html_path.write_text(to_html_map(sites, title=title), encoding="utf-8")
+        out["html"] = str(html_path)
+    elif html_path.is_file():
+        html_path.unlink()
+    if kml:
+        kml_path.write_text(to_kml(sites, title=title), encoding="utf-8")
+        out["kml"] = str(kml_path)
+    return out

@@ -76,7 +76,7 @@ Audit tab: **shift summary** + export.
    - **Drop pin:** click then drag the orange pin — the final spot is saved. Install / Next will not snap it back.
    - **HTML pickup** (Route tab): links drive to each site’s **install GPS / pin**, not the Excel begin/end dots.
 6. **Pickup tab** — mark each site **SECURED**. Download counts in **TrafficViewer**.
-7. **Audit tab** - it flags missing data, then **Handoff export** (Excel + Map `.est` + `.kml`). Zip those for the office — **do not include `.html`** (email antivirus treats zip+HTML as a virus).
+7. **Audit tab** - it flags missing data, then **Handoff export** (Excel + Map `.est`). Zip those for the office — **do not include `.html` or `.kml`** (email antivirus treats extra map viewers as a virus).
 
 ## Live GPS tracing
 

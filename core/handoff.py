@@ -97,11 +97,11 @@ def _write_readme(
         lines.append(f"  {i}. {name}  — Map {i - 1} field install pins")
     lines.extend([
         "",
-        "Open Map *.est in Streets & Trips. Optional: matching .kml in Google Earth.",
-        "Do not email .html map files and do not put them in the zip.",
-        "Office antivirus treats zip + HTML + JavaScript as malware (false virus).",
+        "Open Map *.est in Streets & Trips.",
+        "Do not email .html or .kml map files and do not put them in the zip.",
+        "Office antivirus treats extra map viewers in a zip as malware (false virus).",
         "Skipped sites: no field GPS pin — begin/end from the week Excel only.",
-        "Installed sites: field GPS pin (Grab GPS) on Map *.est and in the .kml.",
+        "Installed sites: field GPS pin (Grab GPS) on Map *.est.",
         "",
         "Excel LAT/LON columns match the Map *.est pushpin locations.",
     ])
@@ -129,7 +129,7 @@ def export_shift_handoff(
     prefix: str = "",
     out_dir: str = "",
 ) -> dict:
-    """Write IG TFC Excel + Map 1/2 .est + .kml to shift_handoff. No .html (email AV)."""
+    """Write IG TFC Excel + Map 1/2 .est to shift_handoff. No .html/.kml (email AV)."""
     est_paths = [p for p in est_paths if p and os.path.isfile(p)]
     folder = out_dir or handoff_dir(data_dir)
     os.makedirs(folder, exist_ok=True)
@@ -192,15 +192,14 @@ def export_shift_handoff(
                 result["est_results"].append(est_result)
                 result["files"][map_key] = out_est
                 try:
-                    viewers = write_viewer_files(
+                    write_viewer_files(
                         out_est,
                         base_path=os.path.splitext(out_est)[0],
                         title=map_name,
                         stops=sheet_stops,
                         html=False,
+                        kml=False,
                     )
-                    if viewers.get("kml"):
-                        result["files"][f"{map_key}_kml"] = viewers["kml"]
                 except Exception as exc:  # noqa: BLE001
                     result["warnings"].append(f"{map_name} viewer: {exc}")
                 if est_result.get("missing_in_est"):

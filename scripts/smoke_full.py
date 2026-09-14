@@ -178,9 +178,12 @@ def test_handoff():
     check("installed has field", sites[0].get("field_lat") == 33.77)
     check("skipped no field", "field_lat" not in sites[1])
     with tempfile.TemporaryDirectory() as td:
-        leftover = os.path.join(td, "Week 14 Map 1.html")
-        with open(leftover, "w", encoding="utf-8") as f:
+        leftover_html = os.path.join(td, "Week 14 Map 1.html")
+        leftover_kml = os.path.join(td, "Week 14 Map 1.kml")
+        with open(leftover_html, "w", encoding="utf-8") as f:
             f.write("<script src='https://unpkg.com/leaflet'></script>")
+        with open(leftover_kml, "w", encoding="utf-8") as f:
+            f.write("<kml></kml>")
         dummy_est = os.path.join(td, "Week 14 Map 1.est")
         with open(dummy_est, "wb") as f:
             f.write(b"not-a-real-est")
@@ -190,11 +193,12 @@ def test_handoff():
             title="Week 14 Map 1.est",
             stops=stops,
             html=False,
+            kml=False,
         )
-        check("office viewer strips leftover html", not os.path.isfile(leftover))
-        check("office viewer writes kml", bool(viewers.get("kml")) and os.path.isfile(viewers["kml"]))
-        kml = open(viewers["kml"], encoding="utf-8").read()
-        check("kml has installed site", "Site 7" in kml)
+        check("office viewer strips leftover html", not os.path.isfile(leftover_html))
+        check("office viewer strips leftover kml", not os.path.isfile(leftover_kml))
+        check("office viewer writes no html", not viewers.get("html"))
+        check("office viewer writes no kml", not viewers.get("kml"))
         empty = handoff.export_shift_handoff([], [], data_dir=td, out_dir=td)
         check(
             "handoff empty errors",
@@ -213,6 +217,7 @@ def test_handoff():
             f.write(b"x")
         local = write_viewer_files(local_est, stops=stops)
         check("local viewer still writes html", os.path.isfile(local["html"]))
+        check("local viewer still writes kml", os.path.isfile(local["kml"]))
         readme = os.path.join(td, "HANDOFF_README.txt")
         handoff._write_readme(
             readme,
@@ -223,8 +228,8 @@ def test_handoff():
             conflict_lines=[],
         )
         readme_txt = open(readme, encoding="utf-8").read()
-        check("readme forbids email html", "Do not email .html" in readme_txt)
-        check("readme does not pitch zip html", "open the matching .html" not in readme_txt.lower())
+        check("readme forbids email html/kml", "Do not email .html or .kml" in readme_txt)
+        check("readme does not pitch zip viewers", "google earth" not in readme_txt.lower())
 
 
 def test_export():

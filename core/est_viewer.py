@@ -340,8 +340,8 @@ def write_viewer_files(
 ) -> dict[str, str]:
     """Write map viewers next to est. Pass stops for begin/end/installed/skipped.
 
-    html=False for office handoff: email antivirus treats zip+HTML+JS as malware.
-    Leftover .html next to the same stem is deleted so it cannot be re-zipped.
+    html=False / kml=False for office handoff (email AV). Leftover .html/.kml
+    next to the same stem are deleted so they cannot be re-zipped.
     """
     est_path = Path(est_path)
     stem = Path(base_path) if base_path else est_path.with_suffix("")
@@ -361,4 +361,6 @@ def write_viewer_files(
     if kml:
         kml_path.write_text(to_kml(sites, title=title), encoding="utf-8")
         out["kml"] = str(kml_path)
+    elif kml_path.is_file():
+        kml_path.unlink()
     return out

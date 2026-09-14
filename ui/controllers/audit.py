@@ -129,11 +129,11 @@ class AuditControllerMixin:
             return
         files = result.get("files") or {}
         msg = f"Shift handoff saved:\n\n{result['folder']}\n\n"
-        for key in ("excel", "map1", "map1_kml", "map2", "map2_kml", "readme"):
+        for key in ("excel", "map1", "map2", "readme"):
             path = files.get(key)
             if path:
                 msg += f"  • {os.path.basename(path)}\n"
-        msg += "\nZip Excel + .est + .kml for the office. Do not include .html.\n"
+        msg += "\nZip Excel + .est for the office. Do not include .html or .kml.\n"
         warns = result.get("warnings") or []
         if warns:
             msg += "\nNotes:\n" + "\n".join(f"  • {w}" for w in warns[:8])

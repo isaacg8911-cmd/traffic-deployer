@@ -250,6 +250,73 @@ def test_export():
     path = export.default_report_path(DATA_DIR, "SMOKE", "xlsx")
     check("export default path", path.endswith(".xlsx") and "IG_TFC_GPS" in path)
     check("export dir exists", os.path.isdir(export.export_dir(DATA_DIR)))
+    mixed = [
+        {"id": "10", "sheet": "Day1", "installed": True, "skipped": False,
+         "exact_time": "2026-09-15 11:00:00", "date": "2026-09-15",
+         "serial": "A", "direction": "n", "lanes": 2,
+         "field_lat": 33.77, "field_lon": -117.94},
+        {"id": "20", "sheet": "Day1", "installed": True, "skipped": False,
+         "exact_time": "2026-09-15 08:00:00", "date": "2026-09-15",
+         "serial": "B", "direction": "e", "lanes": 2,
+         "field_lat": 33.78, "field_lon": -117.95},
+        {"id": "30", "sheet": "Day1", "installed": False, "skipped": False},
+    ]
+    check(
+        "tfc helper install order",
+        [s["id"] for s in export.stops_in_install_order(mixed)] == ["20", "10", "30"],
+    )
+    check(
+        "tfc unmarked keeps ingest order",
+        [s["id"] for s in export.stops_in_install_order([
+            {"id": "3", "sheet": "Day1"}, {"id": "1", "sheet": "Day1"},
+        ])] == ["3", "1"],
+    )
+    check(
+        "tfc skipped follows install time",
+        [s["id"] for s in export.stops_in_install_order([
+            {"id": "1", "sheet": "D", "skipped": True, "exact_time": "2026-09-15 10:00:00"},
+            {"id": "2", "sheet": "D", "installed": True, "exact_time": "2026-09-15 09:00:00"},
+        ])] == ["2", "1"],
+    )
+    xlsx_ord = export._write_ig_tfc_workbook(mixed, template_path=None)
+    check("tfc install-order excel bytes", xlsx_ord is not None and len(xlsx_ord) > 500)
+    if xlsx_ord:
+        import io as _io
+        import pandas as _pd
+        sheet = next(iter(_pd.read_excel(_io.BytesIO(xlsx_ord), sheet_name=None).values()))
+        site_col = next(c for c in sheet.columns if "site" in str(c).lower())
+        ids = [str(v).split(".")[0] for v in sheet[site_col].tolist()]
+        check("tfc excel rows follow install time", ids == ["20", "10", "30"])
+    csv_ord = export.to_csv_text(mixed)
+    csv_sites = [ln.split(",")[1] for ln in csv_ord.splitlines()[1:] if ln.strip()]
+    check("tfc csv install order", csv_sites == ["20", "10"])
+    tmpl = os.path.join(tempfile.mkdtemp(), "week_ig_tfc.xlsx")
+    import pandas as _pd_tmpl
+    _pd_tmpl.DataFrame({
+        "Date": ["", "", ""],
+        "Site": [10, 20, 30],
+        "Serial": ["", "", ""],
+        "Directions": ["n", "e", "n"],
+        "Lanes": [2, 2, 2],
+        "Notes": ["", "", ""],
+        "Installed": ["", "", ""],
+        "Skipped": ["", "", ""],
+        "Picked up": ["", "", ""],
+    }).to_excel(tmpl, index=False)
+    xlsx_tmpl, tmpl_err = export.to_excel_result(
+        mixed, ig_tfc_path=tmpl, data_dir=DATA_DIR)
+    check("tfc template export bytes", xlsx_tmpl is not None, tmpl_err or "")
+    if xlsx_tmpl:
+        import io as _io2
+        import pandas as _pd2
+        tsheet = next(iter(_pd2.read_excel(_io2.BytesIO(xlsx_tmpl), sheet_name=None).values()))
+        tcol = next(c for c in tsheet.columns if "site" in str(c).lower())
+        tids = [str(v).split(".")[0] for v in tsheet[tcol].tolist()]
+        check("tfc template rows follow install time", tids == ["20", "10", "30"])
+        inst_col = next(c for c in tsheet.columns if str(c).lower().strip() == "installed")
+        serial_col = next(c for c in tsheet.columns if "serial" in str(c).lower())
+        check("tfc template first row is first install", str(tsheet.iloc[0][inst_col]).strip().lower() == "x")
+        check("tfc template keeps letter serial", str(tsheet.iloc[0][serial_col]).strip() == "B")
 
 
 def test_maps_links():

@@ -110,7 +110,7 @@ def to_excel_result(
     ig_tfc_path: str = "",
     data_dir: str = "",
 ) -> tuple[bytes | None, str | None]:
-    """IG TFC Excel: sheet layout + LAT/LON on installed sites."""
+    """IG TFC Excel: sheet layout + LAT/LON; rows locked to install order."""
     if not stops:
         return None, None
     if not _excel_engines():
@@ -206,6 +206,18 @@ def _flag_cell(on: bool) -> str:
     return "x" if on else ""
 
 
+def _set_sheet_cell(df: pd.DataFrame, idx, col, value) -> None:
+    """Write a cell; widen numeric-inferred columns when the template had blanks."""
+    if col is None:
+        return
+    try:
+        df.at[idx, col] = value
+    except (TypeError, ValueError):
+        if pd.api.types.is_numeric_dtype(df[col]):
+            df[col] = df[col].astype(object)
+        df.at[idx, col] = value
+
+
 def _gps_pair(stop: dict) -> tuple[float | None, float | None]:
     if not stop.get("installed"):
         return None, None
@@ -242,28 +254,27 @@ def _merge_stop_into_ig_row(df: pd.DataFrame, idx: int, stop: dict) -> None:
         serial = ""
     if serial_col and serial:
         try:
-            num = float(serial)
-            df.at[idx, serial_col] = num
-        except ValueError:
-            df.at[idx, serial_col] = serial
+            _set_sheet_cell(df, idx, serial_col, float(serial))
+        except (ValueError, TypeError):
+            _set_sheet_cell(df, idx, serial_col, serial)
     direction = str(stop.get("direction") or "").strip()
     if dir_col and direction and direction.lower() not in ("nan", "none"):
-        df.at[idx, dir_col] = direction
+        _set_sheet_cell(df, idx, dir_col, direction)
     if lanes_col and stop.get("lanes") is not None:
         try:
-            df.at[idx, lanes_col] = int(stop.get("lanes") or 2)
+            _set_sheet_cell(df, idx, lanes_col, int(stop.get("lanes") or 2))
         except (TypeError, ValueError):
             pass
     if notes_col:
         notes = str(stop.get("notes") or "").strip()
         if notes and notes.lower() not in ("nan", "none", "nat"):
-            df.at[idx, notes_col] = notes
+            _set_sheet_cell(df, idx, notes_col, notes)
     if inst_col:
-        df.at[idx, inst_col] = _flag_cell(bool(stop.get("installed")))
+        _set_sheet_cell(df, idx, inst_col, _flag_cell(bool(stop.get("installed"))))
     if skip_col:
-        df.at[idx, skip_col] = _flag_cell(bool(stop.get("skipped")))
+        _set_sheet_cell(df, idx, skip_col, _flag_cell(bool(stop.get("skipped"))))
     if pick_col:
-        df.at[idx, pick_col] = _flag_cell(bool(stop.get("picked_up")))
+        _set_sheet_cell(df, idx, pick_col, _flag_cell(bool(stop.get("picked_up"))))
 
     lat, lon = _gps_pair(stop)
     if "LAT" not in df.columns:
@@ -297,6 +308,39 @@ _IG_TFC_FALLBACK_COLS = [
 ]
 
 
+def _tfc_field_done(stop: dict | None) -> bool:
+    if not stop:
+        return False
+    return bool(stop.get("installed") or stop.get("skipped"))
+
+
+def _tfc_install_sort_key(stop: dict | None, orig_idx: int) -> tuple:
+    """Done sites first by ExactTime, then remaining in original sheet order."""
+    if not _tfc_field_done(stop):
+        return (1, "", orig_idx)
+    when = str((stop or {}).get("exact_time") or (stop or {}).get("date") or "")
+    return (0, when, orig_idx)
+
+
+def stops_in_install_order(stops: list[dict]) -> list[dict]:
+    """TFC / live Excel row order: installed+skipped by time, then unmarked."""
+    ranked = list(enumerate(stops))
+    ranked.sort(key=lambda pair: _tfc_install_sort_key(pair[1], pair[0]))
+    return [s for _, s in ranked]
+
+
+def _reorder_ig_df_by_install(df: pd.DataFrame, by_id: dict[str, dict]) -> pd.DataFrame:
+    site_col = _find_col(list(df.columns), "site")
+    if not site_col:
+        return df
+    keys: list[tuple] = []
+    for orig_idx, (_pos, row) in enumerate(df.iterrows()):
+        sid = _site_id_from_cell(row.get(site_col))
+        keys.append(_tfc_install_sort_key(by_id.get(sid), orig_idx))
+    order = sorted(range(len(keys)), key=lambda i: keys[i])
+    return df.iloc[order].reset_index(drop=True)
+
+
 def _write_ig_tfc_workbook(
     stops: list[dict],
     *,
@@ -324,6 +368,7 @@ def _write_ig_tfc_workbook(
                     stop = by_id.get(sid)
                     if stop:
                         _merge_stop_into_ig_row(out, idx, stop)
+                out = _reorder_ig_df_by_install(out, by_id)
             sheets[str(sheet_name)] = out
 
     if not sheets:
@@ -332,8 +377,9 @@ def _write_ig_tfc_workbook(
             sheet = str(s.get("sheet") or "Map")
             by_sheet.setdefault(sheet, []).append(s)
         for sheet_name, sheet_stops in by_sheet.items():
+            ordered = stops_in_install_order(sheet_stops)
             sheets[sheet_name] = pd.DataFrame(
-                [_ig_row_from_stop(s) for s in sheet_stops], columns=_IG_TFC_FALLBACK_COLS)
+                [_ig_row_from_stop(s) for s in ordered], columns=_IG_TFC_FALLBACK_COLS)
 
     if not sheets:
         return None
@@ -363,7 +409,7 @@ def to_ig_tfc_csv_text(stops: list[dict]) -> str:
     rows: list[dict] = []
     multi = len(by_sheet) > 1
     for sheet_name, sheet_stops in by_sheet.items():
-        for s in sheet_stops:
+        for s in stops_in_install_order(sheet_stops):
             row = _ig_row_from_stop(s)
             if multi:
                 row = {"MapDay": sheet_name, **row}

@@ -91,7 +91,7 @@ def _write_readme(
         f"Built: {date.today().isoformat()}",
         "",
         "Send these files:",
-        f"  1. {excel_name}  — install log (serials, skipped, GPS on installed only)",
+        f"  1. {excel_name}  — install log (rows in install order; serials, skipped, GPS on installed only)",
     ]
     for i, name in enumerate(map_names, start=2):
         lines.append(f"  {i}. {name}  — Map {i - 1} field install pins")

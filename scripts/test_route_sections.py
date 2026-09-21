@@ -69,6 +69,22 @@ def test_core_helpers() -> None:
     else:
         fail("merge_section_order", f"ids a={a_ids} b={b_ids} sheets={sheets}")
 
+    composed = route_sections.compose_section_routes(
+        {
+            "Day5": {"polyline": [[1.0, 2.0], [1.1, 2.1]], "miles": 3.0, "graph": True},
+            "Day6": {"polyline": [[9.0, 8.0], [9.1, 8.1]], "miles": 4.5, "graph": True},
+        },
+        ["Day5", "Day6"],
+    )
+    if (
+        abs(composed["miles"] - 7.5) < 0.01
+        and len(composed.get("polylines") or []) == 2
+        and composed.get("polyline") == []
+    ):
+        ok("compose_section_routes All days overlay")
+    else:
+        fail("compose_section_routes", str(composed))
+
     fresh = [
         _stop("Day5", "100", 34.0, -118.0),
         _stop("Day5", "101", 34.01, -118.01),

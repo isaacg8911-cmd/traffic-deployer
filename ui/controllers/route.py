@@ -112,9 +112,10 @@ class RouteControllerMixin:
                 f"Re-build: kept install/pickup data on {kept} site(s).", 6000)
 
         rebuild_sheet = None
+        labels = route_sections.section_labels(merged, self.state.active_files)
         if route_sections.multi_section(merged, self.state.active_files):
             cur = getattr(self.state, "map_day_filter", "") or ""
-            if not route_sections.is_all_days(cur) and cur in self.state.active_files:
+            if not route_sections.is_all_days(cur) and cur in labels:
                 rebuild_sheet = cur
         self.state.stops = route_sections.preserve_other_section_orders(
             list(old_by_uid.values()), merged, rebuild_sheet=rebuild_sheet)
@@ -123,7 +124,7 @@ class RouteControllerMixin:
         self.state.routes_by_map = {k: v for k, v in stored.items() if k in keep}
         if rebuild_sheet:
             self.state.routes_by_map.pop(rebuild_sheet, None)
-        elif not route_sections.multi_section(self.state.stops, self.state.active_files):
+        else:
             self.state.routes_by_map = {}
         self._map_preview_stops = []
         self.state.route = route_sections.empty_route()
@@ -132,14 +133,30 @@ class RouteControllerMixin:
         self._update_right(force_map=True)
         self._go_page(1)
         self._refresh_day_filter()
-        if rebuild_sheet:
-            self._set_route_section(rebuild_sheet, persist=False)
-        elif route_sections.multi_section(self.state.stops, self.state.active_files):
-            self._focus_route_section_for_pick()
         self._refresh_route_list()
         self._push_state(fit=True)
-        self._restore_build_button_if_idle()
-        self._begin_route_pick(self.state.stops)
+        mode = self._ask_route_build_mode()
+        if mode == "pick":
+            if rebuild_sheet:
+                self._set_route_section(rebuild_sheet, persist=False)
+            elif route_sections.multi_section(self.state.stops, self.state.active_files):
+                self._focus_route_section_for_pick()
+            self._restore_build_button_if_idle()
+            self._begin_route_pick(self.state.stops)
+            return
+        jobs: list[tuple[str, list[dict]]] = []
+        if rebuild_sheet:
+            jobs = [(rebuild_sheet, route_sections.stops_for_section(
+                self.state.stops, rebuild_sheet))]
+        elif len(labels) >= 2:
+            jobs = [
+                (lab, route_sections.stops_for_section(self.state.stops, lab))
+                for lab in labels
+            ]
+        if jobs:
+            self._start_auto_build_queue(jobs, stay_all_days=rebuild_sheet is None)
+        else:
+            self._optimize_and_route(self.state.stops)
 
     def _start_pick_route_from_route_tab(self) -> None:
         """Manual pick order — alternative to auto-optimize BUILD ROUTE."""
@@ -148,6 +165,85 @@ class RouteControllerMixin:
             self._warn("Load Excel + .EST on Setup first (or resume a saved shift).")
             return
         self._begin_route_pick(stops)
+
+    def _start_auto_build_queue(
+        self,
+        jobs: list[tuple[str, list[dict]]],
+        *,
+        stay_all_days: bool = True,
+    ) -> None:
+        """Auto-optimize each map independently, then show All days together."""
+        jobs = [(lab, list(stops)) for lab, stops in jobs if lab and stops]
+        if not jobs:
+            self._warn("No sites on this map to build.")
+            self._restore_build_button_if_idle()
+            return
+        self._auto_build_queue = jobs
+        self._auto_build_stay_all_days = stay_all_days
+        self._run_next_auto_build()
+
+    def _run_next_auto_build(self) -> None:
+        queue = getattr(self, "_auto_build_queue", None) or []
+        if not queue:
+            return
+        label, _ = queue[0]
+        stops = route_sections.stops_for_section(self.state.stops, label)
+        done_n = int(getattr(self, "_auto_build_done_n", 0) or 0)
+        if done_n == 0:
+            self._auto_build_queue_total = len(queue)
+        self._optimize_and_route(
+            stops or queue[0][1],
+            section=label,
+            queue_pos=done_n + 1,
+            queue_total=int(getattr(self, "_auto_build_queue_total", len(queue)) or 1),
+        )
+
+    def _write_setup_install_html(self, *, mode: str = "both") -> list[str]:
+        from core import maps_links
+
+        labels = [
+            lab for lab in self._route_section_labels()
+            if not route_sections.is_all_days(lab)
+        ]
+        stored = self._ensure_routes_by_map()
+        miles_by = {
+            lab: float((stored.get(lab) or {}).get("miles") or 0) for lab in labels
+        }
+        try:
+            return maps_links.write_install_html_bundle(
+                list(self.state.stops),
+                DATA_DIR,
+                self.state.profile,
+                labels=labels,
+                miles_by_sheet=miles_by,
+                mode=mode,
+            )
+        except Exception as exc:  # noqa: BLE001
+            crash_log.log_error(exc, context="setup_install_html")
+            self.statusBar().showMessage(f"HTML install list failed: {exc}", 8000)
+            return []
+
+    def _finish_auto_build_queue(self, last_section: str) -> None:
+        self._auto_build_queue = []
+        self._auto_build_done_n = 0
+        stay_all = bool(getattr(self, "_auto_build_stay_all_days", True))
+        self._refresh_day_filter()
+        if stay_all and self._route_section_active():
+            self._set_route_section(route_sections.DAY_FILTER_ALL, persist=False)
+        elif last_section:
+            self._set_route_section(last_section, persist=False)
+        self._refresh_route_list()
+        self._push_state(fit=True)
+        paths = self._write_setup_install_html(mode="both")
+        if paths:
+            names = "\n".join(paths)
+            self._info(
+                "HTML install lists saved (merged All days + each map separate):\n\n"
+                f"{names}\n\nSend the file you need to your phone."
+            )
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl.fromLocalFile(paths[-1]))
 
     @staticmethod
     def _street_label(s: dict) -> str:
@@ -676,7 +772,14 @@ class RouteControllerMixin:
         nxt = self._next_leg_payload()
         return nxt["to_uid"] if nxt else None
 
-    def _optimize_and_route(self, stops):
+    def _optimize_and_route(
+        self,
+        stops,
+        *,
+        section: str = "",
+        queue_pos: int = 1,
+        queue_total: int = 1,
+    ):
         if self._route_thread is not None and self._route_thread.isRunning():
             self.statusBar().showMessage("Route build already running…", 4000)
             return
@@ -695,8 +798,10 @@ class RouteControllerMixin:
                 "Add a road map on Setup (Download roads / Import .graphml) for real streets.",
                 9000)
 
+        tag = f"{section} — " if section else ""
+        queue_bit = f" ({queue_pos}/{queue_total})" if queue_total > 1 else ""
         dlg = QProgressDialog(
-            "Building route — zone sweep from your start point...",
+            f"Building {tag}route{queue_bit} — zone sweep from your start point...",
             "Cancel", 0, 0, self)
         dlg.setWindowTitle("Building route")
         dlg.setWindowModality(Qt.WindowModal)
@@ -718,6 +823,8 @@ class RouteControllerMixin:
         thread = RouteOptimizeThread(
             list(stops), tuple(self.state.home), DATA_DIR, start=start)
         self._route_thread = thread
+        build_section = section
+        queued = bool(getattr(self, "_auto_build_queue", None))
 
         def _restore_build_btn():
             if hasattr(self, "btn_build"):
@@ -725,7 +832,8 @@ class RouteControllerMixin:
                 self.btn_build.setText(BUILD_LABEL)
 
         def on_progress(msg: str):
-            dlg.setLabelText(f"{msg}\n\nElapsed: {int(_time.time() - t0)}s")
+            dlg.setLabelText(
+                f"{tag}{msg}{queue_bit}\n\nElapsed: {int(_time.time() - t0)}s")
 
         def tick():
             pass  # progress_text from worker updates the label
@@ -734,8 +842,10 @@ class RouteControllerMixin:
             etimer.stop()
             dlg.close()
             self._route_thread = None
-            _restore_build_btn()
             if not res.get("ok"):
+                _restore_build_btn()
+                self._auto_build_queue = []
+                self._auto_build_done_n = 0
                 err = f"Routing failed: {res.get('error', 'unknown')}"
                 if self.state.offline_mode:
                     self._field_notice(err)
@@ -744,8 +854,16 @@ class RouteControllerMixin:
                 if res.get("trace"):
                     print(res["trace"])
                 return
-            self.state.stops = res["order"]
-            self.state.route = res["route"]
+            ordered = res["order"]
+            if build_section and not route_sections.is_all_days(build_section):
+                self.state.stops = route_sections.merge_section_order(
+                    self.state.stops, ordered)
+                self._ensure_routes_by_map()[build_section] = dict(res["route"])
+                if self._day_filter_value() == build_section:
+                    self.state.route = dict(res["route"])
+            else:
+                self.state.stops = ordered
+                self.state.route = res["route"]
             self.current_index = min(self.current_index, max(0, len(self.state.stops) - 1))
             self._persist_shift(quiet=True)
             self._refresh_route_list()
@@ -775,35 +893,52 @@ class RouteControllerMixin:
             except Exception:
                 clock = ""
             clock_bit = f" · {clock}" if clock else ""
+            map_bit = f"{build_section} · " if build_section else ""
             self.statusBar().showMessage(
-                f"Route ready: {len(res['order'])} stops, {miles:.1f} mi{clock_bit} — {kind}", 12000)
-            if uncovered:
-                self.statusBar().showMessage(
-                    f"Route ready: {len(res['order'])} stops, {miles:.1f} mi — "
-                    "straight-line (saved road map is for a different job). "
-                    "Setup → Download roads with these files loaded, then Build again for real streets.",
-                    14000)
-                QMessageBox.warning(
-                    self,
-                    "Road map does not cover this job",
-                    f"Route built: {len(res['order'])} stops, {miles:.1f} mi "
-                    "(straight-line only).\n\n"
-                    "Saved road map is for a different job area. "
-                    "Setup → Download roads with these Excel/.EST files loaded, "
-                    "then Build again for real street miles.",
-                )
-            elif not r.get("graph"):
-                self.statusBar().showMessage(
-                    "Route built (straight-line miles). For real-street order and miles, "
-                    "add a road map on Setup, then Build again.", 9000)
-            self._refresh_field_ready()
-            self._refresh_route_summary_ui()
+                f"{map_bit}Route ready: {len(ordered)} stops, {miles:.1f} mi{clock_bit} — {kind}",
+                12000)
+            last_in_queue = True
+            queue = getattr(self, "_auto_build_queue", None) or []
+            if queue and queue[0][0] == build_section:
+                queue.pop(0)
+                self._auto_build_done_n = int(getattr(self, "_auto_build_done_n", 0) or 0) + 1
+            if queue:
+                last_in_queue = False
+                QTimer.singleShot(0, self._run_next_auto_build)
+            elif queued or build_section:
+                _restore_build_btn()
+                self._finish_auto_build_queue(build_section)
+            else:
+                _restore_build_btn()
+                paths = self._write_setup_install_html(mode="both")
+                if paths:
+                    self.statusBar().showMessage(
+                        f"Route ready + HTML install list: {paths[-1]}", 10000)
+            if last_in_queue:
+                if uncovered:
+                    QMessageBox.warning(
+                        self,
+                        "Road map does not cover this job",
+                        f"Route built: {len(ordered)} stops, {miles:.1f} mi "
+                        "(straight-line only).\n\n"
+                        "Saved road map is for a different job area. "
+                        "Setup → Download roads with these Excel/.EST files loaded, "
+                        "then Build again for real street miles.",
+                    )
+                elif not r.get("graph"):
+                    self.statusBar().showMessage(
+                        "Route built (straight-line miles). For real-street order and miles, "
+                        "add a road map on Setup, then Build again.", 9000)
+                self._refresh_field_ready()
+                self._refresh_route_summary_ui()
 
         def canceled():
             etimer.stop()
             self._stop_worker(thread)
             dlg.close()
             self._route_thread = None
+            self._auto_build_queue = []
+            self._auto_build_done_n = 0
             _restore_build_btn()
 
         etimer.timeout.connect(tick)

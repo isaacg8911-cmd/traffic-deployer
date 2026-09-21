@@ -1,4 +1,4 @@
-"""Prove D1–D3: no route tour traces, BUILD ROUTE → pick-first, Fleet nav hidden.
+"""Prove D1–D3: no route tour traces, BUILD ROUTE auto-optimizes, Fleet nav hidden.
 
 Site begin↔end dashed chords are allowed (Install Pins look; cheap geometry).
 Gate: load job (Week 18 via TD_JOB_* env when present, else bundled validation job)
@@ -34,7 +34,7 @@ def fail(name: str, detail: str = "") -> None:
 
 
 def main() -> int:
-    print("PROVE D1-D3 (map traces off, pick-first build, Fleet hidden)\n")
+    print("PROVE D1-D3 (map traces off, auto-build, Fleet hidden)\n")
 
     from PySide6.QtCore import QUrl, QTimer
     from PySide6.QtWebChannel import QWebChannel
@@ -83,7 +83,7 @@ def main() -> int:
         return 1
     ok("job load", f"{job.label} ({job.source}) — {len(stops)} stops")
 
-    # --- D2: BUILD ROUTE enters pick mode (no optimize thread) ---------------
+    # --- D2: BUILD ROUTE auto-optimizes (Pick on map stays on Route tab) -----
     class BuildWin(MapSyncControllerMixin, RouteControllerMixin):
         def __init__(self) -> None:
             self.excel_paths = [job.xls]
@@ -156,16 +156,16 @@ def main() -> int:
         def _warn(self, _msg: str) -> None:
             return
 
-        def _optimize_and_route(self, _stops):
+        def _optimize_and_route(self, _stops, **_kw):
             self._optimize_called = True
 
     app = QApplication.instance() or QApplication(sys.argv)
     bw = BuildWin()
     bw._build_route_from_uploads()
-    if bw._route_pick_mode and not bw._optimize_called:
-        ok("D2 BUILD ROUTE -> pick mode", "no silent optimize")
+    if bw._optimize_called and not bw._route_pick_mode:
+        ok("D2 BUILD ROUTE -> auto-optimize", "not pick-first")
     else:
-        fail("D2 BUILD ROUTE -> pick mode", f"pick={bw._route_pick_mode} optimize={bw._optimize_called}")
+        fail("D2 BUILD ROUTE -> auto-optimize", f"pick={bw._route_pick_mode} optimize={bw._optimize_called}")
 
     # --- map push + layer probe ----------------------------------------------
     ensure_qwebchannel_js()

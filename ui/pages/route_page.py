@@ -187,7 +187,7 @@ def build_route_page(win) -> QWidget:
     b_install_links = QPushButton("HTML route")
     b_install_links.setObjectName("secondary")
     b_install_links.setToolTip(
-        "Save an HTML page with one Google Maps link per stop in route order.",
+        "Save HTML install lists: both days merged, each day separate, or this map only.",
     )
     b_install_links.clicked.connect(win._save_install_nav_links)
     b_pickup_links = QPushButton("HTML pickup")

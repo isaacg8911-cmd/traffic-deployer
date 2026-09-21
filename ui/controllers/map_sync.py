@@ -118,8 +118,16 @@ class MapSyncControllerMixin:
         self.bridge.refresh_view()
         self._push_state(fit=True)
 
+    def _composed_all_days_route(self) -> dict:
+        labels = self._route_section_labels()
+        return route_sections.compose_section_routes(self._ensure_routes_by_map(), labels)
+
     def _display_route(self) -> dict:
         if self._route_section_active() and not self._day_filter_active():
+            composed = self._composed_all_days_route()
+            if composed.get("polylines") or composed.get("polyline") or float(
+                    composed.get("miles") or 0) > 0:
+                return display_route_for_map(composed)
             return display_route_for_map(route_sections.empty_route())
         return display_route_for_map(self.state.route)
 
@@ -269,13 +277,23 @@ class MapSyncControllerMixin:
         self._go_page(2)
         self._center_current()
 
+    def _section_label_files(self) -> list[str]:
+        files = list(getattr(self.state, "active_files", None) or [])
+        if files or not getattr(self, "est_paths", None):
+            return files
+        labelfn = getattr(self, "_est_label_from_path", None)
+        if callable(labelfn):
+            return [labelfn(p) for p in self.est_paths]
+        import os
+        return [os.path.splitext(os.path.basename(p))[0] for p in self.est_paths]
+
     def _route_section_labels(self) -> list[str]:
-        return route_sections.section_labels(
-            self.state.stops, getattr(self.state, "active_files", None))
+        stops = self.state.stops or getattr(self, "_map_preview_stops", []) or []
+        return route_sections.section_labels(stops, self._section_label_files())
 
     def _route_section_active(self) -> bool:
-        return route_sections.multi_section(
-            self.state.stops, getattr(self.state, "active_files", None))
+        stops = self.state.stops or getattr(self, "_map_preview_stops", []) or []
+        return route_sections.multi_section(stops, self._section_label_files())
 
     def _ensure_routes_by_map(self) -> dict[str, dict]:
         stored = getattr(self.state, "routes_by_map", None)
@@ -318,7 +336,11 @@ class MapSyncControllerMixin:
         day = self._day_filter_value()
         if route_sections.is_all_days(day):
             if self._route_section_active():
-                self.state.route = route_sections.empty_route()
+                composed = self._composed_all_days_route()
+                self.state.route = composed if (
+                    composed.get("polylines") or composed.get("polyline")
+                    or float(composed.get("miles") or 0) > 0
+                ) else route_sections.empty_route()
             return
         stored = self._ensure_routes_by_map().get(day)
         if stored:
@@ -573,8 +595,8 @@ class MapSyncControllerMixin:
             stop.pop("pick_cross_locked", None)
 
     def _ask_route_build_mode(self) -> str | None:
-        """Pick-first workflow — BUILD ROUTE always opens manual pick (D2)."""
-        return "pick"
+        """Setup Build auto-optimizes; Route tab still has Pick on map."""
+        return "auto"
 
     @staticmethod
     def _stops_with_seq(stops: list[dict]) -> list[dict]:
@@ -591,10 +613,12 @@ class MapSyncControllerMixin:
         if self.state.stops:
             self._map_preview_stops = []
             self._map_preview_route = {"polyline": [], "miles": 0.0, "graph": False}
+            self._refresh_day_filter()
             return
         if not self.excel_paths or not self.est_paths:
             self._map_preview_stops = []
             self._map_preview_route = {"polyline": [], "miles": 0.0, "graph": False}
+            self._refresh_day_filter()
             self._update_right()
             if self._map_js_ready:
                 self._push_state()
@@ -606,6 +630,14 @@ class MapSyncControllerMixin:
             self._map_preview_stops = routing.assign_crossings_for_display(
                 raw, self.state.home, DATA_DIR)
             self._map_preview_route = {"polyline": [], "miles": 0.0, "graph": False}
+            if self._map_preview_stops and not getattr(self.state, "active_files", None):
+                seen: list[str] = []
+                for s in self._map_preview_stops:
+                    name = str(s.get("sheet") or "").strip()
+                    if name and name not in seen:
+                        seen.append(name)
+                if seen:
+                    self.state.active_files = seen
         except ingest.ExcelEngineMissing as exc:
             crash_log.log_field_notice(str(exc), context="map_preview_ingest")
             self._map_preview_stops = []
@@ -618,6 +650,7 @@ class MapSyncControllerMixin:
             crash_log.log_error(exc, context="map_preview")
             self._map_preview_stops = []
             self._map_preview_route = {"polyline": [], "miles": 0.0, "graph": False}
+        self._refresh_day_filter()
         self._update_right(force_map=bool(self._map_preview_stops))
         if self._map_js_ready:
             self._push_state(fit=bool(self._map_preview_stops))

@@ -372,6 +372,25 @@ def test_maps_links():
         "phone nav wired",
         "_save_install_nav_links" in shortcuts_src and "_save_pickup_nav_links" in shortcuts_src,
     )
+    import tempfile
+    two_day = [
+        {"id": "101", "sheet": "Day5", "street": "A St", "lat": 33.77, "lon": -117.94},
+        {"id": "201", "sheet": "Day6", "street": "B St", "lat": 33.78, "lon": -117.95},
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        both = maps_links.write_install_html_bundle(
+            two_day, tmp, "SMOKE", labels=["Day5", "Day6"], mode="both")
+        check("install html both writes 3", len(both) == 3)
+        check("install html has All_days", any("All_days" in p for p in both))
+        check("install html has Day5", any("Day5" in os.path.basename(p) for p in both))
+        sep = maps_links.write_install_html_bundle(
+            two_day, tmp, "SMOKESEP", labels=["Day5", "Day6"], mode="separate")
+        check("install html separate is 2", len(sep) == 2 and not any("All_days" in p for p in sep))
+        merged = maps_links.write_install_html_bundle(
+            two_day, tmp, "SMOKEMERGE", labels=["Day5", "Day6"], mode="merged")
+        check("install html merged is 1", len(merged) == 1 and "All_days" in merged[0])
+        body = open(merged[0], encoding="utf-8").read()
+        check("merged html tags sheets", "[Day5]" in body and "[Day6]" in body)
     from core import export
     row = {
         "Site": 15096, "Street": "DALTON SPRINGS LN", "ExactTime": "2026-06-17 07:58:09",
@@ -594,7 +613,8 @@ def test_web_assets():
     check("field crash log hook", "install_crash_logging" in main_src)
     check("map guide when following", '"show_guide": False' in main_src)
     check("no map trace lines", "SHOW_TRACE_LINES = false" in appjs)
-    check("pick-first build", "_begin_route_pick(" in main_src)
+    check("setup build auto-optimizes maps", "_start_auto_build_queue" in main_src)
+    check("pick still on route tab", "_start_pick_route_from_route_tab" in main_src)
     check("fleet nav removed", "Fleet" not in open(os.path.join(ROOT, "ui", "shell", "main_layout.py"), encoding="utf-8").read())
     check("fleet nav flag off", "FLEET_NAV_ENABLED = False" in open(os.path.join(ROOT, "ui", "simple_mode.py")).read())
     check("D4 seq badge labels", "'text-field': ['to-string', ['get', 'seq']]" in appjs)
@@ -645,7 +665,12 @@ def test_web_assets():
     check("route on map plan", "_route_for_map(preview" in main_src)
     from core import route_sections
     check("two-map route sections", callable(route_sections.merge_section_order)
-          and callable(route_sections.preserve_other_section_orders))
+          and callable(route_sections.preserve_other_section_orders)
+          and callable(route_sections.compose_section_routes))
+    check("setup build auto-optimizes", '"auto"' in open(
+        os.path.join(ROOT, "ui", "controllers", "map_sync.py"), encoding="utf-8").read()
+        and "_start_auto_build_queue" in open(
+            os.path.join(ROOT, "ui", "controllers", "route.py"), encoding="utf-8").read())
     check("map cycle controls", "_cycle_map_next" in main_src and "btn_map_next" in main_src)
     from ui.simple_mode import BUILD_LABEL, SIMPLE_MODE
     check("simple mode default", SIMPLE_MODE)

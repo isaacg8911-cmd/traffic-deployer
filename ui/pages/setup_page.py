@@ -226,6 +226,9 @@ def build_setup_page(win) -> QWidget:
         sec_route = sec_build
     win.btn_build = QPushButton(BUILD_LABEL)
     win.btn_build.setObjectName("primary")
+    win.btn_build.setToolTip(
+        "Auto-build driving order. Two .EST maps: each day separately, then All days together. "
+        "Writes HTML install lists (merged + one file per day). Pick on map is on the Route tab.")
     win.btn_build.clicked.connect(win._build_route_from_uploads)
     button_row(sec_route, win.btn_build)
 

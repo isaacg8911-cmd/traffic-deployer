@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
-from PySide6.QtWidgets import QFileDialog, QApplication, QComboBox, QLineEdit, QPlainTextEdit, QSpinBox
+from PySide6.QtWidgets import (
+    QFileDialog, QApplication, QComboBox, QLineEdit, QPlainTextEdit, QSpinBox, QMessageBox,
+)
 
 from core import maps_links
 from ui.paths import DATA_DIR, UNDO_FIELDS
@@ -107,30 +109,35 @@ class ShortcutsControllerMixin:
         elif self.pages.currentIndex() == 3:
             self._nav_pickup(1)
 
-    def _phone_nav_links(self, kind: str = "install") -> tuple[list[dict], list[str]]:
-        if not self.state.stops:
+    def _phone_nav_links(self, kind: str = "install", *, stops: list[dict] | None = None) -> tuple[list[dict], list[str]]:
+        batch_src = list(stops) if stops is not None else list(self.state.stops)
+        if not batch_src:
             return [], ["Build your route first (Setup → BUILD ROUTE)."]
         if kind == "pickup":
-            batch = maps_links.pickup_sequence_stops(self.state.stops)
+            batch = maps_links.pickup_sequence_stops(batch_src)
             if not batch:
                 return [], ["No installed sites yet — install counters first."]
         else:
-            batch = maps_links.install_sequence_stops(self.state.stops)
-        return maps_links.build_route_links(batch)
+            batch = maps_links.install_sequence_stops(batch_src)
+        include_sheet = False
+        if kind == "install" and stops is None and self._route_section_active() and not self._day_filter_active():
+            include_sheet = True
+        return maps_links.build_route_links(batch, include_sheet=include_sheet)
 
-    def _save_nav_links_page(self, kind: str) -> None:
-        links, errors = self._phone_nav_links(kind)
+    def _save_nav_links_page(self, kind: str, *, stops: list[dict] | None = None, sheet: str = "") -> None:
+        links, errors = self._phone_nav_links(kind, stops=stops)
         if errors and not links:
             self._warn("Cannot build phone links:\n\n" + "\n".join(errors))
             return
         miles = float(self.state.route.get("miles", 0) or 0)
         body = maps_links.to_html(
             links,
-            profile=self.state.profile,
+            profile=sheet or self.state.profile,
             miles=miles if miles > 0 and kind == "install" else None,
             kind=kind,
         )
-        default = maps_links.default_links_path(DATA_DIR, self.state.profile, kind=kind)
+        default = maps_links.default_links_path(
+            DATA_DIR, self.state.profile, kind=kind, sheet=sheet)
         dlg_title = "Save install navigation links" if kind == "install" else "Save pickup navigation links"
         path, _ = QFileDialog.getSaveFileName(self, dlg_title, default, "Web page (*.html)")
         if not path:
@@ -147,7 +154,41 @@ class ShortcutsControllerMixin:
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _save_install_nav_links(self) -> None:
-        self._save_nav_links_page("install")
+        if not self._route_section_active():
+            self._save_nav_links_page("install")
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("HTML install list")
+        box.setText(
+            "Save Google Maps install links — merged (both days) or separate (each map).")
+        b_merged = box.addButton("Both days merged", QMessageBox.AcceptRole)
+        b_sep = box.addButton("Each day separate", QMessageBox.AcceptRole)
+        b_both = box.addButton("Merged + separate", QMessageBox.AcceptRole)
+        b_this = box.addButton("This map only", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is None or clicked == box.button(QMessageBox.Cancel):
+            return
+        if clicked is b_this:
+            if self._day_filter_active():
+                day = self._day_filter_value()
+                self._save_nav_links_page(
+                    "install",
+                    stops=self._stops_matching_day_filter(),
+                    sheet=day,
+                )
+            else:
+                self._save_nav_links_page("install")
+            return
+        mode = "merged" if clicked is b_merged else (
+            "separate" if clicked is b_sep else "both")
+        paths = self._write_setup_install_html(mode=mode)
+        if not paths:
+            self._warn("No install HTML written — build a route first.")
+            return
+        self._info("Saved HTML install list(s):\n\n" + "\n".join(paths))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(paths[-1]))
 
     def _save_pickup_nav_links(self) -> None:
         self._save_nav_links_page("pickup")

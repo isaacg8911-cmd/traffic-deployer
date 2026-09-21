@@ -117,3 +117,46 @@ def cycle_label(labels: list[str], current: str, delta: int) -> str | None:
     if current not in labels:
         return labels[0] if delta >= 0 else labels[-1]
     return labels[(labels.index(current) + delta) % len(labels)]
+
+
+def compose_section_routes(
+    routes_by_map: dict[str, dict] | None,
+    labels: list[str],
+) -> dict:
+    """Overlay independently built day routes for the All-days view.
+
+    Polylines stay in ``polylines`` (one list per map) so a fake drive line
+    is not drawn between the last stop of day 1 and the first stop of day 2.
+    """
+    out = empty_route()
+    chunks: list[list] = []
+    miles = 0.0
+    graph = False
+    site_legs: list = []
+    stored = routes_by_map or {}
+    for label in labels or []:
+        if is_all_days(label):
+            continue
+        route = stored.get(label) or {}
+        poly = list(route.get("polyline") or [])
+        if poly:
+            chunks.append(poly)
+        miles += float(route.get("miles") or 0)
+        if route.get("graph"):
+            graph = True
+        legs = route.get("site_legs") or route.get("legs") or []
+        if isinstance(legs, list):
+            site_legs.extend(legs)
+    if chunks:
+        # Single polyline for maps that only read ``polyline``; keep a gap
+        # marker-free concat only when there is exactly one day.
+        if len(chunks) == 1:
+            out["polyline"] = chunks[0]
+        else:
+            out["polyline"] = []
+        out["polylines"] = chunks
+    out["miles"] = round(miles, 2)
+    out["graph"] = graph
+    if site_legs:
+        out["site_legs"] = site_legs
+    return out

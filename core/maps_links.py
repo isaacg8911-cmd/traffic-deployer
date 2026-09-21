@@ -33,18 +33,20 @@ def google_maps_nav_url(lat: float, lon: float) -> str:
     )
 
 
-def _stop_label(stop: dict, seq: int) -> str:
+def _stop_label(stop: dict, seq: int, *, include_sheet: bool = False) -> str:
     street = str(stop.get("street", "")).strip()
     if not street or street.lower() in ("nan", "none", "nat"):
         street = ""
     site = str(stop.get("id", "")).strip()
+    sheet = str(stop.get("sheet") or "").strip() if include_sheet else ""
+    tag = f"[{sheet}] " if sheet else ""
     if street and site:
-        return f"{seq}. Site {site} — {street}"
+        return f"{seq}. {tag}Site {site} — {street}"
     if site:
-        return f"{seq}. Site {site}"
+        return f"{seq}. {tag}Site {site}"
     if street:
-        return f"{seq}. {street}"
-    return f"{seq}. Stop"
+        return f"{seq}. {tag}{street}"
+    return f"{seq}. {tag}Stop"
 
 
 def install_sequence_stops(stops: list[dict]) -> list[dict]:
@@ -65,7 +67,11 @@ def pickup_sequence_stops(stops: list[dict]) -> list[dict]:
     return installed
 
 
-def build_route_links(stops: list[dict]) -> tuple[list[dict], list[str]]:
+def build_route_links(
+    stops: list[dict],
+    *,
+    include_sheet: bool = False,
+) -> tuple[list[dict], list[str]]:
     """
     Return (links, errors) for stops in current visit order.
     Each link: {seq, id, street, lat, lon, label, url}.
@@ -80,7 +86,7 @@ def build_route_links(stops: list[dict]) -> tuple[list[dict], list[str]]:
             errors.append(f"Stop {i} (site {stop.get('id', '?')}): missing coordinates")
             continue
         lat, lon = coords
-        label = _stop_label(stop, i)
+        label = _stop_label(stop, i, include_sheet=include_sheet)
         links.append({
             "seq": i,
             "id": stop.get("id", ""),
@@ -191,3 +197,79 @@ def write_pickup_links_page(
     with open(path, "w", encoding="utf-8") as f:
         f.write(body)
     return len(links), errors
+
+
+def write_install_links_page(
+    stops: list[dict],
+    path: str,
+    *,
+    profile: str = "",
+    sheet: str = "",
+    miles: float | None = None,
+    include_sheet: bool = False,
+) -> tuple[int, list[str]]:
+    """Install-order HTML (Google Maps tap links). Returns (link_count, errors)."""
+    batch = install_sequence_stops(stops)
+    links, errors = build_route_links(batch, include_sheet=include_sheet)
+    body = to_html(
+        links,
+        profile=sheet or profile,
+        miles=miles if miles and miles > 0 else None,
+        kind="install",
+    )
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(body)
+    return len(links), errors
+
+
+def write_install_html_bundle(
+    stops: list[dict],
+    data_dir: str,
+    profile: str,
+    *,
+    labels: list[str] | None = None,
+    miles_by_sheet: dict[str, float] | None = None,
+    mode: str = "both",
+) -> list[str]:
+    """Write install HTML lists: per-day, merged All days, or both.
+
+    ``mode`` is ``separate`` | ``merged`` | ``both``. One-map jobs always
+    write a single file. Returns paths written (may be empty if no stops).
+    """
+    from core.route_sections import DAY_FILTER_ALL, is_all_days, section_labels, stops_for_section
+
+    if not stops:
+        return []
+    mode = (mode or "both").strip().lower()
+    if mode not in {"separate", "merged", "both"}:
+        mode = "both"
+    miles_by_sheet = miles_by_sheet or {}
+    days = [
+        lab for lab in (labels or section_labels(stops))
+        if lab and not is_all_days(lab)
+    ]
+    written: list[str] = []
+    if len(days) < 2:
+        path = default_links_path(data_dir, profile, kind="install")
+        mi = miles_by_sheet.get(days[0] if days else "", 0.0) or miles_by_sheet.get("", 0.0)
+        write_install_links_page(stops, path, profile=profile, miles=mi or None)
+        return [path]
+    if mode in ("separate", "both"):
+        for lab in days:
+            batch = stops_for_section(stops, lab)
+            if not batch:
+                continue
+            path = default_links_path(data_dir, profile, kind="install", sheet=lab)
+            write_install_links_page(
+                batch, path, profile=profile, sheet=lab,
+                miles=miles_by_sheet.get(lab) or None)
+            written.append(path)
+    if mode in ("merged", "both"):
+        path = default_links_path(data_dir, profile, kind="install", sheet="All_days")
+        total_mi = sum(float(miles_by_sheet.get(lab) or 0) for lab in days) or None
+        write_install_links_page(
+            stops, path, profile=profile, sheet=DAY_FILTER_ALL,
+            miles=total_mi, include_sheet=True)
+        written.append(path)
+    return written

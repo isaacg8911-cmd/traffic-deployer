@@ -79,7 +79,7 @@ Audit tab: **shift summary** + export.
 4. **START DRIVING** - turn-by-turn banner + offline voice (female Windows guide). Light blue line to the next stop only.
 5. **Install tab** — per stop: street, direction, lanes, **Serial #** (type it), **Grab GPS** / drop pin, then **INSTALL** or **SKIP**. Counter USB (connect, clear, download) is **TrafficViewer**, not this app.
    - **Drop pin:** click then drag the orange pin — the final spot is saved. Install / Next will not snap it back.
-   - **HTML pickup** (Route tab): links drive to each site’s **install GPS / pin**, not the Excel begin/end dots.
+   - **HTML route / pickup** (Route tab): merged (both days) or separate (one file per map). Pickup links drive to each site’s **install GPS / pin**, not the Excel begin/end dots.
 6. **Pickup tab** — mark each site **SECURED**. Download counts in **TrafficViewer**.
 7. **Audit tab** - it flags missing data, then **Handoff export** (Excel + Map `.est`). The IG TFC sheet lists sites in **install order** (time marked INSTALL/SKIP), not original office site order. Zip Excel + `.est` for the office — **do not include `.html` or `.kml`** (email antivirus treats extra map viewers as a virus).
 
@@ -146,8 +146,8 @@ label fonts.
 ## One-laptop field checklist (raises readiness)
 
 1. Run **`SMOKE.bat`** (or `.\scripts\smoke_test.ps1` for smoke + demo + preflight) after any update.
-2. Setup: Excel + `.EST` → **Download road map** → **BUILD OPTIMIZED ROUTE**.
-3. Route tab: set **Map on screen** to today's Day# if you only want that day visible.
+2. Setup: Excel + `.EST` → **Download road map** → **Build**. Two maps auto-build **each day separately** and show **All days together**. HTML install lists write merged + per-day into `tds_data/exports/`.
+3. Route tab: **Map** filter = one day (that day’s pins) or **All days** (both). **HTML route** can save merged or separate lists.
 4. Install: **Grab GPS** fills street from internet or **offline road map**; use compass when stopped.
 5. End: Audit export (includes MapDay, cross point, wide-street warning).
 

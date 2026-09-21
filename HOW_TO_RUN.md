@@ -85,8 +85,10 @@ Audit tab: **shift summary** + export.
 
 ## Phone field app (same tabs, smaller screen)
 
-Double-click **`RUN_MOBILE.bat`** and open the printed URL on the phone. Tabs match
-the laptop: **Setup · Route · Install · Pickup · Audit**.
+Double-click **`RUN_MOBILE.bat`** and open the printed URL on the phone. First
+screen matches laptop Setup: **start address** (search or GPS), Excel + `.EST`,
+then **Download / Open job file** (`.tdjob.json`) if the server cannot save.
+Tabs: **Setup · Route · Install · Pickup · Audit**.
 
 If the server cannot save (no signal), the phone keeps the shift locally. Tap
 **Download job file** (`.tdjob.json`) and later **Open job file** on the start

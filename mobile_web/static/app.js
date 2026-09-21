@@ -6,6 +6,7 @@
 
   var DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
   var LS_KEY = 'td_mobile_job';
+  var LS_HOME = 'td_mobile_home';
   var TABS = ['setup', 'route', 'install', 'pickup', 'audit'];
   var MAP_TABS = { route: 1, install: 1, pickup: 1 };
   var CA = { minLat: 32.0, maxLat: 42.5, minLon: -125.0, maxLon: -114.0 };
@@ -16,7 +17,8 @@
     tab: 'route', current: 0, pinMode: false, tileUrl: null,
     publicMode: false, canCreate: true, shareUrl: null,
     reorderMode: false, busy: false, localOnly: false, pending: [],
-    driving: false, geoWatch: null, myLat: null, myLon: null
+    driving: false, geoWatch: null, myLat: null, myLon: null,
+    homeLat: null, homeLon: null, homeLabel: ''
   };
   var map = null, mapReady = false, meMarker = null, pinMarker = null;
 
@@ -829,6 +831,7 @@
     $('saveBanner').classList.add('hidden');
     document.body.classList.remove('has-map');
     TABS.forEach(function (t) { $(t + 'Screen').classList.add('hidden'); });
+    refreshLastHomeBtn();
     listPhoneJobs();
   }
 
@@ -845,12 +848,125 @@
     }
   }
 
+  function setFileLabel(inputId, labelId, emptyText) {
+    var input = $(inputId), el = $(labelId);
+    if (!input || !el) return;
+    var names = [];
+    for (var i = 0; i < input.files.length; i++) names.push(input.files[i].name);
+    el.textContent = names.length ? names.join(', ') : emptyText;
+    var wrap = input.closest ? input.closest('.file-btn') : input.parentNode;
+    if (wrap && wrap.classList) wrap.classList.toggle('has-file', names.length > 0);
+  }
+
+  function loadSavedHome() {
+    try { return JSON.parse(localStorage.getItem(LS_HOME) || 'null'); } catch (e) { return null; }
+  }
+  function persistHome() {
+    if (state.homeLat == null) return;
+    try {
+      localStorage.setItem(LS_HOME, JSON.stringify({
+        lat: state.homeLat, lon: state.homeLon, label: state.homeLabel || ''
+      }));
+    } catch (e) {}
+    refreshLastHomeBtn();
+  }
+  function applyHome(lat, lon, label) {
+    state.homeLat = lat; state.homeLon = lon; state.homeLabel = label || '';
+    $('homeStatus').textContent = (label || 'Start set') + ' · ' + lat.toFixed(5) + ', ' + lon.toFixed(5);
+    $('homeStatus').className = 'msg ok';
+    if (label && !$('homeAddr').value.trim()) $('homeAddr').value = label;
+    persistHome();
+  }
+  function refreshLastHomeBtn() {
+    var saved = loadSavedHome();
+    var btn = $('btnLastHome');
+    if (!btn) return;
+    if (saved && saved.lat != null) {
+      btn.classList.remove('hidden');
+      btn.textContent = 'Use last start' + (saved.label ? ' · ' + String(saved.label).slice(0, 40) : '');
+    } else {
+      btn.classList.add('hidden');
+    }
+  }
+  function pickHomeCandidate(c) {
+    applyHome(c.lat, c.lon, c.label);
+    $('homeCands').classList.add('hidden');
+    $('homeCands').innerHTML = '';
+    toast('Start: ' + (c.label || 'saved'));
+  }
+  function searchHome() {
+    var q = $('homeAddr').value.trim();
+    if (!q) {
+      $('homeStatus').textContent = 'Type a start address (street, city, CA zip).';
+      $('homeStatus').className = 'msg err';
+      return;
+    }
+    $('homeStatus').textContent = 'Searching…'; $('homeStatus').className = 'msg';
+    fetch('/api/geocode?q=' + encodeURIComponent(q)).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok) throw new Error(j.detail || 'Search failed');
+        return j;
+      });
+    }).then(function (res) {
+      var cands = res.candidates || [];
+      if (!cands.length) {
+        $('homeStatus').textContent = 'No California match — try street, city, CA zip.';
+        $('homeStatus').className = 'msg err';
+        $('homeCands').classList.add('hidden');
+        return;
+      }
+      if (cands.length === 1) { pickHomeCandidate(cands[0]); return; }
+      var ul = $('homeCands'); ul.innerHTML = ''; ul.classList.remove('hidden');
+      cands.forEach(function (c) {
+        var li = document.createElement('li');
+        li.innerHTML = '<span class="grow"><b>' + esc(c.label) + '</b><span class="sub">tap to use as start</span></span>';
+        li.onclick = function () { pickHomeCandidate(c); };
+        ul.appendChild(li);
+      });
+      $('homeStatus').textContent = cands.length + ' matches — tap one.';
+      $('homeStatus').className = 'msg';
+    }).catch(function (e) {
+      $('homeStatus').textContent = e.message || 'Address search needs a signal.';
+      $('homeStatus').className = 'msg err';
+    });
+  }
+  function homeFromGps() {
+    if (!navigator.geolocation) {
+      $('homeStatus').textContent = 'No GPS — type an address instead.';
+      $('homeStatus').className = 'msg err';
+      return;
+    }
+    $('homeStatus').textContent = 'Getting GPS…'; $('homeStatus').className = 'msg';
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      var lat = pos.coords.latitude, lon = pos.coords.longitude;
+      if (!(lat > CA.minLat && lat < CA.maxLat && lon > CA.minLon && lon < CA.maxLon)) {
+        $('homeStatus').textContent = 'GPS is outside California — type a CA start address.';
+        $('homeStatus').className = 'msg err';
+        return;
+      }
+      applyHome(lat, lon, 'Phone GPS');
+      toast('Start set from GPS');
+    }, function () {
+      $('homeStatus').textContent = 'GPS denied — type a start address.';
+      $('homeStatus').className = 'msg err';
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+  }
+
   function importJob() {
     var ex = $('impExcel').files, es = $('impEst').files;
-    if (!ex.length || !es.length) { $('startMsg').textContent = 'Pick at least one Excel/CSV and one .EST'; $('startMsg').className = 'msg err'; return; }
+    if (!ex.length || !es.length) {
+      $('startMsg').textContent = 'Pick Excel/CSV and at least one .EST — tap the file boxes above.';
+      $('startMsg').className = 'msg err';
+      return;
+    }
     var fd = new FormData();
     for (var i = 0; i < ex.length; i++) fd.append('excel', ex[i]);
     for (var j = 0; j < es.length; j++) fd.append('est', es[j]);
+    if (state.homeLat != null && state.homeLon != null) {
+      fd.append('home_lat', String(state.homeLat));
+      fd.append('home_lon', String(state.homeLon));
+      fd.append('home_label', state.homeLabel || $('homeAddr').value.trim() || 'Field start');
+    }
     $('startMsg').textContent = 'Importing…'; $('startMsg').className = 'msg';
     fetch('/api/jobs/import', { method: 'POST', body: fd }).then(function (r) {
       return r.json().then(function (j) { if (!r.ok) throw new Error(j.detail || 'Import failed'); return j; });
@@ -914,6 +1030,26 @@
   function wire() {
     $('btnImport').onclick = importJob;
     $('btnResumeFile').onclick = resumeFile;
+    $('btnSearchHome').onclick = searchHome;
+    $('btnHomeGps').onclick = homeFromGps;
+    $('btnLastHome').onclick = function () {
+      var saved = loadSavedHome();
+      if (saved && saved.lat != null) applyHome(saved.lat, saved.lon, saved.label || '');
+    };
+    $('homeAddr').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); searchHome(); }
+    });
+    $('impExcel').addEventListener('change', function () {
+      setFileLabel('impExcel', 'excelNames', 'Tap to choose — .xlsx .xls .csv');
+    });
+    $('impEst').addEventListener('change', function () {
+      setFileLabel('impEst', 'estNames', 'Tap to choose — .EST');
+    });
+    $('impTdjob').addEventListener('change', function () {
+      setFileLabel('impTdjob', 'tdjobName', 'Tap to choose a downloaded job');
+      if ($('impTdjob').files.length) resumeFile();
+    });
+    refreshLastHomeBtn();
     $('btnOpen').onclick = function () {
       openJob($('openId').value.trim(), $('openToken').value.trim()).catch(function (e) {
         $('startMsg').textContent = e.message; $('startMsg').className = 'msg err';

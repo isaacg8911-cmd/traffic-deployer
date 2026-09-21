@@ -66,7 +66,38 @@ body { display: flex; flex-direction: column; }
   width: 100%; max-width: 460px; background: var(--panel); border: 1px solid var(--line);
   border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px;
 }
-.card h1 { margin: 0; font-size: 20px; }
+.card h1 { margin: 0; font-size: 22px; }
+.card h2 { margin: 0; font-size: 15px; font-weight: 800; color: var(--ink); }
+.block {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 0 4px; border-top: 1px solid var(--line);
+}
+.block:first-child { border-top: none; padding-top: 0; }
+.muted.tight { margin: 4px 0 0; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;
+}
+.file-btn {
+  display: flex; flex-direction: column; gap: 4px; cursor: pointer;
+  background: var(--panel2); border: 1px dashed var(--line);
+  border-radius: 12px; padding: 14px 14px;
+}
+.file-btn-title { font-size: 15px; font-weight: 800; color: var(--ink); }
+.file-names { font-size: 12px; color: var(--muted); word-break: break-all; }
+.file-btn.has-file {
+  border-style: solid; border-color: var(--amber);
+  background: #1f3348;
+}
+.file-btn.has-file .file-names { color: #fde68a; }
+
+.advanced {
+  border-top: 1px solid var(--line); padding-top: 10px;
+  color: var(--muted); font-size: 14px;
+}
+.advanced summary { cursor: pointer; font-weight: 700; padding: 6px 0; }
+.advanced .field, .advanced button { margin-top: 8px; }
 .divider {
   text-align: center; color: var(--muted); font-size: 12px; margin: 4px 0;
   display: flex; align-items: center; gap: 10px;

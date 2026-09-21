@@ -24,46 +24,79 @@
     <button id="btnBannerDl" type="button">Download job</button>
   </div>
 
-  <!-- Start / job-load screen (laptop Setup: files in) -->
+  <!-- Start / job-load screen (laptop Setup: start + files) -->
   <section id="startScreen" class="screen">
     <div class="card">
-      <h1>Field app</h1>
-      <p class="muted">Same flow as the laptop: files → route → drive → install → pickup → audit. Built for a phone screen.</p>
+      <h1>Start a shift</h1>
+      <p class="muted">Same as the laptop: start address → Excel + .EST → drive. Phone-sized.</p>
       <ol class="workflow" id="startWorkflow">
+        <li class="current">Start</li>
         <li>Files</li>
         <li>Route</li>
-        <li>Drive</li>
         <li>Install</li>
-        <li>Audit</li>
       </ol>
+
       <div id="createBlock">
-        <label class="field">Excel / CSV sites
-          <input id="impExcel" type="file" accept=".csv,.xlsx,.xls" multiple />
-        </label>
-        <label class="field">.EST map file(s)
-          <input id="impEst" type="file" accept=".EST,.est" multiple />
-        </label>
-        <button id="btnImport" class="primary">Import job</button>
-        <div class="divider">or pick up later</div>
-        <label class="field">Job file (.tdjob.json)
-          <input id="impTdjob" type="file" accept=".json,.tdjob.json,application/json" />
-        </label>
-        <button id="btnResumeFile" class="secondary">Open job file</button>
+        <div class="block">
+          <h2>1. Start</h2>
+          <p class="muted">Yard / shop address. Wrong start can scramble stop order.</p>
+          <label class="field">Home start address
+            <input id="homeAddr" type="text" placeholder="street, city, CA zip" autocomplete="street-address" enterkeyhint="search" />
+          </label>
+          <div class="row">
+            <button id="btnSearchHome" class="primary grow" type="button">Search</button>
+            <button id="btnHomeGps" class="secondary grow" type="button">Use GPS</button>
+          </div>
+          <button id="btnLastHome" class="ghost hidden" type="button">Use last start</button>
+          <div id="homeStatus" class="msg">Optional — search or GPS before import.</div>
+          <ul id="homeCands" class="list hidden"></ul>
+        </div>
+
+        <div class="block">
+          <h2>2. Files</h2>
+          <p class="muted">Same two uploads as the laptop Setup tab.</p>
+          <label class="file-btn" for="impExcel">
+            <input id="impExcel" class="sr-only" type="file" accept=".csv,.xlsx,.xls" multiple />
+            <span class="file-btn-title">Excel / CSV sites</span>
+            <span id="excelNames" class="file-names">Tap to choose — .xlsx .xls .csv</span>
+          </label>
+          <label class="file-btn" for="impEst">
+            <input id="impEst" class="sr-only" type="file" accept=".EST,.est" multiple />
+            <span class="file-btn-title">.EST map file(s)</span>
+            <span id="estNames" class="file-names">Tap to choose — .EST</span>
+          </label>
+          <button id="btnImport" class="primary" type="button">Import job</button>
+        </div>
       </div>
-      <p id="publicNote" class="muted">Open your job from the share link your dispatcher sent you. The plain public URL will not auto-open old sites.</p>
-      <div id="phoneJobsWrap" class="hidden">
-        <div class="divider">saved on this phone</div>
-        <ul id="phoneJobs" class="list"></ul>
+
+      <p id="publicNote" class="muted">Open the share link your dispatcher sent, or a job file they downloaded.</p>
+
+      <div id="pickupBlock" class="block">
+        <h2>Pick up later</h2>
+        <p class="muted">If the server could not save, download a job file from Setup / Audit, then open it here.</p>
+        <label class="file-btn" for="impTdjob">
+          <input id="impTdjob" class="sr-only" type="file" accept=".json,.tdjob.json,application/json" />
+          <span class="file-btn-title">Job file (.tdjob.json)</span>
+          <span id="tdjobName" class="file-names">Tap to choose a downloaded job</span>
+        </label>
+        <button id="btnResumeFile" class="secondary" type="button">Open job file</button>
+        <div id="phoneJobsWrap" class="hidden">
+          <p class="muted tight">Saved on this phone</p>
+          <ul id="phoneJobs" class="list"></ul>
+        </div>
       </div>
-      <div class="divider">or reopen by id</div>
-      <label class="field">Job id
-        <input id="openId" type="text" placeholder="job id" autocomplete="off" />
-      </label>
-      <label class="field">Token
-        <input id="openToken" type="text" placeholder="token" autocomplete="off" />
-      </label>
-      <button id="btnOpen" class="secondary">Reopen job</button>
-      <button id="btnClearSavedJob" class="ghost">Clear remembered job on this phone</button>
+
+      <details id="advancedOpen" class="advanced">
+        <summary>Reopen by job id</summary>
+        <label class="field">Job id
+          <input id="openId" type="text" placeholder="job id" autocomplete="off" />
+        </label>
+        <label class="field">Token
+          <input id="openToken" type="text" placeholder="token" autocomplete="off" />
+        </label>
+        <button id="btnOpen" class="secondary" type="button">Reopen job</button>
+      </details>
+      <button id="btnClearSavedJob" class="ghost" type="button">Clear remembered job on this phone</button>
       <div id="startMsg" class="msg"></div>
     </div>
   </section>
@@ -208,6 +241,6 @@
 
   <script src="/vendor/maplibre-gl.js"></script>
   <script src="/local.js?v=1"></script>
-  <script src="/app.js?v=10"></script>
+  <script src="/app.js?v=11"></script>
 </body>
 </html>

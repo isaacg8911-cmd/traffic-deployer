@@ -117,6 +117,21 @@ def config() -> dict:
     }
 
 
+@app.get("/api/geocode")
+def geocode_home(q: str = "") -> dict:
+    """Laptop-style start-address search (California). Empty/no-match are soft."""
+    from core import geo
+
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="Type a start address (street, city, CA zip).")
+    try:
+        cands = geo.geocode_candidates(query, limit=5)
+    except Exception:
+        cands = []
+    return {"query": query, "candidates": cands}
+
+
 # --------------------------------------------------------------------------- #
 #  Job creation
 # --------------------------------------------------------------------------- #

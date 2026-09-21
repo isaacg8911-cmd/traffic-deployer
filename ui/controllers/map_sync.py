@@ -182,6 +182,8 @@ class MapSyncControllerMixin:
             "to_uid": target["uid"],
             "to_id": target.get("id"),
             "miles": float(leg.get("miles") or 0.0),
+            "drive_min": float(leg.get("drive_min") or 0.0),
+            "from_home_min": float(leg.get("from_home_min") or 0.0),
             "index": idx,
         }
 
@@ -193,8 +195,15 @@ class MapSyncControllerMixin:
             return "All stops done."
         gi = nxt["index"]
         target = self.state.stops[gi]
+        from core.time_est import drive_min_from_miles, fmt_min
+        dmin = float(nxt.get("drive_min") or 0.0)
+        if gi == 0:
+            dmin = float(nxt.get("from_home_min") or dmin)
+        if dmin < 0.5:
+            dmin = drive_min_from_miles(float(nxt.get("miles") or 0.0))
+        clock = f" · ~{fmt_min(dmin)}" if dmin >= 0.5 else ""
         return (
-            f"Next: Site {nxt.get('to_id', '?')} — {nxt['miles']:.1f} mi  "
+            f"Next: Site {nxt.get('to_id', '?')} — {nxt['miles']:.1f} mi{clock}  "
             f"({self._street_label(target)})")
 
     def _update_follow_banner(self) -> None:
@@ -685,14 +694,28 @@ class MapSyncControllerMixin:
         self.bridge.send_state(st)
         shown = self._stops_matching_day_filter() if self._day_filter_active() else self.state.stops
         miles = self.state.route.get("miles", 0.0)
-        drive = (miles / 30.0) * 60 if miles else 0
         tag = f"{self._day_filter_value()} · " if self._day_filter_active() else ""
-        self.status_route.setText(
-            f"{tag}Stops: {len(shown)}   Route: {miles:.1f} mi   ~{drive:.0f} min")
+        try:
+            from core import time_est
+            time_est.ensure(
+                self.state.route, self.state.stops, getattr(self.state, "home", None))
+            pending = len(time_est.pending_stops(self.state.stops))
+            clock = time_est.summary_clause(self.state.route, pending=pending)
+        except Exception:
+            clock = ""
+        base = (
+            f"{tag}{len(shown)} stops · {miles:.1f} mi · {clock}"
+            if clock
+            else f"{tag}Stops: {len(shown)}   Route: {miles:.1f} mi"
+        )
         if nxt and not following:
+            dmin = float(nxt.get("drive_min") or nxt.get("from_home_min") or 0)
+            extra = f" · ~{int(round(dmin))} min" if dmin >= 0.5 else ""
             self.status_route.setText(
-                f"Next: Site {nxt.get('to_id', '?')} — {nxt['miles']:.1f} mi"
-                f"   ({len(shown)} stops this map)")
+                f"Next: Site {nxt.get('to_id', '?')} — {nxt['miles']:.1f} mi{extra}  ·  {base}"
+            )
+        else:
+            self.status_route.setText(base)
 
     @staticmethod
     def _stop_click_coords(stop: dict, side: str | None = None) -> tuple[float, float] | None:

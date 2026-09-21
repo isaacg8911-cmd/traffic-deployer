@@ -156,6 +156,25 @@ class RouteControllerMixin:
             return f"Site {s.get('id', '')}"
         return st
 
+    def _stop_time_suffix(self, stop_index: int, mark: str) -> str:
+        """Drive + setup clock on a route-list row (open stops only)."""
+        try:
+            from core import time_est
+            time_est.ensure(
+                self.state.route, self.state.stops, getattr(self.state, "home", None))
+            legs = self.state.route.get("site_legs") or []
+            leg = legs[stop_index] if stop_index < len(legs) else None
+            pending = time_est.pending_stops(self.state.stops)
+            last_uid = pending[-1].get("uid") if pending else None
+            return time_est.stop_suffix(
+                leg,
+                first=stop_index == 0,
+                last=bool(last_uid) and self.state.stops[stop_index].get("uid") == last_uid,
+                remaining=mark == "--",
+            )
+        except Exception:
+            return ""
+
     def _ensure_route_pick_dialog(self) -> RoutePickOrderDialog:
         if self._route_pick_dialog is None:
             dlg = RoutePickOrderDialog(self)
@@ -748,8 +767,15 @@ class RouteControllerMixin:
                 kind = "straight-line — road map does not cover this job area"
             else:
                 kind = "straight-line only — download road map on Setup"
+            clock = ""
+            try:
+                from core import time_est
+                clock = time_est.summary_clause(r)
+            except Exception:
+                clock = ""
+            clock_bit = f" · {clock}" if clock else ""
             self.statusBar().showMessage(
-                f"Route ready: {len(res['order'])} stops, {miles:.1f} mi — {kind}", 12000)
+                f"Route ready: {len(res['order'])} stops, {miles:.1f} mi{clock_bit} — {kind}", 12000)
             if uncovered:
                 self.statusBar().showMessage(
                     f"Route ready: {len(res['order'])} stops, {miles:.1f} mi — "
@@ -993,7 +1019,8 @@ class RouteControllerMixin:
             ztxt = f" Z{zone}" if zone else ""
             sheet = f" · {s.get('sheet')}" if s.get("sheet") and not self._day_filter_active() else ""
             self.list_route.addItem(
-                f"[{mark}] {seq}.{ztxt} Site {s['id']}{sheet} — {self._street_label(s)}")
+                f"[{mark}] {seq}.{ztxt} Site {s['id']}{sheet} — {self._street_label(s)}"
+                f"{self._stop_time_suffix(i, mark)}")
         miles = float(self.state.route.get("miles", 0.0) or 0)
         on_graph = bool(self.state.route.get("graph"))
         shown = len(visible)

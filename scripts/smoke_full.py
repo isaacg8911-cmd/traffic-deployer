@@ -769,6 +769,29 @@ def test_routing():
     )
     rt_src = open(os.path.join(ROOT, "core", "routing.py"), encoding="utf-8").read()
     check("slide crossings on line", "_slide_crossings" in rt_src)
+    from core import time_est
+    check("neighborhood hop ~10 min", 8 <= time_est.drive_min_from_miles(2.7) <= 12)
+    check("freeway commute ~67 min", 60 <= time_est.drive_min_from_miles(54) <= 75)
+    check("setup band 35 stops", time_est.setup_band(35) == (175.0, 210.0, 280.0))
+    empty = time_est.attach_to_route(
+        {"miles": 10.0, "site_legs": [
+            {"miles": 0.0}, {"miles": 4.0}, {"miles": 6.0},
+        ]},
+        [
+            {"lat": 34.10, "lon": -117.27, "id": "1"},
+            {"lat": 34.11, "lon": -117.26, "id": "2"},
+            {"lat": 34.12, "lon": -117.25, "id": "3"},
+        ],
+        (33.772247, -117.976883),
+        graph=None,
+    )
+    check("job drive minutes stored", empty.get("job_drive_min", 0) > 5)
+    check("home legs stored", empty.get("home_out_min", 0) > 10 and empty.get("home_back_min", 0) > 10)
+    check("setup 5–8 min each", empty.get("setup_min_lo") == 15 and empty.get("setup_min_hi") == 24)
+    clause = time_est.summary_clause(empty)
+    check("summary has setup range", "setup" in clause and "from home" in clause)
+    row = time_est.stop_suffix(empty["site_legs"][0], first=True, last=False, remaining=True)
+    check("first stop shows from home", "from home" in row and "setup" in row)
 
 
 def test_field_ready():

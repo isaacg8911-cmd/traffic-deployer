@@ -139,5 +139,17 @@ def route_summary(stops: list, route: dict) -> dict:
         "zones": len(zones),
         "zone_list": zones,
         "on_graph": on_graph,
-        "text": f"{len(stops)} stops · {miles:.1f} mi · {len(zones)} zone(s) · {kind}",
+        "text": _route_summary_text(len(stops), miles, len(zones), kind, route),
     }
+
+
+def _route_summary_text(n: int, miles: float, nzones: int, kind: str, route: dict) -> str:
+    base = f"{n} stops · {miles:.1f} mi · {nzones} zone(s) · {kind}"
+    try:
+        from core.time_est import summary_clause
+        extra = summary_clause(route)
+    except Exception:
+        extra = ""
+    if extra:
+        return f"{base} · {extra}"
+    return base

@@ -14,6 +14,7 @@ import itertools
 import math
 
 import road_router
+from core import time_est
 
 try:
     import networkx as nx
@@ -1348,8 +1349,12 @@ def build_site_legs(
     *,
     graph=None,
 ) -> list[dict]:
-    """Legs site 1 -> site 2 -> ... -> site N. Site 1 has 0 mi (you drive there)."""
-    del home
+    """Legs site 1 -> site 2 -> ... -> site N. Site 1 has 0 mi (you drive there).
+
+    ``home`` is accepted so callers can pass origin; commute clocks attach in
+    ``build_route`` / ``time_est.attach_to_route``.
+    """
+    _ = home
     if not ordered_stops:
         return []
     if graph is None:
@@ -1370,6 +1375,7 @@ def build_site_legs(
             "to": f"Site {stop.get('id')}",
             "polyline": [],
             "miles": 0.0,
+            "drive_min": 0.0,
             "ok": False,
         }
         if i == 0:
@@ -1389,6 +1395,7 @@ def build_site_legs(
             entry["polyline"] = [[prev[0], prev[1]], [dest[0], dest[1]]]
             entry["miles"] = _haversine_km(prev, dest) * 0.621371
             entry["ok"] = True
+        entry["drive_min"] = round(time_est.drive_min_from_miles(entry["miles"]), 1)
         out.append(entry)
         prev = dest
     return out
@@ -1401,8 +1408,10 @@ def build_route(
     *,
     abort=None,
 ) -> dict:
-    """Real road polyline tracing site 1 -> site 2 -> ... -> site N (no home legs)."""
-    del home
+    """Real road polyline tracing site 1 -> site 2 -> ... -> site N (no home legs).
+
+    Home is used only for clock estimates (leave / get home), not the drive polyline.
+    """
     if not ordered_stops:
         return {"polyline": [], "miles": 0.0, "legs": [], "graph": False}
 
@@ -1456,10 +1465,11 @@ def build_route(
             "legs": legs,
             "graph": True,
             "graph_uncovered": False,
-            "site_legs": build_site_legs(ordered, (0.0, 0.0), data_dir, graph=graph),
+            "site_legs": build_site_legs(ordered, home, data_dir, graph=graph),
         }
         if failed:
             out["failed_legs"] = failed
+        time_est.attach_to_route(out, ordered, home, graph)
         return out
 
     pts = [_stop_pt(s) for s in ordered]
@@ -1469,11 +1479,13 @@ def build_route(
         if len(pts) >= 2
         else 0.0
     )
-    return {
+    out = {
         "polyline": polyline,
         "miles": miles,
         "legs": [],
         "graph": False,
         "graph_uncovered": graph_uncovered,
-        "site_legs": build_site_legs(ordered, (0.0, 0.0), data_dir, graph=None),
+        "site_legs": build_site_legs(ordered, home, data_dir, graph=None),
     }
+    time_est.attach_to_route(out, ordered, home, graph)
+    return out

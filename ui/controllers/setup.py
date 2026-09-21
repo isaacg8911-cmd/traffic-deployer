@@ -201,6 +201,13 @@ class SetupControllerMixin:
             apply_status(self.lbl_route_summary, "")
             return
         summ = build_route_summary(self.state.stops, self.state.route)
+        try:
+            from core import time_est
+            time_est.ensure(
+                self.state.route, self.state.stops, getattr(self.state, "home", None))
+            summ = build_route_summary(self.state.stops, self.state.route)
+        except Exception:
+            pass
         self.lbl_route_summary.setText(summ["text"])
         if summ.get("on_graph"):
             apply_status(self.lbl_route_summary, "ok")

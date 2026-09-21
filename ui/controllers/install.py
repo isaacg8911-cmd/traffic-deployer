@@ -58,8 +58,21 @@ class InstallControllerMixin:
                 side_txt = ""
             cross_txt = f"Drive-to on line{side_txt}"
         from ui.simple_mode import COMPACT_UI
+        setup_bit = " · ~6 min setup"
+        try:
+            from core import time_est
+            time_est.ensure(
+                self.state.route, self.state.stops, getattr(self.state, "home", None))
+            pending = len(time_est.pending_stops(self.state.stops))
+            if pending:
+                slo, _, shi = time_est.setup_band(pending)
+                setup_bit = (
+                    f" · ~6 min this stop · {time_est.fmt_min(slo)}–{time_est.fmt_min(shi)} setup left"
+                )
+        except Exception:
+            pass
         if COMPACT_UI:
-            prog = f"{self._street_label(s)} · {done}/{total} done"
+            prog = f"{self._street_label(s)} · {done}/{total} done{setup_bit}"
             if not s.get("cross_lat"):
                 prog += " · build route for crossing"
             self.lbl_install_prog.setText(prog)
@@ -69,7 +82,8 @@ class InstallControllerMixin:
             self.lbl_cross_hint.setText(
                 cross_txt or "Crossing not set — BUILD ROUTE after road map download.")
             self.lbl_install_prog.setText(
-                f"{s.get('sheet', '')} · {self._street_label(s)} · {done}/{total} installed")
+                f"{s.get('sheet', '')} · {self._street_label(s)} · {done}/{total} installed{setup_bit}"
+            )
         raw = str(s.get("street", "")).strip()
         self.txt_street.setText(raw if raw and raw.lower() not in ("nan", "none", "nat") else "")
         raw_dir = str(s.get("direction") or "").strip().lower()
@@ -202,9 +216,27 @@ class InstallControllerMixin:
             gps = "GPS" if s.get("field_lat") is not None else "   "
             sheet = str(s.get("sheet") or "").strip()
             sheet_txt = f" · {sheet}" if sheet else ""
+            sfx = ""
+            if mark == "--":
+                try:
+                    from core import time_est
+                    time_est.ensure(
+                        self.state.route, self.state.stops, getattr(self.state, "home", None))
+                    legs = self.state.route.get("site_legs") or []
+                    leg = legs[idx] if idx < len(legs) else None
+                    pending = time_est.pending_stops(self.state.stops)
+                    last_uid = pending[-1].get("uid") if pending else None
+                    sfx = time_est.stop_suffix(
+                        leg,
+                        first=idx == 0,
+                        last=bool(last_uid) and s.get("uid") == last_uid,
+                        remaining=True,
+                    )
+                except Exception:
+                    sfx = " · ~6 min setup"
             item = QListWidgetItem(
                 f"{mark} {gps}  {seq}. Site {s.get('id', '?')}{sheet_txt} — "
-                f"{self._street_label(s)}")
+                f"{self._street_label(s)}{sfx}")
             item.setData(Qt.ItemDataRole.UserRole, idx)
             lst.addItem(item)
             if idx == cur:

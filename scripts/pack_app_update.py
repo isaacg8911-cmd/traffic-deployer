@@ -77,28 +77,23 @@ def main() -> int:
         "FORCE_UPDATE.bat",
         "WHERE_AM_I.bat",
         "select_app_update.ps1",
+        "WIFI_UPDATE_NOW.bat",
+        "wifi_update_now.ps1",
+        "td_update_homes.ps1",
+        "td_update_poll.ps1",
+        "refresh_update_channel.ps1",
     ):
         src = os.path.join(ROOT, "packaging", name)
         if os.path.isfile(src):
             shutil.copy2(src, os.path.join(STAGE, name))
 
-    # Bake LAN home URL so OPEN_APP can seed update_channel.json over Wi-Fi.
-    lan_ip = os.environ.get("TD_RELEASES_HOST", "").strip()
-    if not lan_ip:
-        try:
-            import socket
+    # Bake Tailscale + LAN home URLs so OPEN_APP can seed update_channel.json.
+    from core.update_hosts import list_base_urls
 
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            lan_ip = s.getsockname()[0]
-            s.close()
-        except OSError:
-            lan_ip = "192.168.1.30"
-    port = os.environ.get("TD_RELEASES_PORT", "8765").strip() or "8765"
-    home_url = f"http://{lan_ip}:{port}"
+    homes = list_base_urls()
     with open(os.path.join(STAGE, "wifi_update_home.txt"), "w", encoding="ascii", newline="\n") as f:
-        f.write(home_url + "\n")
-    print(f"  OK  wifi_update_home.txt -> {home_url}")
+        f.write("\n".join(homes) + "\n")
+    print(f"  OK  wifi_update_home.txt -> {homes[0] if homes else 'none'} (+{max(0, len(homes) - 1)} more)")
 
     from version import APP_NAME, APP_TAGLINE, APP_VERSION
 

@@ -3,13 +3,14 @@ REM Thin launcher — real logic is wifi_update_now.ps1 (avoids cmd IP mangling)
 setlocal
 cd /d "%~dp0"
 
-REM Always refresh ps1 from home when reachable (stale Downloads copies break updates).
+REM Refresh helper scripts from home when reachable (Tailscale MagicDNS / 100.x / LAN).
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$a='100'+'.93.14.32'; $b='192.168.1.30'; $out='%~dp0wifi_update_now.ps1'; $urls=@(('http://'+$a+':8765/wifi_update_now.ps1'),('http://'+$b+':8765/wifi_update_now.ps1')); foreach($u in $urls){ try { Invoke-WebRequest -Uri $u -OutFile ($out+'.tmp') -UseBasicParsing -TimeoutSec 12; if(Test-Path ($out+'.tmp')){ Move-Item -Force ($out+'.tmp') $out; Write-Host ('Refreshed '+$u); exit 0 } } catch { } }; if(Test-Path $out){ Write-Host 'Using local wifi_update_now.ps1'; exit 0 }; exit 1"
+  "$outRoot='%~dp0'; $names=@('td_update_homes.ps1','wifi_update_now.ps1'); $urls=@('http://msi.tailaf9051.ts.net:8765','http://100.93.14.32:8765','http://192.168.1.30:8765'); $ok=0; foreach($u in $urls){ foreach($n in $names){ try { $dest=Join-Path $outRoot $n; Invoke-WebRequest -Uri ($u.TrimEnd('/')+'/'+$n) -OutFile ($dest+'.tmp') -UseBasicParsing -TimeoutSec 10; if(Test-Path ($dest+'.tmp')){ Move-Item -Force ($dest+'.tmp') $dest; $ok=1 } } catch { } } ; if($ok -eq 1){ Write-Host ('Refreshed from '+$u); exit 0 } }; if(Test-Path (Join-Path $outRoot 'wifi_update_now.ps1')){ Write-Host 'Using local wifi_update_now.ps1'; exit 0 }; exit 1"
 if errorlevel 1 (
   echo FAIL: wifi_update_now.ps1 missing and home PC unreachable.
-  echo Open Edge to http://100.93.14.32:8765/ and download wifi_update_now.ps1
-  echo into the same folder as this bat.
+  echo Make sure Tailscale is connected, then open:
+  echo   http://msi.tailaf9051.ts.net:8765/
+  echo   or http://100.93.14.32:8765/
   pause
   exit /b 1
 )

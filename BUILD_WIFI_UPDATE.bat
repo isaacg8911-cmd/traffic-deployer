@@ -13,10 +13,8 @@ set RC=%ERRORLEVEL%
 if %RC%==0 (
     echo.
     echo === WIFI UPDATE READY ===
-    echo 1. Run C:\TDReleases\SERVE_RELEASES.bat on this PC
-    echo 2. Copy C:\TDReleases\update_channel.json to work laptop:
-    echo       C:\TrafficDeployer\tds_data\update_channel.json
-    echo 3. On laptop (home Wi-Fi, online mode): open Traffic Deployer
+echo 1. Run UPDATE_LAPTOP.bat on this PC (serves Tailscale + LAN)
+echo 2. On the work laptop (Tailscale connected): OPEN_APP.bat or WIFI_UPDATE_NOW.bat
 )
 pause
 exit /b %RC%

@@ -423,17 +423,15 @@ class SetupControllerMixin:
             hint = ""
             if "No update channel" in err:
                 hint = (
-                    "\n\nFix (Wi-Fi, no USB):\n"
-                    "1. On this laptop open Edge/Chrome\n"
-                    "2. Go to http://192.168.1.30:8765/\n"
-                    "3. Tap Download update_channel.json\n"
-                    "4. Save as C:\\TrafficDeployer\\tds_data\\update_channel.json\n"
-                    "5. Close app, run OPEN_APP.bat again, stay ONLINE"
+                    "\n\nFix (Tailscale or home Wi-Fi, no USB):\n"
+                    "1. On home PC run UPDATE_LAPTOP.bat and leave it open\n"
+                    "2. On this laptop keep Tailscale connected\n"
+                    "3. Close app, run OPEN_APP.bat (or WIFI_UPDATE_NOW.bat)"
                 )
             elif "Could not reach" in err:
                 hint = (
-                    "\n\nHome PC update server is off or wrong Wi-Fi.\n"
-                    "On home PC run C:\\TDReleases\\SERVE_RELEASES.bat and leave it open."
+                    "\n\nHome PC update server is off, or Tailscale is disconnected.\n"
+                    "On home PC run UPDATE_LAPTOP.bat and leave it open."
                 )
             QMessageBox.warning(self, "Wi-Fi update", err + hint)
             self.statusBar().showMessage(err[:200], 12000)

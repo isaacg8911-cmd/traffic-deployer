@@ -1,6 +1,7 @@
 @echo off
-REM Serve C:\TDReleases for work-laptop Wi-Fi auto-update (home PC only).
-REM Binds to LAN IP (not 0.0.0.0) so MindLink OS on 127.0.0.1:8765 can coexist.
+REM Serve C:\TDReleases on LAN + Tailscale (home PC).
+REM Binds each non-loopback IPv4 (not 0.0.0.0) so MindLink OS on 127.0.0.1:8765 can coexist.
+setlocal
 set "REL=%TD_RELEASES_DIR%"
 if "%REL%"=="" set "REL=C:\TDReleases"
 set "PORT=%TD_RELEASES_PORT%"
@@ -20,15 +21,30 @@ echo   Folder: %REL%
 echo   Port  : %PORT%
 echo.
 echo Leave this window open while the work laptop updates.
+echo Laptop on Tailscale uses the 100.x / MagicDNS URL (home Wi-Fi not required).
 echo Press Ctrl+C to stop.
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$port=%PORT%; $rel='%REL%';" ^
-  "$ips=@(); try { $ips=@(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -ExpandProperty IPAddress) } catch {}" ^
-  "$hostIp=($ips | Where-Object { $_ -like '192.168.*' } | Select-Object -First 1);" ^
-  "if (-not $hostIp) { $hostIp=($ips | Select-Object -First 1) };" ^
-  "if (-not $hostIp) { Write-Host 'FAIL: no LAN IP'; exit 1 };" ^
-  "Write-Host ('URL: http://{0}:{1}/version.json' -f $hostIp,$port);" ^
-  "Set-Location -LiteralPath $rel;" ^
-  "& python -c ('from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler; ThreadingHTTPServer((\"{0}\", {1}), SimpleHTTPRequestHandler).serve_forever()' -f $hostIp,$port)"
+
+set "SCRIPT="
+set "PY="
+if exist "%~dp0..\scripts\serve_td_releases.py" (
+    set "SCRIPT=%~dp0..\scripts\serve_td_releases.py"
+    if exist "%~dp0..\.venv\Scripts\python.exe" set "PY=%~dp0..\.venv\Scripts\python.exe"
+)
+if not defined SCRIPT if exist "%REL%\serve_td_releases.py" set "SCRIPT=%REL%\serve_td_releases.py"
+if not defined PY if exist "C:\MindLink AI\projects\traffic-deployer\.venv\Scripts\python.exe" (
+    set "PY=C:\MindLink AI\projects\traffic-deployer\.venv\Scripts\python.exe"
+)
+if not defined SCRIPT if exist "C:\MindLink AI\projects\traffic-deployer\scripts\serve_td_releases.py" (
+    set "SCRIPT=C:\MindLink AI\projects\traffic-deployer\scripts\serve_td_releases.py"
+)
+if not defined PY set "PY=python"
+if not defined SCRIPT (
+    echo FAIL: serve_td_releases.py missing. Re-run PUBLISH_APP_UPDATE.bat.
+    pause
+    exit /b 1
+)
+
+"%PY%" "%SCRIPT%"
+echo.
 pause

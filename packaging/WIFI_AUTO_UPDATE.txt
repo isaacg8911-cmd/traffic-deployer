@@ -1,48 +1,49 @@
-WI-FI AUTO-UPDATE — Traffic Deployer (free, home network)
-=========================================================
+WI-FI / TAILSCALE AUTO-UPDATE — Traffic Deployer
+================================================
 
-One-time setup, then each release is: build -> publish -> serve -> open app on laptop.
+When the work laptop is on Tailscale, the home PC can serve an AppUpdate
+and the laptop pulls it. Home Wi-Fi is not required.
 
 HOME PC (this machine)
 ----------------------
 1. BUILD_WIFI_UPDATE.bat     (or BUILD_APP_UPDATE.bat then PUBLISH_APP_UPDATE.bat)
-2. Double-click C:\TDReleases\SERVE_RELEASES.bat — leave it running
-3. Note your home PC IP (printed by PUBLISH, or run ipconfig)
+2. UPDATE_LAPTOP.bat         — starts the server on Tailscale 100.x + LAN
+   (or C:\TDReleases\SERVE_RELEASES.bat if the server is all you need)
+3. Leave the server running until the laptop finishes downloading (~300 MB)
 
-WORK LAPTOP (one time only)
----------------------------
-Copy this file from home PC:
-  C:\TDReleases\update_channel.json
-To work laptop install:
-  C:\TrafficDeployer\tds_data\update_channel.json
-(Keep tds_data\ — do not delete map or shift files.)
+WORK LAPTOP
+-----------
+Tailscale connected (orange/green). Then either:
+
+- OPEN_APP.bat while the home server is up — app checks version.json and applies
+- WIFI_UPDATE_NOW.bat — one-click pull + apply even if the app is closed
+
+First successful update also registers a 15-minute poller
+(TrafficDeployerTailscaleUpdate) so later releases apply while the laptop
+is on Tailscale and the app is closed.
 
 HOW UPDATE RUNS
 ---------------
-- Work laptop on home Wi-Fi, NOT in field mode (online / "I'm online")
-- Open Traffic Deployer (or tap I'm online on Setup)
 - App reads version.json, downloads zip, replaces exe + _internal + web
 - tds_data\ is never touched; app restarts on new version
-- Downloads overwrite one slot (tds_data\update_staging) — old update files are deleted
-- Home server keeps one zip: C:\TDReleases\TrafficDeployer-AppUpdate.zip (overwritten each publish)
+- Downloads overwrite one slot (tds_data\update_staging)
+- Home server keeps one zip: C:\TDReleases\TrafficDeployer-AppUpdate.zip
+- Channel lists Tailscale MagicDNS + 100.x + LAN so the laptop uses whichever answers
 
 EACH NEW RELEASE
 ----------------
 1. Home: BUILD_WIFI_UPDATE.bat
-   (auto-bumps APP_VERSION, e.g. 1.0.10 -> 1.0.11 — proof of progression)
-2. Home: SERVE_RELEASES.bat (if not already running)
-3. Laptop: open app on Wi-Fi — auto-applies
+2. Home: UPDATE_LAPTOP.bat
+3. Laptop: OPEN_APP.bat or WIFI_UPDATE_NOW.bat (or wait for the poller)
 4. Laptop title bar must show the new version number
 
 TROUBLESHOOT
 ------------
-- "No update channel" -> copy update_channel.json into tds_data\
-- "Could not reach update server" -> SERVE_RELEASES.bat running? same Wi-Fi? firewall?
-- "version.json missing download_url" -> home version.json has UTF-8 BOM (do not
-  edit with Notepad/Set-Content -Encoding utf8). Re-run PUBLISH_APP_UPDATE.bat, then
-  re-download wifi_update_now.ps1 from http://HOME:8765/ (not an old Downloads copy).
-- Field mode -> tap I'm online first; updates skip in field mode
-- Wrong IP after router change -> re-run PUBLISH_APP_UPDATE.bat, recopy update_channel.json
+- "Could not reach update server" -> UPDATE_LAPTOP.bat running? Tailscale connected?
+- "No update channel" -> run OPEN_APP.bat or WIFI_UPDATE_NOW.bat once
+- "version.json missing download_url" -> UTF-8 BOM; re-run PUBLISH_APP_UPDATE.bat
+- Field mode in the app still updates if you launch via OPEN_APP.bat (TD_UPDATE_HOME set)
+- Poller skips while TrafficDeployer.exe is running (won't interrupt a shift)
 
 USB STILL WORKS
 ---------------

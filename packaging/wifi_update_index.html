@@ -9,32 +9,44 @@
     h1 { font-size: 1.4rem; }
     .step { background: #f4f7fb; border: 1px solid #c5d0de; border-radius: 10px; padding: 1rem 1.1rem; margin: 1rem 0; }
     .step strong { display: block; margin-bottom: 0.35rem; }
-    a.btn { display: inline-block; margin-top: 0.5rem; padding: 0.85rem 1.2rem; background: #0d5c4b; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 1.05rem; }
-    a.btn2 { display: inline-block; margin-top: 0.5rem; padding: 0.6rem 1rem; background: #1565c0; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 700; }
+    a.btn { display: inline-block; margin-top: 0.5rem; margin-right: 0.5rem; padding: 0.85rem 1.2rem; background: #0d5c4b; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 1.05rem; }
+    a.btn2 { display: inline-block; margin-top: 0.5rem; margin-right: 0.5rem; padding: 0.6rem 1rem; background: #1565c0; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 700; }
+    a.btn3 { display: inline-block; margin-top: 0.5rem; margin-right: 0.5rem; padding: 0.6rem 1rem; background: #9a3412; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 700; }
     code { background: #e8edf3; padding: 0.1rem 0.35rem; border-radius: 4px; }
     .warn { color: #9a3412; }
   </style>
 </head>
 <body>
   <h1>Traffic Deployer — Wi-Fi update</h1>
-  <p>Same home Wi-Fi as the home PC. <strong>No USB.</strong></p>
+  <p>Target version: <strong>1.0.14</strong>. Map and shift data stay on this laptop.</p>
 
   <div class="step">
-    <strong>Do this (easiest)</strong>
-    1. Close Traffic Deployer if it is open.<br/>
-    2. Download the green button.<br/>
-    3. Double-click the downloaded file.<br/>
-    4. Wait (~300 MB). Black window shows progress.<br/>
-    5. App reopens — title must show <strong>1.0.13</strong> (or newer).
+    <strong>If title still says 1.0.13 — do this</strong>
+    Opening the app alone does <em>not</em> upgrade. Keep Tailscale connected, then either run <code>WIFI_UPDATE_NOW.bat</code> or download both files below into the <strong>same folder</strong> and double-click FORCE_UPDATE.
+    <br/>
+    <a class="btn3" href="TrafficDeployer-AppUpdate.zip" download="TrafficDeployer-AppUpdate.zip">1. Download AppUpdate zip (~300 MB)</a>
+    <a class="btn3" href="FORCE_UPDATE.bat" download="FORCE_UPDATE.bat">2. Download FORCE_UPDATE.bat</a>
+    <br/><br/>
+    Also download (same folder):
+    <a class="btn2" href="select_app_update.ps1" download="select_app_update.ps1">select_app_update.ps1</a>
+    <br/><br/>
+    3. Close Traffic Deployer completely.<br/>
+    4. Double-click <code>FORCE_UPDATE.bat</code> — pick the zip if asked.<br/>
+    5. Title bar must show <strong>1.0.14</strong>.
+  </div>
+
+  <div class="step">
+    <strong>One-click updater (alternative)</strong>
+    Black window must reach <code>Downloaded … MB</code> and <code>PROOF</code> with 1.0.14. If it closes early, use FORCE above.
     <br/>
     <a class="btn" href="WIFI_UPDATE_NOW.bat" download="WIFI_UPDATE_NOW.bat">Download WIFI_UPDATE_NOW.bat</a>
   </div>
 
   <div class="step">
-    <strong>Optional: normal launcher</strong>
+    <strong>After update — normal launcher</strong>
     <a class="btn2" href="OPEN_APP.bat" download="OPEN_APP.bat">Download OPEN_APP.bat</a>
   </div>
 
-  <p class="warn">If download fails: home PC update server is off, or laptop is on a different Wi-Fi.</p>
+  <p class="warn">If download fails: home PC must be running UPDATE_LAPTOP.bat (or SERVE_RELEASES.bat), and this laptop must be on Tailscale or home Wi-Fi.</p>
 </body>
 </html>

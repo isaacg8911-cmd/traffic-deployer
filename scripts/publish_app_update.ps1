@@ -64,7 +64,10 @@ function Get-LanIp {
 }
 
 $LanIp = Get-LanIp
-$BaseUrl = "http://${LanIp}:${Port}"
+$hostsJson = & $Py -c "import json; from core.update_hosts import list_base_urls, preferred_base_url; print(json.dumps({'bases': list_base_urls($Port), 'preferred': preferred_base_url($Port)}))"
+$hosts = $hostsJson | ConvertFrom-Json
+$BaseUrl = [string]$hosts.preferred
+if (-not $BaseUrl) { $BaseUrl = "http://${LanIp}:${Port}" }
 # Stable download name — each publish overwrites the previous zip (no version pile-up).
 $StableZipName = "TrafficDeployer-AppUpdate.zip"
 $DownloadUrl = "$BaseUrl/$StableZipName"
@@ -88,18 +91,21 @@ $channelPath = Join-Path $ReleasesDir "update_channel.json"
 & $Py -c @"
 import json, pathlib
 from datetime import datetime, timezone
+from core.update_hosts import channel_document, list_base_urls
 manifest = {
     'version': '$AppVersion',
     'download_url': '$DownloadUrl',
     'sha256': '$sha256',
-    'notes': 'App update v$AppVersion (map + tds_data stay on laptop)',
+    'notes': 'App update v$AppVersion via Tailscale or home Wi-Fi (map + tds_data stay on laptop)',
     'published': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
 }
 def write_utf8_no_bom(path, text):
     pathlib.Path(path).write_bytes(text.encode('utf-8'))
 write_utf8_no_bom(r'$manifestPath', json.dumps(manifest, indent=2) + '\n')
-channel = {'version_url': '$BaseUrl/version.json'}
+channel = channel_document($Port)
 write_utf8_no_bom(r'$channelPath', json.dumps(channel, indent=2) + '\n')
+homes = '\n'.join(list_base_urls($Port)) + '\n'
+write_utf8_no_bom(r'$ReleasesDir\wifi_update_home.txt', homes)
 "@ | Out-Null
 $bom = [System.IO.File]::ReadAllBytes($manifestPath)[0..2]
 if ($bom[0] -eq 0xEF -and $bom[1] -eq 0xBB -and $bom[2] -eq 0xBF) {
@@ -127,8 +133,18 @@ if (Test-Path $indexSrc) {
     Copy-Item -Force $indexSrc (Join-Path $ReleasesDir "index.html")
 }
 
-# Base URL for OPEN_APP seed (also written into AppUpdate at pack time).
-Set-Content -Path (Join-Path $ReleasesDir "wifi_update_home.txt") -Value $BaseUrl -Encoding ascii
+$pack = Join-Path $Root "packaging"
+foreach ($name in @(
+        "WIFI_UPDATE_NOW.bat", "wifi_update_now.ps1", "td_update_homes.ps1",
+        "td_update_poll.ps1", "refresh_update_channel.ps1", "OPEN_APP.bat",
+        "FORCE_UPDATE.bat", "select_app_update.ps1", "APPLY_UPDATE.bat",
+        "FINISH_UPDATE.bat"
+    )) {
+    $src = Join-Path $pack $name
+    if (Test-Path $src) { Copy-Item -Force $src (Join-Path $ReleasesDir $name) }
+}
+$servePy = Join-Path (Join-Path $Root "scripts") "serve_td_releases.py"
+if (Test-Path $servePy) { Copy-Item -Force $servePy (Join-Path $ReleasesDir "serve_td_releases.py") }
 
 Write-Host ""
 Write-Host "PUBLISH OK - Wi-Fi auto-update channel ready"
@@ -140,16 +156,15 @@ Write-Host "  Manifest: $manifestPath"
 Write-Host "  Zip    : $(Join-Path $ReleasesDir $StableZipName)"
 Write-Host "  (overwrites previous - one zip on the update server)"
 Write-Host ""
-Write-Host "HOME PC - start server (leave running while laptop updates):"
+Write-Host "HOME PC - push to work laptop over Tailscale:"
+Write-Host "  UPDATE_LAPTOP.bat"
+Write-Host "  (starts server on Tailscale 100.x + LAN; laptop pulls)"
+Write-Host ""
+Write-Host "Or start server only:"
 Write-Host "  $ReleasesDir\SERVE_RELEASES.bat"
 Write-Host ""
-Write-Host "WORK LAPTOP - first time (Wi-Fi only, no USB):"
-Write-Host "  1. Open Edge/Chrome to $BaseUrl/"
-Write-Host "  2. Download update_channel.json into C:\TrafficDeployer\tds_data\"
-Write-Host "  3. OPEN_APP.bat while ONLINE"
-Write-Host ""
-Write-Host "TEST: on work laptop at home Wi-Fi, open app (online mode)."
-Write-Host "  App checks $BaseUrl/version.json and applies if newer."
-Write-Host "  Laptop keeps one overwrite slot under tds_data\update_staging (no version pile-up)."
+Write-Host "WORK LAPTOP - Tailscale connected (home Wi-Fi not required):"
+Write-Host "  OPEN_APP.bat  or  WIFI_UPDATE_NOW.bat"
+Write-Host "  Channel: $BaseUrl/version.json"
 Write-Host ""
 exit 0

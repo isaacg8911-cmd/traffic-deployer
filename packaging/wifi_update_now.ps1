@@ -1,39 +1,48 @@
 # Wi-Fi / Tailscale AppUpdate — no USB. Run from WIFI_UPDATE_NOW.bat.
 $ErrorActionPreference = "Stop"
-
-$urls = @(
-    "http://100.93.14.32:8765",
-    "http://192.168.1.30:8765"
-)
-
-Write-Host ""
-Write-Host "Traffic Deployer - WIFI UPDATE NOW"
-Write-Host "=================================="
-Write-Host ""
-
-Write-Host "Finding home PC update server..."
-$homeBase = $null
-foreach ($u in $urls) {
-    $base = $u.TrimEnd("/")
-    try {
-        $r = Invoke-WebRequest -Uri ($base + "/version.json") -UseBasicParsing -TimeoutSec 8
-        if ($r.StatusCode -ge 200) {
-            $homeBase = $base
-            Write-Host "OK $base"
-            break
-        }
-    } catch {
-        Write-Host ("miss " + $base + " - " + $_.Exception.Message)
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$homes = Join-Path $here "td_update_homes.ps1"
+if (Test-Path -LiteralPath $homes) {
+    . $homes
+} else {
+    function Get-TdHomeBases {
+        return @(
+            "http://100.93.14.32:8765",
+            "http://192.168.1.30:8765"
+        )
     }
+    function Get-TdReachableHome {
+        param([int]$TimeoutSec = 8)
+        foreach ($base in Get-TdHomeBases) {
+            try {
+                $r = Invoke-WebRequest -Uri ($base + "/version.json") -UseBasicParsing -TimeoutSec $TimeoutSec
+                if ($r.StatusCode -ge 200) { return $base }
+            } catch { }
+        }
+        return $null
+    }
+    function Register-TdUpdatePoll { param([string]$InstallDir) }
 }
+
+$silent = [string]$env:TD_UPDATE_SILENT -eq "1"
+
+if (-not $silent) {
+    Write-Host ""
+    Write-Host "Traffic Deployer - WIFI / TAILSCALE UPDATE"
+    Write-Host "=========================================="
+    Write-Host ""
+}
+
+Write-Host "Finding home PC update server (Tailscale then LAN)..."
+$homeBase = Get-TdReachableHome
 if (-not $homeBase) {
     Write-Host ""
     Write-Host "FAIL: cannot reach home PC."
     Write-Host "Tried:"
-    $urls | ForEach-Object { Write-Host ("  " + $_) }
+    Get-TdHomeBases | ForEach-Object { Write-Host ("  " + $_) }
     Write-Host ""
-    Write-Host "On HOME PC: keep update server running."
-    Write-Host "On LAPTOP: open Edge to http://100.93.14.32:8765/"
+    Write-Host "On HOME PC: run UPDATE_LAPTOP.bat (leave the server window open)."
+    Write-Host "Laptop must be connected to Tailscale (or home Wi-Fi)."
     exit 1
 }
 
@@ -51,6 +60,7 @@ foreach ($c in $candidates) {
     }
 }
 if (-not $install) {
+    if ($silent) { throw "install folder not found" }
     $install = Read-Host "Type install folder (e.g. C:\TrafficDeployer)"
     $install = $install.Trim().Trim('"')
 }
@@ -70,12 +80,15 @@ $cur = if (Test-Path $verFile) { (Get-Content $verFile -Raw).Trim() } else { "un
 Write-Host "Current: v$cur"
 Write-Host ""
 
-Write-Host "Closing app if open..."
-Get-Process -Name "TrafficDeployer" -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Seconds 2
+if (-not $silent) {
+    Write-Host "Closing app if open..."
+    Get-Process -Name "TrafficDeployer" -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Seconds 2
+} elseif (Get-Process -Name "TrafficDeployer" -ErrorAction SilentlyContinue) {
+    Write-Host "App is open — skip apply (will retry next poll)."
+    exit 0
+}
 
-# Windows PowerShell 5.x: Invoke-RestMethod + UTF-8 BOM version.json returns a
-# bare string (Length only) — $manifest.download_url is then empty. Parse ourselves.
 function Read-TdManifest([string]$Url) {
     $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 20
     $text = [string]$resp.Content
@@ -99,7 +112,6 @@ $zipUrl = [string]$manifest.download_url
 $sha = [string]$manifest.sha256
 if (-not $latest) { throw "version.json missing version" }
 
-# Always pull zip from the reachable home base (LAN IP in manifest may be blocked).
 $zipName = "TrafficDeployer-AppUpdate.zip"
 if ($zipUrl) {
     $fromUrl = ($zipUrl -split "/")[-1]
@@ -117,7 +129,7 @@ $dataDir = Join-Path $install "tds_data"
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 
 if ($cur -eq $latest) {
-    Write-Host "Already on v$latest. Writing update channel and launching."
+    Write-Host "Already on v$latest. Writing update channel."
 } else {
     $staging = Join-Path $dataDir "wifi_update_now"
     if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
@@ -156,7 +168,11 @@ if ($cur -eq $latest) {
         if (Test-Path $webDst) { Remove-Item -Recurse -Force $webDst }
         Copy-Item -Recurse -Force $webSrc $webDst
     }
-    foreach ($name in @("OPEN_APP.bat", "VERSION.txt", "READ_ME_FIRST.txt", "wifi_update_home.txt")) {
+    foreach ($name in @(
+            "OPEN_APP.bat", "VERSION.txt", "READ_ME_FIRST.txt", "wifi_update_home.txt",
+            "WIFI_UPDATE_NOW.bat", "wifi_update_now.ps1", "td_update_homes.ps1",
+            "td_update_poll.ps1", "refresh_update_channel.ps1"
+        )) {
         $p = Join-Path $src $name
         if (Test-Path $p) { Copy-Item -Force $p (Join-Path $install $name) }
     }
@@ -167,22 +183,31 @@ if ($cur -eq $latest) {
     Remove-Item -Recurse -Force $staging -ErrorAction SilentlyContinue
 }
 
-$channel = @{ version_url = ($homeBase + "/version.json") } | ConvertTo-Json
+$channelUrls = @(Get-TdHomeBases | ForEach-Object { $_ + "/version.json" })
+$channel = @{
+    version_url  = ($homeBase + "/version.json")
+    version_urls = $channelUrls
+} | ConvertTo-Json
 Set-Content -LiteralPath (Join-Path $dataDir "update_channel.json") -Value $channel -Encoding utf8
 Write-Host "Channel written."
+Register-TdUpdatePoll -InstallDir $install
 
 Write-Host ""
 Write-Host "========== PROOF =========="
 Write-Host ("VERSION.txt: " + (Get-Content (Join-Path $install "VERSION.txt") -Raw).Trim())
 Write-Host "Expected : $latest"
 Write-Host "Install  : $install"
+Write-Host "Home     : $homeBase"
 Write-Host "==========================="
 Write-Host ""
-Write-Host "Starting app..."
-$open = Join-Path $install "OPEN_APP.bat"
-if (Test-Path $open) {
-    Start-Process -FilePath $open -WorkingDirectory $install
-} else {
-    Start-Process -FilePath (Join-Path $install "TrafficDeployer.exe") -WorkingDirectory $install
+
+if (-not $silent) {
+    Write-Host "Starting app..."
+    $open = Join-Path $install "OPEN_APP.bat"
+    if (Test-Path $open) {
+        Start-Process -FilePath $open -WorkingDirectory $install
+    } else {
+        Start-Process -FilePath (Join-Path $install "TrafficDeployer.exe") -WorkingDirectory $install
+    }
+    Write-Host "Done. Window title must show v$latest."
 }
-Write-Host "Done. Window title must show v$latest."

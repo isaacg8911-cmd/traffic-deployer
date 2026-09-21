@@ -4,8 +4,8 @@ REM OK to keep a copy in Downloads: this finds the real install and runs from th
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "TDS_WORK_LAPTOP=1"
-REM Home PC Wi-Fi update server (same home network). Change if your home IP changes.
-set "TD_UPDATE_HOME=http://192.168.1.30:8765"
+REM Home PC update server — Tailscale first, then LAN. refresh_update_channel.ps1 discovers live peers.
+set "TD_UPDATE_HOME=http://msi.tailaf9051.ts.net:8765"
 set "TD_UPDATE_URL=%TD_UPDATE_HOME%/version.json"
 
 echo.
@@ -77,11 +77,15 @@ if not exist "_internal\" (
 if not exist "tds_data\" mkdir "tds_data"
 if not exist "tds_data\counter_downloads\" mkdir "tds_data\counter_downloads"
 
-REM Always refresh Wi-Fi channel from home PC when online (safe overwrite).
-echo Checking Wi-Fi update channel from home PC...
-echo   %TD_UPDATE_HOME%
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$homeUrl='%TD_UPDATE_HOME%'.Trim().TrimEnd('/'); $dest='tds_data\update_channel.json'; $channel=$homeUrl+'/update_channel.json'; try { Invoke-WebRequest -Uri $channel -OutFile $dest -UseBasicParsing -TimeoutSec 12; Write-Host '  Channel OK -> tds_data\update_channel.json' } catch { Write-Host ('  WARN: could not reach home PC: ' + $_.Exception.Message); Write-Host '  Open Edge on this laptop to '+$homeUrl+'/ and download update_channel.json into tds_data\' }"
+REM Refresh update channel from home PC (Tailscale or LAN). Safe overwrite.
+echo Checking Tailscale / Wi-Fi update channel from home PC...
+if exist "refresh_update_channel.ps1" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "refresh_update_channel.ps1"
+) else (
+  echo   %TD_UPDATE_HOME%
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$homes=@('http://msi.tailaf9051.ts.net:8765','http://100.93.14.32:8765','http://192.168.1.30:8765'); $dest='tds_data\update_channel.json'; $ok=$false; foreach($homeUrl in $homes){ try { Invoke-WebRequest -Uri ($homeUrl.TrimEnd('/')+'/update_channel.json') -OutFile $dest -UseBasicParsing -TimeoutSec 8; Write-Host ('  Channel OK -> '+$homeUrl); $ok=$true; break } catch {} }; if(-not $ok){ Write-Host '  WARN: could not reach home PC over Tailscale or LAN. On home PC run UPDATE_LAPTOP.bat.' }"
+)
 echo.
 
 REM Stalled Wi-Fi download — finish file swap before launching old exe.

@@ -1011,6 +1011,19 @@ def test_ingest_file_errors():
         check("missing spreadsheet raises", False, str(exc))
 
 
+def test_tailscale_update():
+    print("[tailscale update]")
+    script = os.path.join(ROOT, "scripts", "test_tailscale_update.py")
+    proc = subprocess.run(
+        [sys.executable, script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    detail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-400:]
+    check("tailscale update channel", proc.returncode == 0, detail)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Traffic Deployer headless smoke suite")
     ap.add_argument(
@@ -1047,6 +1060,7 @@ def main(argv: list[str] | None = None) -> int:
         test_offline_gate()
         test_field_error_logging()
         test_ingest_file_errors()
+        test_tailscale_update()
     print()
     if FAILURES:
         print(f"SMOKE FAILED ({len(FAILURES)}):")

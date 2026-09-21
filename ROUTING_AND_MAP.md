@@ -91,7 +91,7 @@ Goal: order sites so total **road** travel between segment crossings is low, and
 ### Distance matrix
 
 - Index `0` = **home**; `1..n` = each stop’s segment (up to **100 stops**).
-- For each segment, the graph exposes two **attachment points** (nearest road nodes to begin/end) via `road_router.segment_access`.
+- For each segment, the graph exposes **attachment points** along the street line: begin, end, and interior samples (¼, mid, ¾) when the Excel chord is a real block (~40 m–1.5 mi). Bogus multi-mile pairs stay begin/end only.
 - Matrix entries use **batched Dijkstra**: one shortest-path tree per attachment node, then O(1) lookups — same road-mile precision from 5 to 100 stops.
 
 ### Tour improvement
@@ -102,13 +102,15 @@ Goal: order sites so total **road** travel between segment crossings is low, and
 
 ### Crossing side
 
-**`_assign_crossings_open`** walks the ordered list stop-to-stop:
+**`_assign_crossings_open`** walks the ordered list stop-to-stop, then **`_slide_crossings`** nudges each pin along its line:
 
-- Site 1: pick begin vs end by which faces site 2 on the road.
-- Later stops: pick the endpoint closer on the road from the previous crossing.
+- You do **not** have to drive to Excel begin or end. Any point on the hose/block is a legal park if it cuts miles.
+- Site 1: closest sample on the line toward site 2.
+- Later stops: closest sample from the previous crossing, then a 2-pass slide that min(incoming + outgoing).
+- Locked manual picks still force begin or end.
 - Navigation targets use **field GPS** if stamped, else **crossing**, else midpoint (`_stop_pt`).
 
-This is why the route is “efficient” for **traffic deployer** work: it optimizes **which way you cross each street line**, not just visiting map pins in Excel order.
+This is why the route is “efficient” for **traffic deployer** work: it optimizes **where on each street line you cross**, not just visiting map pins in Excel order.
 
 ---
 

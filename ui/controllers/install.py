@@ -50,9 +50,13 @@ class InstallControllerMixin:
         side = str(s.get("cross_side") or "").strip()
         cross_txt = ""
         if s.get("cross_lat") is not None:
-            cross_txt = (
-                f"Drive-to on line"
-                f"{f' ({side})' if side else ''}")
+            if side == "mid":
+                side_txt = " (between begin and end)"
+            elif side:
+                side_txt = f" ({side})"
+            else:
+                side_txt = ""
+            cross_txt = f"Drive-to on line{side_txt}"
         from ui.simple_mode import COMPACT_UI
         if COMPACT_UI:
             prog = f"{self._street_label(s)} · {done}/{total} done"

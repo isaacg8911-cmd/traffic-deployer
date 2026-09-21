@@ -733,6 +733,42 @@ def test_routing():
         check("road graph load", False, detail)
     else:
         print("  WARN road_graph.graphml missing — download road map in Setup for full routing")
+    from core import routing
+    mid_stop = {
+        "begin_lat": 34.10, "begin_lon": -117.25,
+        "end_lat": 34.10, "end_lon": -117.24,
+        "lat": 34.10, "lon": -117.245,
+    }
+    cands = routing._seg_candidates(mid_stop)
+    check("hose interior samples", len(cands) >= 5, f"n={len(cands)}")
+    lat, lon, side = routing._cross_begin_or_end(
+        None, None, (34.11, -117.245), mid_stop)
+    check("approach mid of hose", side == "mid", f"side={side} lon={lon:.5f}")
+    pin = {
+        "begin_lat": 34.10, "begin_lon": -117.25,
+        "end_lat": 34.10, "end_lon": -117.25,
+        "lat": 34.10, "lon": -117.25,
+    }
+    check("pin has no interior", len(routing._seg_candidates(pin)) == 1)
+    bogus = {
+        "begin_lat": 34.14, "begin_lon": -117.25,
+        "end_lat": 34.10, "end_lon": -117.47,
+        "lat": 34.12, "lon": -117.36,
+    }
+    check("bogus long chord stays ends-only", len(routing._seg_candidates(bogus)) == 2)
+    locked = {
+        **mid_stop, "cross_side": "begin", "pick_cross_locked": True,
+        "begin_lat": 34.10, "begin_lon": -117.25,
+        "end_lat": 34.10, "end_lon": -117.24,
+    }
+    assigned = routing._assign_crossings_open(None, [locked, dict(mid_stop)])
+    check(
+        "locked begin sticks",
+        assigned[0]["cross_side"] == "begin"
+        and abs(assigned[0]["cross_lon"] - locked["begin_lon"]) < 1e-9,
+    )
+    rt_src = open(os.path.join(ROOT, "core", "routing.py"), encoding="utf-8").read()
+    check("slide crossings on line", "_slide_crossings" in rt_src)
 
 
 def test_field_ready():

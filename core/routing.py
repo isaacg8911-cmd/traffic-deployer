@@ -29,6 +29,10 @@ EXACT_MATRIX_MAX_STOPS = 9
 ORTOOLS_MATRIX_MAX_STOPS = 15
 # Zone sweep: cluster geographically for 12+ stops (P20/P21).
 ZONE_MIN_STOPS = 12
+# Sample points between Excel begin/end when the chord is a real block.
+# Skip pins (<40 m) and bogus multi-mile Excel pairs (>1.5 mi).
+HOSE_INTERIOR_MIN_M = 40.0
+HOSE_INTERIOR_MAX_M = 2400.0
 
 
 def _haversine_km(a, b):
@@ -98,12 +102,74 @@ def _project_on_segment(beg: tuple[float, float], end: tuple[float, float],
     return (beg[0] + t * dy, beg[1] + t * dx)
 
 
-def _segment_access(graph, stop: dict) -> dict:
-    """Road attachment points at each end of the street segment line."""
+def _lerp_ll(a: tuple[float, float], b: tuple[float, float], t: float) -> tuple[float, float]:
+    return (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]))
+
+
+def _hose_len_m(stop: dict) -> float:
     b, e = _seg_endpoints(stop)
-    if graph is not None:
-        return road_router.segment_access(graph, b, e)
-    return {"begin": b, "end": e}
+    return _haversine_km(b, e) * 1000.0
+
+
+def _side_from_t(t: float) -> str:
+    if t <= 0.12:
+        return "begin"
+    if t >= 0.88:
+        return "end"
+    return "mid"
+
+
+def _sample_side(name: str) -> str:
+    return name if name in ("begin", "end") else "mid"
+
+
+def _seg_samples(stop: dict) -> list[tuple[str, tuple[float, float]]]:
+    """Begin, end, and interior samples when the Excel chord is a usable block."""
+    b, e = _seg_endpoints(stop)
+    out: list[tuple[str, tuple[float, float]]] = [("begin", b), ("end", e)]
+    meters = _hose_len_m(stop)
+    if meters < HOSE_INTERIOR_MIN_M or meters > HOSE_INTERIOR_MAX_M:
+        return out
+    for t, name in ((0.25, "q1"), (0.5, "mid"), (0.75, "q3")):
+        out.append((name, _lerp_ll(b, e, t)))
+    return out
+
+
+def _seg_candidates(stop: dict) -> list[tuple[float, float, str]]:
+    """Drive-to options: endpoints plus on-line samples (unique coords)."""
+    seen: set[tuple[float, float]] = set()
+    out: list[tuple[float, float, str]] = []
+    for name, pt in _seg_samples(stop):
+        key = (round(pt[0], 6), round(pt[1], 6))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((pt[0], pt[1], _sample_side(name)))
+    return out
+
+
+def _snap_ll(graph, pt: tuple[float, float]) -> tuple[float, float]:
+    n = road_router.nearest_node(graph, pt[0], pt[1])
+    return (float(graph.nodes[n]["y"]), float(graph.nodes[n]["x"]))
+
+
+def _segment_access(graph, stop: dict) -> dict:
+    """Road attachment points along the street segment (ends + interior)."""
+    acc: dict[str, tuple[float, float]] = {}
+    for name, pt in _seg_samples(stop):
+        acc[name] = _snap_ll(graph, pt) if graph is not None else pt
+    return acc
+
+
+def _access_nodes(graph, acc: dict) -> list:
+    nodes = []
+    seen: set = set()
+    for pt in _access_pts(acc):
+        n = road_router.nearest_node(graph, pt[0], pt[1])
+        if n not in seen:
+            seen.add(n)
+            nodes.append(n)
+    return nodes
 
 
 def _road_m(graph, a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -121,7 +187,7 @@ def _cached_dist(graph, lengths: dict | None, a: tuple[float, float], b: tuple[f
 
 
 def _access_pts(acc: dict) -> list[tuple[float, float]]:
-    return [acc["begin"], acc["end"]]
+    return list(acc.values())
 
 
 def _pair_dist(graph, acc_a: dict, acc_b: dict) -> float:
@@ -138,13 +204,18 @@ def _cross_begin_or_end(
     cur: tuple[float, float],
     stop: dict,
 ) -> tuple[float, float, str]:
-    """Drive-to point is segment begin or end only (whichever is closer on the road)."""
-    seg_b, seg_e = _seg_endpoints(stop)
-    d_b = _cached_dist(graph, lengths, cur, seg_b)
-    d_e = _cached_dist(graph, lengths, cur, seg_e)
-    if d_b <= d_e:
-        return seg_b[0], seg_b[1], "begin"
-    return seg_e[0], seg_e[1], "end"
+    """Drive-to point on the site line: begin, end, or a closer point between them."""
+    best: tuple[float, float, str] | None = None
+    best_d = float("inf")
+    for lat, lon, side in _seg_candidates(stop):
+        d = _cached_dist(graph, lengths, cur, (lat, lon))
+        if d < best_d:
+            best_d = d
+            best = (lat, lon, side)
+    if best is None:
+        b, _e = _seg_endpoints(stop)
+        return b[0], b[1], "begin"
+    return best
 
 
 def _locked_cross(stop: dict, side: str) -> tuple[float, float, str]:
@@ -161,7 +232,7 @@ def _assign_crossings(
     ordered: list[dict],
     lengths: dict | None = None,
 ) -> list[dict]:
-    """Chain crossings using begin/end endpoints only."""
+    """Chain crossings using the closest point on each site line."""
     cur = (float(home[0]), float(home[1]))
     for stop in ordered:
         locked = stop.get("cross_side") if stop.get("pick_cross_locked") else None
@@ -172,7 +243,7 @@ def _assign_crossings(
         stop["cross_lat"], stop["cross_lon"] = lat, lon
         stop["cross_side"] = side
         cur = (lat, lon)
-    return ordered
+    return _slide_crossings(graph, ordered, lengths, home=home)
 
 
 def _tour_cost_assigned(
@@ -319,9 +390,7 @@ def _batched_road_lengths(graph, home: tuple[float, float], stops: list[dict]):
     m = [[0.0] * n for _ in range(n)]
 
     def _nodes_for_acc(acc: dict) -> list:
-        nb = road_router.nearest_node(graph, acc["begin"][0], acc["begin"][1])
-        ne = road_router.nearest_node(graph, acc["end"][0], acc["end"][1])
-        return [nb, ne]
+        return _access_nodes(graph, acc)
 
     home_n = road_router.nearest_node(graph, float(home[0]), float(home[1]))
     stop_nodes = [_nodes_for_acc(a) for a in accs]
@@ -357,7 +426,7 @@ def _batched_road_lengths(graph, home: tuple[float, float], stops: list[dict]):
 
 
 def _road_matrix(graph, home: tuple[float, float], stops: list[dict]) -> tuple[list[list[float]], dict | None]:
-    """Distance matrix: index 0 = home, 1..n = segment line (min road dist between access ends)."""
+    """Distance matrix: index 0 = home, 1..n = segment line (min road dist along access points)."""
     if graph is None:
         return _haversine_matrix(home, stops, None)
     return _batched_road_lengths(graph, home, stops)
@@ -380,9 +449,7 @@ def _stops_only_matrix(
         return m, None
 
     def _nodes_for_acc(acc: dict) -> list:
-        nb = road_router.nearest_node(graph, acc["begin"][0], acc["begin"][1])
-        ne = road_router.nearest_node(graph, acc["end"][0], acc["end"][1])
-        return [nb, ne]
+        return _access_nodes(graph, acc)
 
     stop_nodes = [_nodes_for_acc(a) for a in accs]
     all_nodes = {nd for pair in stop_nodes for nd in pair}
@@ -773,15 +840,8 @@ def _assign_crossings_open(
     if locked0 in ("begin", "end"):
         lat, lon, side = _locked_cross(s0, locked0)
     else:
-        s1 = ordered[1]
-        seg_b, seg_e = _seg_endpoints(s0)
-        toward = (float(s1["lat"]), float(s1["lon"]))
-        d_b = _cached_dist(graph, lengths, toward, seg_b)
-        d_e = _cached_dist(graph, lengths, toward, seg_e)
-        if d_b <= d_e:
-            lat, lon, side = seg_b[0], seg_b[1], "begin"
-        else:
-            lat, lon, side = seg_e[0], seg_e[1], "end"
+        toward = (float(ordered[1]["lat"]), float(ordered[1]["lon"]))
+        lat, lon, side = _cross_begin_or_end(graph, lengths, toward, s0)
     s0["cross_lat"], s0["cross_lon"], s0["cross_side"] = lat, lon, side
 
     cur = (lat, lon)
@@ -793,7 +853,7 @@ def _assign_crossings_open(
             lat, lon, side = _cross_begin_or_end(graph, lengths, cur, stop)
         stop["cross_lat"], stop["cross_lon"], stop["cross_side"] = lat, lon, side
         cur = (lat, lon)
-    return ordered
+    return _slide_crossings(graph, ordered, lengths)
 
 
 def _endpoint_distances(
@@ -842,16 +902,59 @@ def _resolve_anchor(
     return float(home[0]), float(home[1])
 
 
+def _slide_crossings(
+    graph,
+    ordered: list[dict],
+    lengths: dict | None,
+    *,
+    home: tuple[float, float] | None = None,
+) -> list[dict]:
+    """Shift each crossing along its line to cut incoming + outgoing miles."""
+    n = len(ordered)
+    if n < 1:
+        return ordered
+    if n < 2 and home is None:
+        return ordered
+    for _round in range(2):
+        for i, stop in enumerate(ordered):
+            if stop.get("pick_cross_locked") and stop.get("cross_side") in ("begin", "end"):
+                continue
+            if stop.get("field_lat") is not None and stop.get("field_lon") is not None:
+                continue
+            prev = None
+            if i == 0:
+                if home is not None:
+                    prev = (float(home[0]), float(home[1]))
+            elif ordered[i - 1].get("cross_lat") is not None:
+                prev = (float(ordered[i - 1]["cross_lat"]), float(ordered[i - 1]["cross_lon"]))
+            nxt = None
+            if i + 1 < n and ordered[i + 1].get("cross_lat") is not None:
+                nxt = (float(ordered[i + 1]["cross_lat"]), float(ordered[i + 1]["cross_lon"]))
+            best = None
+            best_d = float("inf")
+            for lat, lon, side in _seg_candidates(stop):
+                d = 0.0
+                if prev is not None:
+                    d += _cached_dist(graph, lengths, prev, (lat, lon))
+                if nxt is not None:
+                    d += _cached_dist(graph, lengths, (lat, lon), nxt)
+                if d < best_d:
+                    best_d = d
+                    best = (lat, lon, side)
+            if best is not None:
+                stop["cross_lat"], stop["cross_lon"], stop["cross_side"] = best
+    return ordered
+
+
 def _min_dist_to_stop(
     graph,
     lengths: dict | None,
     pt: tuple[float, float],
     stop: dict,
 ) -> float:
-    seg_b, seg_e = _seg_endpoints(stop)
     return min(
-        _cached_dist(graph, lengths, pt, seg_b),
-        _cached_dist(graph, lengths, pt, seg_e),
+        _cached_dist(graph, lengths, pt, (lat, lon))
+        for lat, lon, _side in _seg_candidates(stop)
     )
 
 

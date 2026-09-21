@@ -7,9 +7,12 @@ Online-first, lean. Reuses desktop core:
   - core.map_state: Qt-free map payload
 
 No USB GPS, no PicoCount, no Qt. Location comes from the phone browser.
+When the phone cannot reach this server, the PWA keeps a local snapshot and a
+portable `.tdjob.json` file so the crew can pick up later.
 """
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 
@@ -20,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from core import export, ingest, map_state, routing
 from mobile_web import settings
 from mobile_web.store import JobStore, link_status, public_job
+from mobile_web.tdjob import TdjobError, pack_job, unpack_job
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -210,6 +214,63 @@ async def import_job(
     )
 
 
+def _restore_from_payload(request: Request, payload: dict) -> dict:
+    try:
+        data = unpack_job(payload)
+    except TdjobError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    job = store.create(
+        home=data["home"],
+        home_label=data["home_label"],
+        stops=data["stops"],
+        active_files=data["active_files"],
+        label=data["label"],
+        expires_in_hours=_resolve_ttl(request),
+    )
+    job["route"] = data["route"]
+    store.save(job)
+    return job
+
+
+@app.post("/api/jobs/restore")
+async def restore_job(request: Request) -> JSONResponse:
+    """Re-create a job from a downloaded `.tdjob.json` (admin-key in public mode).
+
+    Accepts `application/json` or multipart form field `file` / `tdjob`.
+    Always mints a new job id + token — the file is a snapshot, not a share link.
+    """
+    _require_admin(request)
+    ct = (request.headers.get("content-type") or "").lower()
+    payload: dict | None = None
+    if "multipart" in ct:
+        form = await request.form()
+        uf = form.get("file") or form.get("tdjob")
+        if uf is None or not hasattr(uf, "read"):
+            raise HTTPException(
+                status_code=422, detail="Attach a .tdjob.json file as 'file'."
+            )
+        raw = await uf.read()
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail="Job file is not valid JSON.") from exc
+    else:
+        try:
+            payload = await request.json()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="Upload a .tdjob.json file or JSON body.",
+            ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Job file must be a JSON object.")
+    job = _restore_from_payload(request, payload)
+    return JSONResponse(
+        {"job_id": job["id"], "token": job["token"], "job": public_job(job),
+         "state": _job_state(job), "share_url": _share_url(request, job)}
+    )
+
+
 @app.post("/api/jobs/demo")
 def import_demo(request: Request) -> JSONResponse:
     """Admin/test-only seed job from the bundled fixture (not shown in the app UI).
@@ -321,6 +382,18 @@ def get_job(job_id: str, request: Request) -> dict:
 def get_map_state(job_id: str, request: Request) -> dict:
     job = _authorize(request, job_id)
     return _job_state(job)
+
+
+@app.get("/api/jobs/{job_id}/tdjob")
+def download_tdjob(job_id: str, request: Request) -> JSONResponse:
+    """Portable job snapshot for download / later re-upload."""
+    job = _authorize(request, job_id)
+    payload = pack_job(job)
+    fname = f"TD_job_{job_id}.tdjob.json"
+    return JSONResponse(
+        payload,
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 def _trace_current_order(job: dict) -> bool:

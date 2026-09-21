@@ -1,8 +1,13 @@
 # Mobile Web (phone field runner)
 
-A lean, online-first PWA companion to the desktop app. It reuses the desktop
-core (ingest, routing, export) but drops USB GPS, the PicoCount workflow, and the
-Qt shell. Location comes from the phone browser.
+A lean PWA companion to the desktop app. Same field tabs as the laptop
+(Setup / Route / Install / Pickup / Audit), mobile-sized. It reuses the
+desktop core (ingest, routing, export) but drops USB GPS, PicoCount, and
+the Qt shell. Location comes from the phone browser.
+
+If the server cannot save (no signal, laptop asleep), the phone keeps the
+shift on-device and you can **download a `.tdjob.json` file** to re-upload
+later — same idea as the laptop's local shift file.
 
 ## Run it
 
@@ -85,21 +90,23 @@ host (Render / Fly.io / VPS) — phase 2.
 | Map | Offline PMTiles | Online tiles |
 | GPS capture | USB receiver | Phone browser geolocation |
 | Drop pin fallback | Yes | Yes |
+| Follow GPS / next-stop banner | Yes | Yes |
 | Install / skip | Yes | Yes |
 | Serial / lanes / dir / notes | Yes | Yes |
 | PicoCount USB | Yes | No (counter columns blank) |
 | Pickup | Yes | Yes |
-| Audit / IG TFC export | Yes | Yes |
-| Offline field mode | Yes | Not v1 (online-first) |
+| Audit / IG TFC export | Yes | CSV on-phone; Excel when server is up |
+| Local save if online fails | Encrypted `tds_data/` | IndexedDB + `.tdjob.json` download/re-upload |
 | Undo | Yes | Not yet |
 
 ## Architecture
 
 - `mobile_web/server.py` — FastAPI app (REST + static PWA)
 - `mobile_web/store.py` — web-safe JSON job store (token-scoped, in-memory cached)
+- `mobile_web/tdjob.py` — portable `.tdjob.json` pack/unpack (no token in the file)
 - `mobile_web/tls.py` — self-signed LAN cert (secure context for phone GPS)
 - `mobile_web/settings.py` — share-only public mode + admin key + public URL
-- `mobile_web/static/` — the PWA (index.html, app.js, style.css, sw.js, manifest)
+- `mobile_web/static/` — the PWA (index.html, app.js, local.js, style.css, sw.js, manifest)
 - `core/map_state.py` — Qt-free map payload shared with the renderer
 - Reuses `core.ingest`, `core.routing`, `core.export` unchanged
 
@@ -109,11 +116,13 @@ host (Render / Fly.io / VPS) — phase 2.
 |---|---|---|
 | POST | `/api/jobs/demo` | Create job from bundled fixture (admin-key in public mode) |
 | POST | `/api/jobs/import` | Upload Excel/CSV + .EST (admin-key in public mode) |
+| POST | `/api/jobs/restore` | Re-create a job from a `.tdjob.json` snapshot (new id + token) |
 | GET | `/join/{id}?token=` | Share-link entry — serves the PWA, auto-opens the job |
 | GET | `/api/jobs/{id}/share` | Share link for a job (token required) |
 | GET | `/api/jobs/{id}/share.svg` | QR code (SVG) for the share link |
 | GET | `/api/jobs/{id}` | Job + map state |
 | GET | `/api/jobs/{id}/map-state` | Lean map payload |
+| GET | `/api/jobs/{id}/tdjob` | Download portable job snapshot |
 | POST | `/api/jobs/{id}/route` | Optimize + trace |
 | PATCH | `/api/jobs/{id}/stops/{uid}` | Edit fields / install / skip / pickup |
 | POST | `/api/jobs/{id}/stops/{uid}/grab` | Save phone GPS / pin location |
@@ -127,6 +136,7 @@ header or `?token=` query.
 
 ```
 .venv\Scripts\python.exe scripts\mobile_user_prove.py     # user flow
+.venv\Scripts\python.exe scripts\test_tdjob.py            # job file pack/restore
 .venv\Scripts\python.exe scripts\mobile_tls_prove.py      # real HTTPS secure context
 .venv\Scripts\python.exe scripts\mobile_share_prove.py    # public share-only mode + links
 .venv\Scripts\python.exe scripts\mobile_stress_loop.py    # load + latency
@@ -140,6 +150,6 @@ improvements). Stress latency logs to `logs/mobile_stress/`.
 
 - HTTPS is self-signed (one-time phone warning); use a trusted cert/proxy in prod
 - Job token only, not full multi-user auth (phase 2)
-- Online-first: no offline field queue yet (IndexedDB sync is phase 2)
+- Street-route rebuild still needs the server; install/pickup/notes work from the phone copy
 - Heavy route builds (large jobs with a server road graph) should be backgrounded
 - Browser/device E2E (Playwright) not wired; current proof is in-process API

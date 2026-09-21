@@ -1,7 +1,7 @@
 /* Service worker: cache the app shell only (online-first for data and tiles).
  * Job data, map-state, and tiles are always fetched fresh from the network.
  */
-var SHELL = 'td-mobile-shell-v6';
+var SHELL = 'td-mobile-shell-v7';
 var SHELL_ASSETS = [
   '/style.css', '/manifest.webmanifest', '/icon.svg',
   '/vendor/maplibre-gl.js', '/vendor/maplibre-gl.css'
@@ -26,7 +26,8 @@ function isAppCode(url) {
   return url.pathname === '/'
     || url.pathname === '/index.html'
     || url.pathname.indexOf('/join/') === 0
-    || url.pathname === '/app.js';
+    || url.pathname === '/app.js'
+    || url.pathname === '/local.js';
 }
 
 self.addEventListener('fetch', function (e) {

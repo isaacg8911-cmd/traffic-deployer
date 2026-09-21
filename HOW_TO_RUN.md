@@ -69,7 +69,8 @@ Audit tab: **shift summary** + export.
    - **Download road map** for these sites (or import `.graphml` from home PC if work Wi‑Fi blocks download).
    - **BUILD OPTIMIZED ROUTE**, then **READY FOR OFFLINE** before you leave.
 2. **Route tab** - see the ordered stops (numbered **1, 2, 3…** on the map), total miles,
-   and the **blue drive line** traced on real streets (needs road map downloaded).
+   estimated drive (from home, between sites, back home), and **~5–8 min setup per hose**.
+   The **blue drive line** is traced on real streets (needs road map downloaded).
    Optional **work-site lines** are dashed purple (Excel segment, not the drive path).
    Click a numbered stop to open it.
 3. **Map** — standard **Protomaps light** colors (not tied to Sunny/Cloudy/Night panel
@@ -81,6 +82,15 @@ Audit tab: **shift summary** + export.
    - **HTML pickup** (Route tab): links drive to each site’s **install GPS / pin**, not the Excel begin/end dots.
 6. **Pickup tab** — mark each site **SECURED**. Download counts in **TrafficViewer**.
 7. **Audit tab** - it flags missing data, then **Handoff export** (Excel + Map `.est`). The IG TFC sheet lists sites in **install order** (time marked INSTALL/SKIP), not original office site order. Zip Excel + `.est` for the office — **do not include `.html` or `.kml`** (email antivirus treats extra map viewers as a virus).
+
+## Phone field app (same tabs, smaller screen)
+
+Double-click **`RUN_MOBILE.bat`** and open the printed URL on the phone. Tabs match
+the laptop: **Setup · Route · Install · Pickup · Audit**.
+
+If the server cannot save (no signal), the phone keeps the shift locally. Tap
+**Download job file** (`.tdjob.json`) and later **Open job file** on the start
+screen to pick up where you left off. Details: **[docs/MOBILE_WEB.md](docs/MOBILE_WEB.md)**.
 
 ## Live GPS tracing
 

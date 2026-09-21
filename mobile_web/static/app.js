@@ -1,18 +1,27 @@
-/* Traffic Deployer Mobile — lean field runner.
- * Online-first PWA. Talks to the FastAPI backend; renders an online MapLibre map.
+/* Traffic Deployer phone — laptop workflow on a mobile screen.
+ * Online when the server is up; otherwise saves on this phone and as a .tdjob.json file.
  */
 (function () {
   'use strict';
 
   var DIRECTIONS = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
   var LS_KEY = 'td_mobile_job';
+  var TABS = ['setup', 'route', 'install', 'pickup', 'audit'];
+  var MAP_TABS = { route: 1, install: 1, pickup: 1 };
+  var CA = { minLat: 32.0, maxLat: 42.5, minLon: -125.0, maxLon: -114.0 };
+  var L = window.TDLocal;
 
-  var state = { jobId: null, token: null, data: null, tab: 'route', current: 0, pinMode: false, tileUrl: null, publicMode: false, shareUrl: null, reorderMode: false, busy: false };
+  var state = {
+    jobId: null, token: null, data: null, job: null,
+    tab: 'route', current: 0, pinMode: false, tileUrl: null,
+    publicMode: false, canCreate: true, shareUrl: null,
+    reorderMode: false, busy: false, localOnly: false, pending: [],
+    driving: false, geoWatch: null, myLat: null, myLon: null
+  };
   var map = null, mapReady = false, meMarker = null, pinMarker = null;
 
   var $ = function (id) { return document.getElementById(id); };
 
-  // ----------------------------------------------------------------- helpers
   function toast(msg) {
     var t = $('toast');
     t.textContent = msg; t.classList.remove('hidden');
@@ -26,37 +35,103 @@
     return h;
   }
 
+  function isLocalId(id) { return !id || String(id).indexOf('local-') === 0; }
+
   function api(path, opts) {
     opts = opts || {};
     opts.headers = headers(opts.headers);
     return fetch(path, opts).then(function (r) {
       if (!r.ok) {
         return r.json().catch(function () { return { detail: 'Request failed' }; })
-          .then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); });
+          .then(function (j) {
+            var err = new Error(j.detail || ('HTTP ' + r.status));
+            err.status = r.status;
+            throw err;
+          });
       }
       var ct = r.headers.get('content-type') || '';
       return ct.indexOf('application/json') >= 0 ? r.json() : r;
     });
   }
 
+  function markLocal(reason) {
+    state.localOnly = true;
+    updateSaveUi(reason || 'Saved on this phone — server unreachable.');
+  }
+
+  function markOnline() {
+    state.localOnly = false;
+    updateSaveUi('');
+  }
+
+  function updateSaveUi(banner) {
+    var pill = $('savePill');
+    var bar = $('saveBanner');
+    if (!state.jobId) {
+      pill.textContent = '—';
+      pill.className = 'pill save-off';
+      bar.classList.add('hidden');
+      return;
+    }
+    if (state.localOnly || isLocalId(state.jobId)) {
+      pill.textContent = 'This phone';
+      pill.className = 'pill save-local';
+      $('saveBannerText').textContent = banner ||
+        'Saved on this phone. Download a job file so you can pick up later.';
+      bar.classList.remove('hidden');
+    } else {
+      pill.textContent = 'Saved';
+      pill.className = 'pill save-ok';
+      bar.classList.add('hidden');
+    }
+  }
+
+  function persist() {
+    if (!state.job) return Promise.resolve();
+    var rec = {
+      jobId: state.jobId,
+      token: state.token || '',
+      localOnly: state.localOnly || isLocalId(state.jobId),
+      job: state.job,
+      pending: state.pending || [],
+      updated: Date.now()
+    };
+    saveSession();
+    return L.saveSnapshot(rec);
+  }
+
+  function applyJob(job, mapState) {
+    state.job = job;
+    state.data = mapState || L.buildMapState(job);
+    renderAll();
+    persist();
+  }
+
   function saveSession() {
-    if (state.jobId) localStorage.setItem(LS_KEY, JSON.stringify({ jobId: state.jobId, token: state.token }));
+    if (state.jobId) {
+      try {
+        localStorage.setItem(LS_KEY, JSON.stringify({
+          jobId: state.jobId, token: state.token || '', localOnly: state.localOnly
+        }));
+      } catch (e) {}
+    }
   }
   function loadSession() {
     try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) { return null; }
   }
-  function clearSession() { localStorage.removeItem(LS_KEY); }
-  function closeRememberedJob(msg) {
-    clearSession();
-    state.jobId = null;
-    state.token = null;
-    state.data = null;
-    state.reorderMode = false;
-    showStart();
-    if (msg) {
-      $('startMsg').textContent = msg;
-      $('startMsg').className = 'msg ok';
-    }
+  function clearSession() { try { localStorage.removeItem(LS_KEY); } catch (e) {} }
+
+  function downloadJobFile() {
+    if (!state.job) { toast('Nothing to download yet.'); return; }
+    var pack = L.pack(state.job);
+    var name = 'TD_job_' + (state.jobId || 'local') + '.tdjob.json';
+    L.downloadNamed(name, JSON.stringify(pack, null, 2), 'application/json');
+    toast('Job file saved — re-upload it to pick up later');
+  }
+
+  function downloadCsv() {
+    if (!state.job) return;
+    L.downloadNamed('IG_TFC_' + (state.jobId || 'local') + '.csv', L.toCsv(state.job.stops), 'text/csv');
   }
 
   // ----------------------------------------------------------------- map
@@ -173,11 +248,139 @@
     map.flyTo({ center: [s.anchor[1], s.anchor[0]], zoom: 16, duration: 500 });
   }
 
-  // ----------------------------------------------------------------- data sync
-  function applyState(st) { state.data = st; renderAll(); }
+  // ----------------------------------------------------------------- online / local mutations
+  function refreshFromServer() {
+    if (!state.jobId || isLocalId(state.jobId) || state.localOnly) {
+      if (state.job) applyJob(state.job);
+      return Promise.resolve();
+    }
+    return api('/api/jobs/' + state.jobId + '/tdjob').then(function (pack) {
+      var data = L.unpack(pack);
+      data.id = state.jobId;
+      applyJob(data);
+      markOnline();
+    }).catch(function () {
+      return api('/api/jobs/' + state.jobId + '/map-state').then(function (st) {
+        var job = L.jobFromMapState(st, { jobId: state.jobId });
+        applyJob(job, st);
+      });
+    });
+  }
 
-  function refresh() {
-    return api('/api/jobs/' + state.jobId + '/map-state').then(applyState);
+  function withServer(fn, localFn) {
+    if (state.localOnly || isLocalId(state.jobId) || !state.token) {
+      return Promise.resolve(localFn());
+    }
+    return fn().catch(function (e) {
+      markLocal(e.message || 'Saved on this phone — server unreachable.');
+      return localFn();
+    });
+  }
+
+  function queue(op) {
+    state.pending = state.pending || [];
+    state.pending.push(op);
+  }
+
+  function patchStop(uid, patch) {
+    return withServer(function () {
+      return api('/api/jobs/' + state.jobId + '/stops/' + encodeURIComponent(uid), {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch)
+      }).then(function (res) {
+        var raw = L.findStop(state.job, uid);
+        if (raw && res.stop) L.mergePublicStop(raw, res.stop);
+        else if (raw) L.applyStopPatch(raw, patch);
+        applyJob(state.job, res.state);
+        return res;
+      });
+    }, function () {
+      var raw = L.findStop(state.job, uid);
+      if (raw) L.applyStopPatch(raw, patch);
+      queue({ op: 'patch', uid: uid, body: patch });
+      applyJob(state.job);
+      return { state: state.data };
+    });
+  }
+
+  function grabLocal(uid, lat, lon, source, accuracy) {
+    var raw = L.findStop(state.job, uid);
+    if (raw) L.applyGrab(raw, lat, lon, source, accuracy);
+    queue({ op: 'grab', uid: uid, body: { lat: lat, lon: lon, source: source, accuracy: accuracy } });
+    applyJob(state.job);
+  }
+
+  function saveGrab(lat, lon, source, accuracy) {
+    if (!(lat > CA.minLat && lat < CA.maxLat && lon > CA.minLon && lon < CA.maxLon)) {
+      toast('Location looks outside California.');
+      return;
+    }
+    var stops = (state.data && state.data.stops) || [];
+    var s = stops[state.current];
+    if (!s) return;
+    withServer(function () {
+      return api('/api/jobs/' + state.jobId + '/stops/' + encodeURIComponent(s.uid) + '/grab', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ lat: lat, lon: lon, source: source, accuracy: accuracy })
+      }).then(function (res) {
+        var raw = L.findStop(state.job, s.uid);
+        if (raw && res.stop) L.mergePublicStop(raw, res.stop);
+        else grabLocal(s.uid, lat, lon, source, accuracy);
+        applyJob(state.job, res.state);
+        disablePinMode();
+        toast('Location saved for Site ' + s.id);
+      });
+    }, function () {
+      grabLocal(s.uid, lat, lon, source, accuracy);
+      disablePinMode();
+      toast('Location saved on this phone for Site ' + s.id);
+    });
+  }
+
+  function moveStop(uid, dir) {
+    if (state.busy) return;
+    state.busy = true;
+    withServer(function () {
+      return api('/api/jobs/' + state.jobId + '/stops/' + encodeURIComponent(uid) + '/move', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dir: dir })
+      }).then(function (res) {
+        L.moveStop(state.job, uid, dir);
+        applyJob(state.job, res.state);
+      });
+    }, function () {
+      L.moveStop(state.job, uid, dir);
+      queue({ op: 'move', uid: uid, dir: dir });
+      applyJob(state.job);
+    }).catch(function (e) { toast(e.message); })
+      .finally(function () { state.busy = false; });
+  }
+
+  function pushToServer() {
+    if (!state.job) return;
+    var pack = L.pack(state.job);
+    $('setupMsg').textContent = 'Saving to server…';
+    fetch('/api/jobs/restore', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(pack)
+    }).then(function (r) {
+      return r.json().then(function (j) { if (!r.ok) throw new Error(j.detail || 'Save failed'); return j; });
+    }).then(function (res) {
+      state.jobId = res.job_id;
+      state.token = res.token;
+      state.pending = [];
+      var data = L.unpack(pack);
+      data.id = res.job_id;
+      applyJob(data, res.state);
+      markOnline();
+      toast('Saved on server');
+      $('setupMsg').textContent = 'Saved on server · job ' + res.job_id;
+      $('setupMsg').className = 'msg ok';
+    }).catch(function (e) {
+      markLocal(e.message);
+      $('setupMsg').textContent = e.message + ' — job file still on this phone.';
+      $('setupMsg').className = 'msg err';
+    });
   }
 
   // ----------------------------------------------------------------- rendering
@@ -186,15 +389,44 @@
     var c = state.data.counts || {};
     $('progressPill').textContent = (c.installed || 0) + '/' + (c.total || 0) + ' done';
     renderMap();
+    renderSetup();
     renderRoute();
     renderInstall();
     renderPickup();
     renderAudit();
+    renderDriveBanner();
+    updateSaveUi();
+  }
+
+  function renderSetup() {
+    if (!state.job) return;
+    var c = state.data.counts || {};
+    var miles = (state.data.route && state.data.route.miles) || 0;
+    $('setupMeta').textContent = (state.job.label || 'Field job') + ' · ' + (c.total || 0) + ' sites';
+    var files = (state.job.active_files || []).join(', ') || 'Imported job';
+    $('setupFiles').textContent = files + (miles ? (' · ' + miles.toFixed(1) + ' mi') : ' · not routed yet');
+    var filesDone = (state.job.stops || []).length > 0;
+    var routed = miles > 0.05;
+    var installing = (c.installed || 0) + (c.skipped || 0) > 0;
+    var auditReady = installing && (c.pending || 0) === 0;
+    var steps = {
+      files: filesDone, route: routed, drive: state.driving,
+      install: installing, audit: auditReady
+    };
+    var current = 'audit';
+    ['files', 'route', 'drive', 'install', 'audit'].some(function (id) {
+      if (!steps[id]) { current = id; return true; }
+      return false;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('#jobWorkflow li'), function (li) {
+      var id = li.getAttribute('data-step');
+      li.className = steps[id] ? 'done' : (id === current ? 'current' : '');
+    });
   }
 
   function renderRoute() {
     var ul = $('stopList'); ul.innerHTML = '';
-    var route = state.data.route || {};
+    var route = (state.data && state.data.route) || {};
     var miles = route.miles || 0;
     $('routeMiles').textContent = route.stale ? 'order changed — re-trace' : (miles ? (miles.toFixed(1) + ' mi') : 'not routed');
     if (state.reorderMode) {
@@ -203,7 +435,7 @@
         ? 'Order changed — tap Re-trace line to redraw the drive path.'
         : 'Tap ▲ / ▼ to set your own order, then Re-trace line.';
     }
-    var stops = state.data.stops || [];
+    var stops = (state.data && state.data.stops) || [];
     var last = stops.length - 1;
     stops.forEach(function (s, i) {
       var li = document.createElement('li');
@@ -241,33 +473,26 @@
     renderRoute();
   }
 
-  function moveStop(uid, dir) {
-    if (state.busy) return;
-    state.busy = true;
-    api('/api/jobs/' + state.jobId + '/stops/' + encodeURIComponent(uid) + '/move', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dir: dir })
-    }).then(function (res) {
-      applyState(res.state);
-    }).catch(function (e) { toast(e.message); })
-      .finally(function () { state.busy = false; });
-  }
-
   function retraceRoute() {
     if (state.busy) return;
+    if (state.localOnly || isLocalId(state.jobId)) {
+      toast('Connect to the server to re-trace the street line.');
+      return;
+    }
     state.busy = true;
     $('btnRetrace').disabled = true; $('btnRetrace').textContent = 'Re-tracing…';
     api('/api/jobs/' + state.jobId + '/retrace', { method: 'POST' }).then(function (res) {
-      applyState(res.state); fitToStops();
+      if (res.state && res.state.route) state.job.route = res.state.route;
+      applyJob(state.job, res.state); fitToStops();
       toast(res.traced ? 'Line re-traced for your order' : 'Order saved (line unchanged)');
-    }).catch(function (e) { toast(e.message); }).finally(function () {
+    }).catch(function (e) { toast(e.message); markLocal(e.message); }).finally(function () {
       state.busy = false;
       $('btnRetrace').disabled = false; $('btnRetrace').textContent = 'Re-trace line';
     });
   }
 
   function renderInstall() {
-    var stops = state.data.stops || [];
+    var stops = (state.data && state.data.stops) || [];
     if (!stops.length) { $('installTitle').textContent = 'No stops yet.'; return; }
     if (state.current >= stops.length) state.current = 0;
     var s = stops[state.current];
@@ -287,7 +512,7 @@
       $('grabInfo').textContent = 'No location captured yet.';
       $('grabInfo').className = 'msg';
     }
-    flyToStop(s);
+    if (state.tab === 'install') flyToStop(s);
   }
 
   function fillDir(val) {
@@ -300,7 +525,7 @@
 
   function renderPickup() {
     var ul = $('pickupList'); ul.innerHTML = '';
-    var installed = (state.data.stops || []).filter(function (s) { return s.installed; });
+    var installed = ((state.data && state.data.stops) || []).filter(function (s) { return s.installed; });
     var done = installed.filter(function (s) { return s.picked_up; }).length;
     $('pickupProg').textContent = 'Pickup: ' + done + '/' + installed.length + ' done';
     installed.forEach(function (s) {
@@ -317,22 +542,32 @@
   }
 
   function renderAudit() {
-    api('/api/jobs/' + state.jobId + '/audit').then(function (a) {
-      $('auditSummary').textContent = a.ok
-        ? ('Ready · ' + a.count + ' sites complete')
-        : (a.missing.length + ' issue(s) to fix');
-      var ul = $('auditList'); ul.innerHTML = '';
-      (a.missing.length ? a.missing : ['All required fields present.']).forEach(function (m) {
-        var li = document.createElement('li');
-        li.innerHTML = '<span class="grow"><span class="sub">' + esc(m) + '</span></span>';
-        ul.appendChild(li);
-      });
-    }).catch(function () {});
-    var q = '?token=' + encodeURIComponent(state.token);
-    $('btnExportCsv').href = '/api/jobs/' + state.jobId + '/export.csv' + q;
-    $('btnExportXlsx').href = '/api/jobs/' + state.jobId + '/export.xlsx' + q;
-    $('jobMeta').textContent = 'Job ' + state.jobId;
-    loadShare();
+    var a;
+    try { a = L.audit((state.job && state.job.stops) || []); }
+    catch (e) { a = { ok: true, missing: [], count: 0 }; }
+    $('auditSummary').textContent = a.ok
+      ? ('Ready · ' + a.count + ' sites complete')
+      : (a.missing.length + ' issue(s) to fix');
+    var ul = $('auditList'); ul.innerHTML = '';
+    (a.missing.length ? a.missing : ['All required fields present.']).forEach(function (m) {
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="grow"><span class="sub">' + esc(m) + '</span></span>';
+      ul.appendChild(li);
+    });
+    var q = '?token=' + encodeURIComponent(state.token || '');
+    var xls = $('btnExportXlsx');
+    if (state.token && !isLocalId(state.jobId) && !state.localOnly) {
+      xls.href = '/api/jobs/' + state.jobId + '/export.xlsx' + q;
+      xls.classList.remove('hidden');
+    } else {
+      xls.href = '#';
+      xls.onclick = function (ev) { ev.preventDefault(); toast('Excel export needs the server. CSV works offline.'); };
+    }
+    $('jobMeta').textContent = (state.localOnly || isLocalId(state.jobId))
+      ? ('On this phone · ' + (state.jobId || ''))
+      : ('Job ' + state.jobId);
+    if (state.token && !isLocalId(state.jobId) && !state.localOnly) loadShare();
+    else $('shareWrap').classList.add('hidden');
   }
 
   function loadShare() {
@@ -356,15 +591,8 @@
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
 
-  // ----------------------------------------------------------------- actions
-  function patchStop(uid, patch) {
-    return api('/api/jobs/' + state.jobId + '/stops/' + encodeURIComponent(uid), {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch)
-    }).then(function (res) { applyState(res.state); return res; });
-  }
-
   function flushForm() {
-    var stops = state.data.stops || [];
+    var stops = (state.data && state.data.stops) || [];
     if (!stops.length || state.current >= stops.length) return Promise.resolve();
     var s = stops[state.current];
     return patchStop(s.uid, {
@@ -381,24 +609,11 @@
     $('grabInfo').textContent = 'Getting GPS…'; $('grabInfo').className = 'msg';
     navigator.geolocation.getCurrentPosition(function (pos) {
       saveGrab(pos.coords.latitude, pos.coords.longitude, 'phone_gps', pos.coords.accuracy);
-    }, function (err) {
+    }, function () {
       $('grabInfo').textContent = 'GPS denied/failed — tap Drop pin and pick on the map.';
       $('grabInfo').className = 'msg err';
       enablePinMode();
     }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
-  }
-
-  function saveGrab(lat, lon, source, accuracy) {
-    var stops = state.data.stops || [];
-    var s = stops[state.current];
-    api('/api/jobs/' + state.jobId + '/stops/' + encodeURIComponent(s.uid) + '/grab', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ lat: lat, lon: lon, source: source, accuracy: accuracy })
-    }).then(function (res) {
-      applyState(res.state);
-      disablePinMode();
-      toast('Location saved for Site ' + s.id);
-    }).catch(function (e) { toast(e.message); });
   }
 
   function enablePinMode() {
@@ -415,14 +630,16 @@
     if (pinMarker) pinMarker.remove();
     pinMarker = new maplibregl.Marker({ color: '#e65100', draggable: true })
       .setLngLat([lon, lat]).addTo(map);
-    pinMarker.on('dragend', function () { var ll = pinMarker.getLngLat(); pinMarker._ll = ll; });
-    pinMarker._ll = { lat: lat, lng: lon };
+    pinMarker.on('dragend', function () {
+      var ll = pinMarker.getLngLat();
+      saveGrab(ll.lat, ll.lng, 'manual', null);
+    });
     $('mapHint').textContent = 'Pin set — drag to adjust, then INSTALL saves it';
     saveGrab(lat, lon, 'manual', null);
   }
 
   function commitInstall(installed) {
-    var stops = state.data.stops || [];
+    var stops = (state.data && state.data.stops) || [];
     if (!stops.length) return;
     var s = stops[state.current];
     flushForm().then(function () {
@@ -435,28 +652,101 @@
   }
 
   function nextPending() {
-    var stops = state.data.stops || [];
+    var stops = (state.data && state.data.stops) || [];
     for (var i = state.current + 1; i < stops.length; i++) if (!stops[i].installed && !stops[i].skipped) return i;
     for (var j = 0; j < stops.length; j++) if (!stops[j].installed && !stops[j].skipped) return j;
     return -1;
   }
 
   function buildRoute() {
+    if (state.localOnly || isLocalId(state.jobId) || !state.token) {
+      toast('Connect and tap Save to server, then Build route can trace streets.');
+      return;
+    }
     $('btnBuildRoute').disabled = true; $('btnBuildRoute').textContent = 'Building…';
     api('/api/jobs/' + state.jobId + '/route', { method: 'POST' }).then(function (res) {
       if (state.reorderMode) setReorderMode(false);
-      applyState(res.state); fitToStops();
+      if (res.state && res.state.route) state.job.route = res.state.route;
+      if (res.state && res.state.stops) {
+        state.job.stops = res.state.stops.map(function (s) {
+          var raw = L.findStop(state.job, s.uid) || L.copyStop(s);
+          L.mergePublicStop(raw, s);
+          return raw;
+        }).filter(Boolean);
+      }
+      applyJob(state.job, res.state); fitToStops();
       toast(res.graph ? 'Route built on streets' : 'Route built (straight-line — no road map on server)');
-    }).catch(function (e) { toast(e.message); }).finally(function () {
+    }).catch(function (e) { toast(e.message); markLocal(e.message); }).finally(function () {
       $('btnBuildRoute').disabled = false; $('btnBuildRoute').textContent = 'Build route';
     });
   }
 
+  // ----------------------------------------------------------------- drive (Follow GPS)
+  function setDrive(on) {
+    state.driving = !!on;
+    $('btnDrive').classList.toggle('active', state.driving);
+    $('btnDrive').textContent = state.driving ? 'Following…' : 'Follow GPS';
+    $('driveBanner').classList.toggle('hidden', !state.driving);
+    if (state.driving) {
+      startWatch();
+      renderDriveBanner();
+      setTab('route');
+    } else {
+      stopWatch();
+    }
+  }
+
+  function startWatch() {
+    if (!navigator.geolocation) { toast('No GPS on this device.'); setDrive(false); return; }
+    stopWatch();
+    state.geoWatch = navigator.geolocation.watchPosition(function (pos) {
+      state.myLat = pos.coords.latitude;
+      state.myLon = pos.coords.longitude;
+      if (meMarker) meMarker.remove();
+      if (mapReady) {
+        meMarker = new maplibregl.Marker({ color: '#2196f3' }).setLngLat([state.myLon, state.myLat]).addTo(map);
+        map.easeTo({ center: [state.myLon, state.myLat], zoom: Math.max(map.getZoom(), 15), duration: 600 });
+      }
+      renderDriveBanner();
+    }, function () { toast('Could not follow GPS.'); }, { enableHighAccuracy: true, maximumAge: 2000 });
+  }
+  function stopWatch() {
+    if (state.geoWatch != null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(state.geoWatch);
+    }
+    state.geoWatch = null;
+  }
+
+  function renderDriveBanner() {
+    if (!state.driving) return;
+    var stops = (state.data && state.data.stops) || [];
+    var idx = nextPending();
+    if (idx < 0) {
+      $('driveNext').textContent = 'All sites done';
+      $('driveSub').textContent = 'Open Audit to export.';
+      return;
+    }
+    var s = stops[idx];
+    $('driveNext').textContent = 'Next: Site ' + s.id + ' · ' + (s.street || '');
+    var sub = 'Stop ' + (idx + 1) + '/' + stops.length;
+    if (state.myLat != null && s.anchor) {
+      var mi = L.haversineMi(state.myLat, state.myLon, s.anchor[0], s.anchor[1]);
+      sub += ' · ' + (mi < 0.1 ? Math.round(mi * 5280) + ' ft' : mi.toFixed(1) + ' mi');
+    }
+    $('driveSub').textContent = sub;
+  }
+
+  function arrivedInstall() {
+    var idx = nextPending();
+    if (idx >= 0) state.current = idx;
+    setDrive(false);
+    setTab('install');
+  }
+
   // ----------------------------------------------------------------- tabs
-  var MAP_TABS = { route: 1, install: 1, pickup: 1 };
   function setTab(tab) {
     state.tab = tab;
-    ['route', 'install', 'pickup', 'audit'].forEach(function (t) {
+    TABS.forEach(function (t) {
       $(t + 'Screen').classList.toggle('hidden', t !== tab);
     });
     Array.prototype.forEach.call(document.querySelectorAll('#tabbar button'), function (b) {
@@ -468,16 +758,61 @@
     if (showMap && map) setTimeout(function () { map.resize(); }, 60);
     if (tab === 'install') renderInstall();
     if (tab === 'audit') renderAudit();
+    if (tab === 'setup') renderSetup();
   }
 
   // ----------------------------------------------------------------- job load
+  function openFromJob(jobId, token, job, mapState, localOnly) {
+    state.jobId = jobId;
+    state.token = token || '';
+    state.localOnly = !!localOnly || isLocalId(jobId);
+    state.pending = [];
+    job.id = jobId;
+    applyJob(job, mapState);
+    showApp();
+    fitToStops();
+    updateSaveUi();
+  }
+
   function openJob(jobId, token) {
     state.jobId = jobId; state.token = token; saveSession();
     return api('/api/jobs/' + jobId).then(function (res) {
-      applyState(res.state);
-      showApp();
-      fitToStops();
+      return api('/api/jobs/' + jobId + '/tdjob').catch(function () { return null; })
+        .then(function (pack) {
+          var job = pack ? L.unpack(pack) : L.jobFromMapState(res.state, { jobId: jobId, label: (res.job && res.job.label) });
+          job.id = jobId;
+          if (res.job) {
+            job.label = res.job.label || job.label;
+            job.active_files = res.job.active_files || job.active_files;
+            job.home_label = res.job.home_label || job.home_label;
+          }
+          openFromJob(jobId, token, job, res.state, false);
+          markOnline();
+        });
     });
+  }
+
+  function openLocalRecord(rec) {
+    if (!rec || !rec.job) throw new Error('Saved job is empty.');
+    state.pending = rec.pending || [];
+    openFromJob(rec.jobId, rec.token || '', rec.job, L.buildMapState(rec.job), true);
+    markLocal('Opened from this phone.');
+  }
+
+  function openTdjobData(data) {
+    var id = L.localJobId();
+    var job = {
+      id: id,
+      label: data.label,
+      home: data.home,
+      home_label: data.home_label,
+      active_files: data.active_files,
+      stops: data.stops,
+      route: data.route
+    };
+    openFromJob(id, '', job, L.buildMapState(job), true);
+    markLocal('Opened from job file. Tap Save to server when you have a signal.');
+    toast('Job loaded from file');
   }
 
   function showApp() {
@@ -486,11 +821,28 @@
     setTab('route');
   }
   function showStart() {
+    stopWatch();
+    state.driving = false;
     $('startScreen').classList.remove('hidden');
     $('tabbar').classList.add('hidden');
     $('mapWrap').classList.add('hidden');
+    $('saveBanner').classList.add('hidden');
     document.body.classList.remove('has-map');
-    ['route', 'install', 'pickup', 'audit'].forEach(function (t) { $(t + 'Screen').classList.add('hidden'); });
+    TABS.forEach(function (t) { $(t + 'Screen').classList.add('hidden'); });
+    listPhoneJobs();
+  }
+
+  function closeRememberedJob(msg) {
+    var id = state.jobId;
+    clearSession();
+    if (id) L.deleteSnapshot(id);
+    state.jobId = null; state.token = null; state.data = null; state.job = null;
+    state.reorderMode = false; state.localOnly = false; state.pending = [];
+    showStart();
+    if (msg) {
+      $('startMsg').textContent = msg;
+      $('startMsg').className = 'msg ok';
+    }
   }
 
   function importJob() {
@@ -506,10 +858,52 @@
       .catch(function (e) { $('startMsg').textContent = e.message; $('startMsg').className = 'msg err'; });
   }
 
+  function resumeFile() {
+    var f = $('impTdjob').files && $('impTdjob').files[0];
+    if (!f) { $('startMsg').textContent = 'Pick a .tdjob.json file first.'; $('startMsg').className = 'msg err'; return; }
+    $('startMsg').textContent = 'Opening job file…';
+    L.parseFile(f).then(function (data) {
+      // Try the server first so the crew share-link still works; fall back to this phone.
+      return fetch('/api/jobs/restore', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(L.pack({
+          label: data.label, home: data.home, home_label: data.home_label,
+          active_files: data.active_files, stops: data.stops, route: data.route
+        }))
+      }).then(function (r) {
+        return r.json().then(function (j) {
+          if (r.ok) return openJob(j.job_id, j.token);
+          openTdjobData(data);
+        });
+      }).catch(function () { openTdjobData(data); });
+    }).catch(function (e) {
+      $('startMsg').textContent = e.message || 'Could not open that job file.';
+      $('startMsg').className = 'msg err';
+    });
+  }
+
+  function listPhoneJobs() {
+    L.listSnapshots().then(function (rows) {
+      var ul = $('phoneJobs'); ul.innerHTML = '';
+      rows.sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); });
+      if (!rows.length) { $('phoneJobsWrap').classList.add('hidden'); return; }
+      $('phoneJobsWrap').classList.remove('hidden');
+      rows.forEach(function (rec) {
+        var n = ((rec.job && rec.job.stops) || []).length;
+        var li = document.createElement('li');
+        li.innerHTML = '<span class="grow"><b>' + esc((rec.job && rec.job.label) || rec.jobId) + '</b>' +
+          '<span class="sub">' + n + ' sites · tap to resume</span></span>';
+        li.onclick = function () { openLocalRecord(rec); };
+        ul.appendChild(li);
+      });
+    });
+  }
+
   function locateMe() {
     if (!navigator.geolocation) { toast('No geolocation on this device.'); return; }
     navigator.geolocation.getCurrentPosition(function (pos) {
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
+      state.myLat = lat; state.myLon = lon;
       if (meMarker) meMarker.remove();
       meMarker = new maplibregl.Marker({ color: '#2196f3' }).setLngLat([lon, lat]).addTo(map);
       map.flyTo({ center: [lon, lat], zoom: 15 });
@@ -519,8 +913,16 @@
   // ----------------------------------------------------------------- wire up
   function wire() {
     $('btnImport').onclick = importJob;
-    $('btnOpen').onclick = function () { openJob($('openId').value.trim(), $('openToken').value.trim()).catch(function (e) { $('startMsg').textContent = e.message; $('startMsg').className = 'msg err'; }); };
+    $('btnResumeFile').onclick = resumeFile;
+    $('btnOpen').onclick = function () {
+      openJob($('openId').value.trim(), $('openToken').value.trim()).catch(function (e) {
+        $('startMsg').textContent = e.message; $('startMsg').className = 'msg err';
+      });
+    };
     $('btnBuildRoute').onclick = buildRoute;
+    $('btnDrive').onclick = function () { setDrive(!state.driving); };
+    $('btnStopDrive').onclick = function () { setDrive(false); };
+    $('btnArrived').onclick = arrivedInstall;
     $('btnReorder').onclick = function () { setReorderMode(!state.reorderMode); };
     $('btnRetrace').onclick = retraceRoute;
     $('btnGrab').onclick = grabGps;
@@ -528,23 +930,30 @@
     $('btnInstall').onclick = function () { commitInstall(true); };
     $('btnSkip').onclick = function () { commitInstall(false); };
     $('btnPrev').onclick = function () { if (state.current > 0) { state.current--; renderInstall(); } };
-    $('btnNext').onclick = function () { var st = state.data.stops || []; if (state.current < st.length - 1) { state.current++; renderInstall(); } };
+    $('btnNext').onclick = function () { var st = (state.data && state.data.stops) || []; if (state.current < st.length - 1) { state.current++; renderInstall(); } };
     $('btnLocate').onclick = locateMe;
-    $('btnCloseJob').onclick = function () { closeRememberedJob('Remembered job cleared on this phone. Use a share link to reopen a job.'); };
+    $('btnCloseJob').onclick = function () { closeRememberedJob('Job closed on this phone. Download a job file first if you still need it.'); };
     $('btnClearSavedJob').onclick = function () { closeRememberedJob('Remembered job cleared on this phone.'); };
     $('btnCopyShare').onclick = copyShare;
+    $('btnDlSetup').onclick = downloadJobFile;
+    $('btnDlAudit').onclick = downloadJobFile;
+    $('btnBannerDl').onclick = downloadJobFile;
+    $('btnLocalCsv').onclick = downloadCsv;
+    $('btnPushServer').onclick = pushToServer;
     Array.prototype.forEach.call(document.querySelectorAll('#tabbar button'), function (b) {
       b.onclick = function () { if (state.tab === 'install') flushForm(); setTab(b.dataset.tab); };
     });
-    // Autosave install form fields on change (debounced).
     ['fStreet', 'fDir', 'fLanes', 'fSerial', 'fNotes'].forEach(function (id) {
-      var el = $(id);
-      el.addEventListener('change', function () { flushForm(); });
+      $(id).addEventListener('change', function () { flushForm(); });
+    });
+    window.addEventListener('online', function () {
+      if (state.job && (state.localOnly || isLocalId(state.jobId))) {
+        toast('Back online — tap Setup → Save to server');
+      }
     });
   }
 
   function shareTarget() {
-    // Share link form: /join/<job_id>?token=<secret>
     var m = location.pathname.match(/\/join\/([A-Za-z0-9_-]+)/);
     if (!m) return null;
     var token = new URLSearchParams(location.search).get('token') || '';
@@ -555,7 +964,6 @@
     state.publicMode = !!isPublic;
     state.canCreate = !!canCreate;
     if (isPublic) document.body.classList.add('public-mode');
-    // Open-uploads deploy: public tunnel but the phone may still create/import.
     if (isPublic && canCreate) document.body.classList.add('public-open');
   }
 
@@ -564,22 +972,28 @@
     if (share && share.jobId) {
       $('startMsg').textContent = 'Opening shared job…';
       openJob(share.jobId, share.token).then(function () {
-        // Clean the URL so the token is not left in the address bar / history.
         try { history.replaceState({}, '', '/'); } catch (e) {}
       }).catch(function (e) {
         clearSession(); showStart();
         $('startMsg').textContent = e.message || 'This share link is invalid or expired.';
         $('startMsg').className = 'msg err';
       });
-    } else if (state.publicMode) {
-      // Public/share links are explicit. The bare tunnel URL should not surprise
-      // a crew phone by reopening an old job from browser storage.
+    } else if (state.publicMode && !state.canCreate) {
       clearSession();
       showStart();
     } else {
       var sess = loadSession();
       if (sess && sess.jobId) {
-        openJob(sess.jobId, sess.token).catch(function () { clearSession(); showStart(); });
+        L.loadSnapshot(sess.jobId).then(function (rec) {
+          if (rec && rec.job && (sess.localOnly || isLocalId(sess.jobId))) {
+            openLocalRecord(rec);
+            return;
+          }
+          openJob(sess.jobId, sess.token).catch(function () {
+            if (rec && rec.job) openLocalRecord(rec);
+            else { clearSession(); showStart(); }
+          });
+        });
       } else {
         showStart();
       }
@@ -587,6 +1001,7 @@
   }
 
   function boot() {
+    if (!L) { console.error('local.js failed to load'); }
     wire();
     api('/api/config').then(function (cfg) {
       state.tileUrl = cfg.tile_url; applyPublicMode(cfg.public_mode, cfg.can_create); initMap(); finishBoot();

@@ -24,6 +24,7 @@ if not os.path.isfile(PY):
 
 STEPS = [
     ("user_prove", "scripts/mobile_user_prove.py"),
+    ("tdjob_prove", "scripts/test_tdjob.py"),
     ("tls_prove", "scripts/mobile_tls_prove.py"),
     ("share_prove", "scripts/mobile_share_prove.py"),
     ("stress_loop", "scripts/mobile_stress_loop.py"),
@@ -40,7 +41,8 @@ KNOWN_IMPROVEMENTS = [
     "scripts/manage_share_link.py); full multi-user auth still phase 2",
     "Hosted deploy means job data lives on the host — use same-Wi-Fi mode for "
     "data that must never leave the machine",
-    "Offline field mode not implemented — online-first; brief drops not yet queued in IndexedDB",
+    "Phone now keeps a local snapshot + .tdjob.json download/re-upload when the "
+    "server cannot save; street-route rebuild still needs the server",
     "Server-side road graph optional — without it, routes are straight-line, not street-traced",
     "No undo on mobile install/skip (desktop has undo)",
     "Browser/device E2E (Playwright) not wired — current proof is in-process API simulation",
@@ -87,6 +89,17 @@ def _audit(results: list[dict]) -> dict:
         weaknesses.append("User test failures: " + ", ".join(up["failed"]))
     elif not by.get("user_prove", {}).get("ok"):
         weaknesses.append("User test did not pass — see logs/mobile_check tail")
+
+    tj = _load(os.path.join(REPORT_DIR, "proofs", "tdjob_prove.json"))
+    if by.get("tdjob_prove", {}).get("ok") and tj:
+        strengths.append(
+            f"Job file pickup: {tj['passed']}/{tj['total']} checks pass "
+            "(pack/unpack, bad-file reject, download, restore keeps install GPS)"
+        )
+    elif tj and tj.get("failed"):
+        weaknesses.append("tdjob test failures: " + ", ".join(tj["failed"]))
+    elif not by.get("tdjob_prove", {}).get("ok"):
+        weaknesses.append("tdjob restore test did not pass — see logs/mobile_check tail")
 
     tp = _load(os.path.join(REPORT_DIR, "proofs", "tls_prove.json"))
     if by.get("tls_prove", {}).get("ok") and tp:

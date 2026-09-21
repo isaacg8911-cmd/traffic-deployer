@@ -153,8 +153,12 @@ def main() -> int:
     # 12. static shell served
     r = client.get("/")
     check("pwa_shell_served", r.status_code == 200 and "Traffic Deployer" in r.text)
+    check("pwa_setup_tab", r.status_code == 200 and 'data-tab="setup"' in r.text)
+    check("pwa_job_file_pickup", r.status_code == 200 and "impTdjob" in r.text)
     r = client.get("/manifest.webmanifest")
     check("manifest_served", r.status_code == 200)
+    r = client.get("/local.js")
+    check("local_js_served", r.status_code == 200 and "TDLocal" in r.text)
 
     failed = [c["name"] for c in checks if not c["ok"]]
     return _finish(checks, 0 if not failed else 1)

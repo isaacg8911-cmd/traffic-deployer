@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0f2744" />
-  <title>Traffic Deployer Mobile</title>
+  <title>Traffic Deployer</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/icon.svg" />
   <link rel="stylesheet" href="/vendor/maplibre-gl.css" />
@@ -13,14 +13,29 @@
 <body>
   <header id="topbar">
     <div id="brand">Traffic Deployer</div>
-    <div id="progressPill" class="pill">—</div>
+    <div class="pills">
+      <div id="savePill" class="pill save-ok">—</div>
+      <div id="progressPill" class="pill">—</div>
+    </div>
   </header>
 
-  <!-- Start / job-load screen -->
+  <div id="saveBanner" class="save-banner hidden">
+    <span id="saveBannerText">Saved on this phone. Download a job file so you can pick up later if the signal drops.</span>
+    <button id="btnBannerDl" type="button">Download job</button>
+  </div>
+
+  <!-- Start / job-load screen (laptop Setup: files in) -->
   <section id="startScreen" class="screen">
     <div class="card">
-      <h1>Field runner</h1>
-      <p class="muted">Open a job to drive the route, capture installs with your phone's GPS, and export.</p>
+      <h1>Field app</h1>
+      <p class="muted">Same flow as the laptop: files → route → drive → install → pickup → audit. Built for a phone screen.</p>
+      <ol class="workflow" id="startWorkflow">
+        <li>Files</li>
+        <li>Route</li>
+        <li>Drive</li>
+        <li>Install</li>
+        <li>Audit</li>
+      </ol>
       <div id="createBlock">
         <label class="field">Excel / CSV sites
           <input id="impExcel" type="file" accept=".csv,.xlsx,.xls" multiple />
@@ -29,16 +44,25 @@
           <input id="impEst" type="file" accept=".EST,.est" multiple />
         </label>
         <button id="btnImport" class="primary">Import job</button>
-        <div class="divider">or reopen</div>
-        <label class="field">Job id
-          <input id="openId" type="text" placeholder="job id" autocomplete="off" />
+        <div class="divider">or pick up later</div>
+        <label class="field">Job file (.tdjob.json)
+          <input id="impTdjob" type="file" accept=".json,.tdjob.json,application/json" />
         </label>
-        <label class="field">Token
-          <input id="openToken" type="text" placeholder="token" autocomplete="off" />
-        </label>
-        <button id="btnOpen" class="secondary">Reopen job</button>
+        <button id="btnResumeFile" class="secondary">Open job file</button>
       </div>
       <p id="publicNote" class="muted">Open your job from the share link your dispatcher sent you. The plain public URL will not auto-open old sites.</p>
+      <div id="phoneJobsWrap" class="hidden">
+        <div class="divider">saved on this phone</div>
+        <ul id="phoneJobs" class="list"></ul>
+      </div>
+      <div class="divider">or reopen by id</div>
+      <label class="field">Job id
+        <input id="openId" type="text" placeholder="job id" autocomplete="off" />
+      </label>
+      <label class="field">Token
+        <input id="openToken" type="text" placeholder="token" autocomplete="off" />
+      </label>
+      <button id="btnOpen" class="secondary">Reopen job</button>
       <button id="btnClearSavedJob" class="ghost">Clear remembered job on this phone</button>
       <div id="startMsg" class="msg"></div>
     </div>
@@ -47,17 +71,50 @@
   <!-- Map (shared by Route/Install/Pickup) -->
   <div id="mapWrap" class="hidden">
     <div id="map"></div>
+    <div id="driveBanner" class="drive-banner hidden">
+      <div id="driveNext" class="drive-next">Next: —</div>
+      <div id="driveSub" class="muted"></div>
+      <div class="row">
+        <button id="btnArrived" class="field-primary">ARRIVED → Install</button>
+        <button id="btnStopDrive" class="secondary">Stop</button>
+      </div>
+    </div>
     <div id="mapHint" class="map-hint hidden"></div>
     <button id="btnLocate" class="map-fab" title="Center on me">◎</button>
   </div>
+
+  <!-- Setup tab (in-job) -->
+  <section id="setupScreen" class="screen tab hidden">
+    <div class="panel">
+      <ol class="workflow" id="jobWorkflow">
+        <li data-step="files">Files</li>
+        <li data-step="route">Route</li>
+        <li data-step="drive">Drive</li>
+        <li data-step="install">Install</li>
+        <li data-step="audit">Audit</li>
+      </ol>
+      <div id="setupMeta" class="stop-title">No job</div>
+      <div id="setupFiles" class="muted"></div>
+      <p class="muted">If the server cannot save, this phone keeps a copy. Download a job file to pick up on another phone or after a crash.</p>
+      <div class="row">
+        <button id="btnDlSetup" class="primary grow">Download job file</button>
+        <button id="btnPushServer" class="secondary grow">Save to server</button>
+      </div>
+      <div class="row">
+        <button id="btnCloseJob" class="ghost grow">Close job</button>
+      </div>
+      <div id="setupMsg" class="msg"></div>
+    </div>
+  </section>
 
   <!-- Route tab -->
   <section id="routeScreen" class="screen tab hidden">
     <div class="panel">
       <div class="row">
-        <button id="btnBuildRoute" class="primary">Build route</button>
-        <span id="routeMiles" class="muted"></span>
+        <button id="btnDrive" class="go grow">Follow GPS</button>
+        <button id="btnBuildRoute" class="primary grow">Build route</button>
       </div>
+      <span id="routeMiles" class="muted"></span>
       <div class="row">
         <button id="btnReorder" class="secondary grow">Reorder stops</button>
         <button id="btnRetrace" class="secondary grow hidden">Re-trace line</button>
@@ -119,8 +176,11 @@
       <div id="auditSummary" class="stop-title">—</div>
       <ul id="auditList" class="list"></ul>
       <div class="row">
-        <a id="btnExportCsv" class="primary" href="#">Export CSV</a>
-        <a id="btnExportXlsx" class="secondary" href="#">Export Excel</a>
+        <button id="btnLocalCsv" class="primary grow">Download CSV</button>
+        <a id="btnExportXlsx" class="secondary grow" href="#">Excel (server)</a>
+      </div>
+      <div class="row">
+        <button id="btnDlAudit" class="secondary grow">Download job file</button>
       </div>
       <div id="shareWrap" class="share hidden">
         <div class="divider">share with crew</div>
@@ -131,13 +191,13 @@
         </div>
         <img id="shareQr" class="qr" alt="Scan to open job" />
       </div>
-      <button id="btnCloseJob" class="ghost">Close / clear remembered job</button>
       <div id="jobMeta" class="msg"></div>
     </div>
   </section>
 
-  <!-- Bottom nav -->
+  <!-- Bottom nav — same five areas as the laptop -->
   <nav id="tabbar" class="hidden">
+    <button data-tab="setup">Setup</button>
     <button data-tab="route" class="active">Route</button>
     <button data-tab="install">Install</button>
     <button data-tab="pickup">Pickup</button>
@@ -147,6 +207,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/vendor/maplibre-gl.js"></script>
-  <script src="/app.js?v=8"></script>
+  <script src="/local.js?v=1"></script>
+  <script src="/app.js?v=10"></script>
 </body>
 </html>

@@ -231,6 +231,7 @@ class InstallControllerMixin:
                         first=idx == 0,
                         last=bool(last_uid) and s.get("uid") == last_uid,
                         remaining=True,
+                        home_back_min=float(self.state.route.get("home_back_min") or 0),
                     )
                 except Exception:
                     sfx = " · ~6 min setup"

@@ -171,6 +171,7 @@ class RouteControllerMixin:
                 first=stop_index == 0,
                 last=bool(last_uid) and self.state.stops[stop_index].get("uid") == last_uid,
                 remaining=mark == "--",
+                home_back_min=float(self.state.route.get("home_back_min") or 0),
             )
         except Exception:
             return ""

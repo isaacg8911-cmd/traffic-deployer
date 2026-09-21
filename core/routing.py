@@ -1487,5 +1487,5 @@ def build_route(
         "graph_uncovered": graph_uncovered,
         "site_legs": build_site_legs(ordered, home, data_dir, graph=None),
     }
-    time_est.attach_to_route(out, ordered, home, graph)
+    time_est.attach_to_route(out, ordered, home, None)
     return out

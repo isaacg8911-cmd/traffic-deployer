@@ -792,6 +792,23 @@ def test_routing():
     check("summary has setup range", "setup" in clause and "from home" in clause)
     row = time_est.stop_suffix(empty["site_legs"][0], first=True, last=False, remaining=True)
     check("first stop shows from home", "from home" in row and "setup" in row)
+    from core.state import DEFAULT_HOME
+    factory = time_est.attach_to_route(
+        {"miles": 10.0, "site_legs": [{"miles": 0.0}, {"miles": 4.0}]},
+        [{"lat": 34.10, "lon": -117.27}, {"lat": 34.11, "lon": -117.26}],
+        DEFAULT_HOME,
+        graph=None,
+    )
+    check("factory home has no commute clock", factory.get("home_out_min") == 0)
+    check("factory summary skips from home", "from home" not in time_est.summary_clause(factory))
+    mid = [dict(s) for s in [
+        {"lat": 34.10, "lon": -117.27, "installed": True},
+        {"lat": 34.11, "lon": -117.26},
+        {"lat": 34.12, "lon": -117.25},
+    ]]
+    leftover = time_est.summary_clause(empty, pending=2, stops=mid)
+    check("remaining drops from-home", "from home" not in leftover)
+    check("remaining still has setup", "setup" in leftover)
 
 
 def test_field_ready():

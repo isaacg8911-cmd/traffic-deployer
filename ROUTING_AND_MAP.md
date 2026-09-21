@@ -126,7 +126,7 @@ This is why the route is “efficient” for **traffic deployer** work: it optim
 
 If no road graph exists, the app falls back to **straight chords** (`graph: false`) and Field Readiness warns you.
 
-**Clock estimates** (`core/time_est.py`): after the polyline is built, the app adds **from home**, **between sites**, **~5–8 min setup per hose**, and **drive home**. Speeds are offline (neighborhood / arterial / freeway from miles) — not live Google traffic. Summary, stop list, Install, and the status bar show the clocks.
+**Clock estimates** (`core/time_est.py`): after the polyline is built, the app adds **from home**, **between sites**, **~5–8 min setup per hose**, and **drive home**. Factory default home is not used as a commute. Remaining clocks drop “from home” after the first site is done. Speeds are offline (neighborhood / arterial / freeway from miles) — not live Google traffic. Summary, stop list, Install, and the status bar show the clocks.
 
 **UI thread:** `_RouteOptimizeThread` runs `optimize` then `build_route` so the window stays responsive (`main.py`).
 

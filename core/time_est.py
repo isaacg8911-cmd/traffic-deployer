@@ -12,7 +12,7 @@ SETUP_MIN_LO = 5.0
 SETUP_MIN_HI = 8.0
 # Crow-flies → road when the graph is missing.
 _NO_GRAPH_ROAD = 1.3
-EST_VERSION = 1
+EST_VERSION = 2
 
 
 def drive_min_from_miles(miles: float) -> float:
@@ -52,6 +52,35 @@ def _haversine_mi(a: tuple[float, float], b: tuple[float, float]) -> float:
     )
     km = 6371.0 * 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h))
     return km * 0.621371
+
+
+def _home_usable(home: tuple[float, float] | None) -> bool:
+    """Factory default is not a real origin — do not invent a commute clock."""
+    if home is None:
+        return False
+    try:
+        from core.state import RouteState
+        return not RouteState.is_factory_home(float(home[0]), float(home[1]))
+    except Exception:
+        try:
+            float(home[0]); float(home[1])
+        except (TypeError, ValueError, IndexError):
+            return False
+        return True
+
+
+def remaining_job_drive_min(route: dict, stops: list[dict] | None) -> float:
+    """Minutes still to drive between open sites (not hops already done)."""
+    legs = list(route.get("site_legs") or [])
+    total = 0.0
+    for i, s in enumerate(stops or []):
+        if s.get("installed") or s.get("skipped"):
+            continue
+        if i == 0:
+            continue
+        if i < len(legs):
+            total += float(legs[i].get("drive_min") or 0.0)
+    return total
 
 
 def commute_miles_min(
@@ -126,18 +155,29 @@ def attach_to_route(
 
     first_ll = _stop_ll(stops[0]) if stops else None
     last_ll = _stop_ll(stops[-1]) if stops else None
-    out_mi, out_min = commute_miles_min(home, first_ll, graph)
-    back_mi, back_min = commute_miles_min(last_ll, home, graph)
+    home_ok = _home_usable(home)
+    if home_ok:
+        out_mi, out_min = commute_miles_min(home, first_ll, graph)
+        back_mi, back_min = commute_miles_min(last_ll, home, graph)
+    else:
+        out_mi = out_min = back_mi = back_min = 0.0
     if legs:
-        legs[0]["from_home_miles"] = round(out_mi, 2)
-        legs[0]["from_home_min"] = round(out_min, 1)
-        legs[-1]["to_home_miles"] = round(back_mi, 2)
-        legs[-1]["to_home_min"] = round(back_min, 1)
+        if home_ok:
+            legs[0]["from_home_miles"] = round(out_mi, 2)
+            legs[0]["from_home_min"] = round(out_min, 1)
+            legs[-1]["to_home_miles"] = round(back_mi, 2)
+            legs[-1]["to_home_min"] = round(back_min, 1)
+        else:
+            legs[0].pop("from_home_miles", None)
+            legs[0].pop("from_home_min", None)
+            legs[-1].pop("to_home_miles", None)
+            legs[-1].pop("to_home_min", None)
 
     n = len(stops)
     slo, smid, shi = setup_band(n)
     drive_all = out_min + job_min + back_min
     route["est_version"] = EST_VERSION
+    route["home_clocks"] = home_ok
     route["job_drive_min"] = round(job_min, 1)
     route["home_out_min"] = round(out_min, 1)
     route["home_out_miles"] = round(out_mi, 2)
@@ -157,12 +197,19 @@ def ensure(route: dict, stops: list[dict], home: tuple[float, float] | None, gra
     """Fill estimates if BUILD ROUTE ran before this field existed."""
     if not route:
         return route
-    if int(route.get("est_version") or 0) >= EST_VERSION and "job_drive_min" in route:
+    stale = int(route.get("est_version") or 0) < EST_VERSION or "job_drive_min" not in route
+    home_mismatch = bool(route.get("home_clocks")) != _home_usable(home)
+    if not stale and not home_mismatch:
         return route
     return attach_to_route(route, stops or [], home, graph)
 
 
-def summary_clause(route: dict, *, pending: int | None = None) -> str:
+def summary_clause(
+    route: dict,
+    *,
+    pending: int | None = None,
+    stops: list[dict] | None = None,
+) -> str:
     """One line of clock estimates, or empty."""
     if not route or route.get("job_drive_min") is None:
         return ""
@@ -177,6 +224,12 @@ def summary_clause(route: dict, *, pending: int | None = None) -> str:
         day_hi = float(route.get("day_min_hi") or 0)
     else:
         slo, _smid, shi = setup_band(n)
+        if stops is not None:
+            job = remaining_job_drive_min(route, stops)
+            if stops and (stops[0].get("installed") or stops[0].get("skipped")):
+                out_m = 0.0
+            if n <= 0:
+                back = 0.0
         drive = out_m + job + back
         day_lo, day_hi = drive + slo, drive + shi
     parts = []
@@ -200,7 +253,14 @@ def summary_clause(route: dict, *, pending: int | None = None) -> str:
     return " · ".join(parts)
 
 
-def stop_suffix(leg: dict | None, *, first: bool, last: bool, remaining: bool) -> str:
+def stop_suffix(
+    leg: dict | None,
+    *,
+    first: bool,
+    last: bool,
+    remaining: bool,
+    home_back_min: float = 0.0,
+) -> str:
     """Short clock bit for a stop-list row."""
     bits = []
     if not remaining:
@@ -210,6 +270,9 @@ def stop_suffix(leg: dict | None, *, first: bool, last: bool, remaining: bool) -
     elif leg and float(leg.get("drive_min") or 0) >= 0.5:
         bits.append(f"{fmt_min(float(leg['drive_min']))} drive")
     bits.append("~6 min setup")
-    if last and leg and float(leg.get("to_home_min") or 0) >= 1:
-        bits.append(f"then {fmt_min(float(leg['to_home_min']))} home")
+    home_m = 0.0
+    if last:
+        home_m = float((leg or {}).get("to_home_min") or home_back_min or 0)
+    if home_m >= 1:
+        bits.append(f"then {fmt_min(home_m)} home")
     return " · " + " · ".join(bits) if bits else ""

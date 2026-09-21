@@ -700,7 +700,8 @@ class MapSyncControllerMixin:
             time_est.ensure(
                 self.state.route, self.state.stops, getattr(self.state, "home", None))
             pending = len(time_est.pending_stops(self.state.stops))
-            clock = time_est.summary_clause(self.state.route, pending=pending)
+            clock = time_est.summary_clause(
+                self.state.route, pending=pending, stops=self.state.stops)
         except Exception:
             clock = ""
         base = (

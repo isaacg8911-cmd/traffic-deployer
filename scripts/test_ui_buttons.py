@@ -39,6 +39,7 @@ def _stub_window():
         "_build_route_from_uploads", "_toggle_drive", "_route_pick_auto_finish",
         "_route_pick_clear", "_route_pick_apply", "_show_route_pick_dialog",
         "_start_pick_route_from_route_tab",
+        "_offer_merge_days",
         "_recover_map", "_refresh_day_filter", "_grab_gps_here", "_toggle_manual_grab",
         "_confirm_manual_grab_pin", "_clear_field_gps", "_set_dir_from_compass", "_commit_install",
         "_nav_install", "_undo_last_action", "_center_current",

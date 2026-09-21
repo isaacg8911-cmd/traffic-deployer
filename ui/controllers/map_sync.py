@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QMessageBox
 
 from core import crash_log, geo, ingest
 from core import route_sections
@@ -122,7 +123,14 @@ class MapSyncControllerMixin:
         labels = self._route_section_labels()
         return route_sections.compose_section_routes(self._ensure_routes_by_map(), labels)
 
+    def _days_merged_active(self) -> bool:
+        return bool(getattr(self.state, "days_merged", False)) and bool(
+            getattr(self.state, "merged_route", None) or self.state.route)
+
     def _display_route(self) -> dict:
+        if self._days_merged_active() and not self._day_filter_active():
+            merged = getattr(self.state, "merged_route", None) or self.state.route
+            return display_route_for_map(merged)
         if self._route_section_active() and not self._day_filter_active():
             composed = self._composed_all_days_route()
             if composed.get("polylines") or composed.get("polyline") or float(
@@ -335,6 +343,11 @@ class MapSyncControllerMixin:
     def _apply_section_route_to_state(self) -> None:
         day = self._day_filter_value()
         if route_sections.is_all_days(day):
+            if self._days_merged_active():
+                merged = getattr(self.state, "merged_route", None)
+                if isinstance(merged, dict):
+                    self.state.route = dict(merged)
+                return
             if self._route_section_active():
                 composed = self._composed_all_days_route()
                 self.state.route = composed if (
@@ -497,6 +510,8 @@ class MapSyncControllerMixin:
             btn = getattr(self, attr, None)
             if btn is not None:
                 btn.setVisible(show)
+        if hasattr(self, "btn_merge_days"):
+            self.btn_merge_days.setVisible(self._route_section_active())
 
     def _stops_for_map(self) -> list[dict]:
         base = self.state.stops or getattr(self, "_map_preview_stops", []) or []
@@ -595,8 +610,54 @@ class MapSyncControllerMixin:
             stop.pop("pick_cross_locked", None)
 
     def _ask_route_build_mode(self) -> str | None:
-        """Setup Build auto-optimizes; Route tab still has Pick on map."""
-        return "auto"
+        """Choose Auto (best route) or Pick on map. Cancel returns None."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Build route")
+        box.setText("How do you want to set stop order?")
+        two = self._route_section_active() or route_sections.multi_section(
+            self.state.stops, getattr(self.state, "active_files", None))
+        if two:
+            box.setInformativeText(
+                "Day 1 and Day 2 are built separately first.\n"
+                "After both exist, you can merge them into one best driving "
+                "order from your start (by location).")
+        else:
+            box.setInformativeText(
+                "Auto uses the best driving order from your start.\n"
+                "Pick on map lets you tap the order yourself.")
+        b_auto = box.addButton("Auto — best route", QMessageBox.AcceptRole)
+        b_pick = box.addButton("Pick on map", QMessageBox.ActionRole)
+        box.addButton("Cancel", QMessageBox.RejectRole)
+        box.setDefaultButton(b_auto)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is b_auto:
+            return "auto"
+        if clicked is b_pick:
+            return "pick"
+        return None
+
+    def _offer_merge_days(self) -> bool:
+        """Ask whether to merge both maps into one best geographic route.
+
+        Returns True if a merge optimize was started.
+        """
+        if not self._route_section_active():
+            return False
+        box = QMessageBox(self)
+        box.setWindowTitle("Merge days?")
+        box.setText("Keep Day 1 and Day 2 as two routes, or merge into one?")
+        box.setInformativeText(
+            "Merge ignores the day split and builds a new best driving order "
+            "from your start, using location and position of every site.")
+        b_keep = box.addButton("Keep separate", QMessageBox.RejectRole)
+        b_merge = box.addButton("Merge — best route", QMessageBox.AcceptRole)
+        box.setDefaultButton(b_keep)
+        box.exec()
+        if box.clickedButton() is b_merge:
+            self._merge_days_best_route()
+            return True
+        return False
 
     @staticmethod
     def _stops_with_seq(stops: list[dict]) -> list[dict]:

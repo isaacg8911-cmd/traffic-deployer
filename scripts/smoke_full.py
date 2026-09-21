@@ -613,8 +613,10 @@ def test_web_assets():
     check("field crash log hook", "install_crash_logging" in main_src)
     check("map guide when following", '"show_guide": False' in main_src)
     check("no map trace lines", "SHOW_TRACE_LINES = false" in appjs)
-    check("setup build auto-optimizes maps", "_start_auto_build_queue" in main_src)
+    check("setup build asks auto or pick", "_ask_route_build_mode" in main_src)
     check("pick still on route tab", "_start_pick_route_from_route_tab" in main_src)
+    check("merge days best route", "_merge_days_best_route" in main_src
+          and "_offer_merge_days" in main_src)
     check("fleet nav removed", "Fleet" not in open(os.path.join(ROOT, "ui", "shell", "main_layout.py"), encoding="utf-8").read())
     check("fleet nav flag off", "FLEET_NAV_ENABLED = False" in open(os.path.join(ROOT, "ui", "simple_mode.py")).read())
     check("D4 seq badge labels", "'text-field': ['to-string', ['get', 'seq']]" in appjs)
@@ -667,9 +669,11 @@ def test_web_assets():
     check("two-map route sections", callable(route_sections.merge_section_order)
           and callable(route_sections.preserve_other_section_orders)
           and callable(route_sections.compose_section_routes))
-    check("setup build auto-optimizes", '"auto"' in open(
-        os.path.join(ROOT, "ui", "controllers", "map_sync.py"), encoding="utf-8").read()
-        and "_start_auto_build_queue" in open(
+    check("setup build auto then optional merge", "_start_auto_build_queue" in open(
+            os.path.join(ROOT, "ui", "controllers", "route.py"), encoding="utf-8").read()
+        and "Pick on map" in open(
+            os.path.join(ROOT, "ui", "controllers", "map_sync.py"), encoding="utf-8").read()
+        and "_merge_days_best_route" in open(
             os.path.join(ROOT, "ui", "controllers", "route.py"), encoding="utf-8").read())
     check("map cycle controls", "_cycle_map_next" in main_src and "btn_map_next" in main_src)
     from ui.simple_mode import BUILD_LABEL, SIMPLE_MODE

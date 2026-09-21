@@ -156,6 +156,12 @@ def main() -> int:
         def _warn(self, _msg: str) -> None:
             return
 
+        def _ask_route_build_mode(self):
+            return "auto"
+
+        def _offer_merge_days(self):
+            return False
+
         def _optimize_and_route(self, _stops, **_kw):
             self._optimize_called = True
 

@@ -110,6 +110,83 @@ def test_core_helpers() -> None:
         fail("cycle from All days")
 
 
+def test_days_merged_view() -> None:
+    print("\n[merge days = one best route]")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QStatusBar
+
+    from ui.controllers.map_sync import MapSyncControllerMixin
+    from ui.controllers.route import RouteControllerMixin
+    from ui.map_helpers import display_route_for_map
+
+    class Win(MapSyncControllerMixin, RouteControllerMixin):
+        def __init__(self) -> None:
+            self._route_pick_mode = False
+            self._route_pick_uids = []
+            self._route_pick_sides = {}
+            self._route_pick_by_map = {}
+            self._route_pick_dialog = None
+            self._manual_grab_mode = False
+            self._map_preview_stops = []
+            self._map_js_ready = False
+            self._gps_follow = False
+            self._map_follow = False
+            self._day_filter_prev = "All days"
+            self.current_index = 0
+            self.chk_show_segments = type("C", (), {"isChecked": lambda _s: False})()
+            self.statusBar = lambda: self._status
+            self._status = QStatusBar()
+            a = [_stop("Day5", "100", 34.0, -118.0), _stop("Day5", "101", 34.01, -118.01)]
+            b = [_stop("Day6", "200", 34.2, -117.3), _stop("Day6", "201", 34.21, -117.31)]
+            self.state = type("S", (), {})()
+            self.state.stops = a + b
+            self.state.active_files = ["Day5", "Day6"]
+            self.state.map_day_filter = "All days"
+            self.state.days_merged = False
+            self.state.merged_route = None
+            self.state.routes_by_map = {
+                "Day5": {"polyline": [[1.0, 2.0]], "miles": 3.0, "graph": True},
+                "Day6": {"polyline": [[9.0, 8.0]], "miles": 4.5, "graph": True},
+            }
+            self.state.route = {"polyline": [], "miles": 0.0, "graph": False}
+            self.state.home = (33.77, -117.94)
+
+        def _persist_shift(self, *, quiet: bool = True):
+            _ = quiet
+
+    _ = QApplication.instance() or QApplication(sys.argv)
+    win = Win()
+    win._apply_section_route_to_state()
+    composed = win._composed_all_days_route()
+    if not win._days_merged_active() and len(composed.get("polylines") or []) == 2:
+        ok("separate days overlay before merge")
+    else:
+        fail("separate days overlay", str(composed))
+
+    merged = {
+        "polyline": [[34.0, -118.0], [34.2, -117.3], [34.01, -118.01]],
+        "miles": 12.4,
+        "graph": True,
+        "legs": [],
+    }
+    win.state.days_merged = True
+    win.state.merged_route = merged
+    win._apply_section_route_to_state()
+    shown = win._display_route()
+    if (
+        win._days_merged_active()
+        and abs(float(win.state.route.get("miles") or 0) - 12.4) < 0.01
+        and abs(float(shown.get("miles") or 0) - 12.4) < 0.01
+    ):
+        ok("merged All days uses one best route")
+    else:
+        fail(
+            "merged All days",
+            f"mi={win.state.route.get('miles')} shown={shown.get('miles')}",
+        )
+    _ = display_route_for_map
+
+
 def test_pick_scoped_to_one_map() -> None:
     print("\n[pick scoped to one map]")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -253,6 +330,7 @@ def test_pick_scoped_to_one_map() -> None:
 def main() -> int:
     print("ROUTE SECTIONS — two maps, two independent builds\n")
     test_core_helpers()
+    test_days_merged_view()
     test_pick_scoped_to_one_map()
     print()
     if FAILURES:

@@ -26,8 +26,14 @@ def _resolve_paths() -> tuple[str, str]:
 MODULE_MARKERS: dict[str, tuple[str, ...]] = {
     "ui.route_pick_dialog": ("apply_requested", "Apply route"),
     "ui.threads": ("RouteApplyPickThread", "pick_sides", "start_ll"),
-    "ui.controllers.route": ("_enter_pick_map_focus", "_begin_route_pick", "_route_pick_apply"),
-    "ui.controllers.map_sync": ("_parse_stop_click", "_push_state", "_on_map_follow_toggled", "_map_follow"),
+    "ui.controllers.route": (
+        "_enter_pick_map_focus", "_begin_route_pick", "_route_pick_apply",
+        "_merge_days_best_route",
+    ),
+    "ui.controllers.map_sync": (
+        "_parse_stop_click", "_push_state", "_on_map_follow_toggled", "_map_follow",
+        "_ask_route_build_mode", "_offer_merge_days",
+    ),
     "ui.controllers.setup": ("_commit_home_start", "_ready_offline"),
     "ui.controllers.install": ("_commit_install", "_begin_manual_grab", "_clear_field_gps", "Tap Next"),
     "ui.controllers.counter": ("_counter_read_serial", "_counter_clear_configure"),

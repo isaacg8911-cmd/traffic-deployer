@@ -126,6 +126,8 @@ class RouteControllerMixin:
             self.state.routes_by_map.pop(rebuild_sheet, None)
         else:
             self.state.routes_by_map = {}
+        self.state.days_merged = False
+        self.state.merged_route = None
         self._map_preview_stops = []
         self.state.route = route_sections.empty_route()
         self._persist_shift(quiet=True)
@@ -136,10 +138,21 @@ class RouteControllerMixin:
         self._refresh_route_list()
         self._push_state(fit=True)
         mode = self._ask_route_build_mode()
+        if mode not in ("auto", "pick"):
+            self._restore_build_button_if_idle()
+            return
+        two_maps = len(labels) >= 2 and rebuild_sheet is None
+        self._offer_merge_after_build = two_maps
+        self._pick_build_queue = []
         if mode == "pick":
             if rebuild_sheet:
                 self._set_route_section(rebuild_sheet, persist=False)
-            elif route_sections.multi_section(self.state.stops, self.state.active_files):
+                self._pick_build_queue = []
+                self._offer_merge_after_build = False
+            elif two_maps:
+                self._pick_build_queue = list(labels)
+                self._set_route_section(labels[0], persist=False)
+            else:
                 self._focus_route_section_for_pick()
             self._restore_build_button_if_idle()
             self._begin_route_pick(self.state.stops)
@@ -156,6 +169,7 @@ class RouteControllerMixin:
         if jobs:
             self._start_auto_build_queue(jobs, stay_all_days=rebuild_sheet is None)
         else:
+            self._offer_merge_after_build = False
             self._optimize_and_route(self.state.stops)
 
     def _start_pick_route_from_route_tab(self) -> None:
@@ -234,16 +248,34 @@ class RouteControllerMixin:
             self._set_route_section(last_section, persist=False)
         self._refresh_route_list()
         self._push_state(fit=True)
+        if getattr(self, "_offer_merge_after_build", False) and self._route_section_active():
+            self._offer_merge_after_build = False
+            if self._offer_merge_days():
+                return
+        self._notify_install_html()
+
+    def _notify_install_html(self) -> None:
         paths = self._write_setup_install_html(mode="both")
-        if paths:
-            names = "\n".join(paths)
-            self._info(
-                "HTML install lists saved (merged All days + each map separate):\n\n"
-                f"{names}\n\nSend the file you need to your phone."
-            )
-            from PySide6.QtGui import QDesktopServices
-            from PySide6.QtCore import QUrl
-            QDesktopServices.openUrl(QUrl.fromLocalFile(paths[-1]))
+        if not paths:
+            return
+        names = "\n".join(paths)
+        self._info(
+            "HTML install lists saved (merged All days + each map separate):\n\n"
+            f"{names}\n\nSend the file you need to your phone."
+        )
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl.fromLocalFile(paths[-1]))
+
+    def _merge_days_best_route(self) -> None:
+        """One new best driving order from every site on both maps."""
+        stops = list(self.state.stops)
+        if not route_sections.multi_section(stops, self.state.active_files):
+            self._warn("Load two .EST maps before merging days.")
+            return
+        self._merge_build_pending = True
+        self._set_route_section(route_sections.DAY_FILTER_ALL, persist=False)
+        self._optimize_and_route(stops)
 
     @staticmethod
     def _street_label(s: dict) -> str:
@@ -353,7 +385,10 @@ class RouteControllerMixin:
         self._refresh_route_list()
         self._push_state(fit=True)
         extra = ""
-        if self._route_section_active():
+        queue = getattr(self, "_pick_build_queue", None) or []
+        if len(queue) > 1:
+            extra = f" After Apply, pick {queue[1]} next."
+        elif self._route_section_active():
             extra = " Cycle Map for the other .EST — that route stays as you left it."
         self.statusBar().showMessage(
             f"Pick route on map — {self._pick_prompt_text()}. "
@@ -750,6 +785,7 @@ class RouteControllerMixin:
             if hasattr(self, "btn_build"):
                 self.btn_build.setEnabled(True)
                 self.btn_build.setText(BUILD_LABEL)
+            self._continue_pick_or_merge(section)
 
         def canceled():
             self._stop_worker(thread)
@@ -764,6 +800,23 @@ class RouteControllerMixin:
         thread.start()
         dlg.show()
         on_progress("Starting…")
+
+    def _continue_pick_or_merge(self, just_applied: str) -> None:
+        """After a manual Apply, pick the next day or offer merge."""
+        queue = list(getattr(self, "_pick_build_queue", None) or [])
+        if just_applied and just_applied in queue:
+            queue = [lab for lab in queue if lab != just_applied]
+            self._pick_build_queue = queue
+        if queue:
+            nxt = queue[0]
+            self.statusBar().showMessage(
+                f"{just_applied or 'Map'} saved. Now pick {nxt} on the map.", 12000)
+            self._set_route_section(nxt, persist=False)
+            QTimer.singleShot(0, lambda: self._begin_route_pick(self.state.stops))
+            return
+        if getattr(self, "_offer_merge_after_build", False) and self._route_section_active():
+            self._offer_merge_after_build = False
+            QTimer.singleShot(0, self._offer_merge_days)
 
     def _highlight_stop_uid(self) -> str | None:
         if self._manual_grab_mode and self.state.stops and self.current_index < len(self.state.stops):
@@ -846,6 +899,7 @@ class RouteControllerMixin:
                 _restore_build_btn()
                 self._auto_build_queue = []
                 self._auto_build_done_n = 0
+                self._merge_build_pending = False
                 err = f"Routing failed: {res.get('error', 'unknown')}"
                 if self.state.offline_mode:
                     self._field_notice(err)
@@ -864,6 +918,11 @@ class RouteControllerMixin:
             else:
                 self.state.stops = ordered
                 self.state.route = res["route"]
+            if getattr(self, "_merge_build_pending", False):
+                self._merge_build_pending = False
+                self.state.days_merged = True
+                self.state.merged_route = dict(res["route"])
+                self._set_route_section(route_sections.DAY_FILTER_ALL, persist=False)
             self.current_index = min(self.current_index, max(0, len(self.state.stops) - 1))
             self._persist_shift(quiet=True)
             self._refresh_route_list()
@@ -910,10 +969,11 @@ class RouteControllerMixin:
                 self._finish_auto_build_queue(build_section)
             else:
                 _restore_build_btn()
-                paths = self._write_setup_install_html(mode="both")
-                if paths:
+                if getattr(self.state, "days_merged", False):
                     self.statusBar().showMessage(
-                        f"Route ready + HTML install list: {paths[-1]}", 10000)
+                        f"Merged route ready: {len(ordered)} stops, {miles:.1f} mi — {kind}",
+                        12000)
+                self._notify_install_html()
             if last_in_queue:
                 if uncovered:
                     QMessageBox.warning(
@@ -939,6 +999,7 @@ class RouteControllerMixin:
             self._route_thread = None
             self._auto_build_queue = []
             self._auto_build_done_n = 0
+            self._merge_build_pending = False
             _restore_build_btn()
 
         etimer.timeout.connect(tick)

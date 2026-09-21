@@ -64,8 +64,10 @@ Audit tab: **shift summary** + export.
      or coordinates. Wrong home = wrong route order.
    - **Choose** your Excel/CSV (site coordinates) and your `.EST` map file(s).
      Map names come from the upload filename (e.g. `Day5.EST` → Day5).
-     **Two maps:** BUILD ROUTE splits into two independent sections (one per `.EST`).
-     Cycle **Map ◀ ▶** in the top bar — picking or applying one route does not change the other.
+     **Two maps:** Build asks Auto or Pick. Each day is built separately first.
+     Then you can **Merge** — one new best driving order from every site, by
+     location from your start (not Day 1 then Day 2 glued together).
+     Cycle **Map ◀ ▶** to work one day at a time; merge is optional.
    - **Download road map** for these sites (or import `.graphml` from home PC if work Wi‑Fi blocks download).
    - **BUILD OPTIMIZED ROUTE**, then **READY FOR OFFLINE** before you leave.
 2. **Route tab** - see the ordered stops (numbered **1, 2, 3…** on the map), total miles,

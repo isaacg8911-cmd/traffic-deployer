@@ -52,6 +52,12 @@ def build_route_page(win) -> QWidget:
             "Choose stop order by tapping blue/red dots on the map (instead of auto-optimize).")
         win.btn_pick_on_map.clicked.connect(win._start_pick_route_from_route_tab)
         button_row(sec_drive, win.btn_start, win.btn_pick_on_map)
+        win.btn_merge_days = QPushButton("Merge days")
+        win.btn_merge_days.setObjectName("secondary")
+        win.btn_merge_days.setToolTip(
+            "After Day 1 and Day 2 exist: one new best driving order from all sites, by location.")
+        win.btn_merge_days.clicked.connect(win._offer_merge_days)
+        sec_drive.addWidget(win.btn_merge_days)
     else:
         sec_drive.addWidget(win.btn_start)
 

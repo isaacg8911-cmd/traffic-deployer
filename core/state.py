@@ -49,6 +49,8 @@ class RouteState:
         self.current_index: int = 0
         self.pickup_index: int = 0
         self.map_day_filter: str = "All days"
+        self.days_merged: bool = False
+        self.merged_route: dict | None = None
         self.saved_home_label: str = ""
         self.saved_home_coords: tuple[float, float] | None = None
         self.ig_tfc_path: str = ""
@@ -79,6 +81,9 @@ class RouteState:
         d["current_index"] = int(self.current_index)
         d["pickup_index"] = int(self.pickup_index)
         d["map_day_filter"] = self.map_day_filter or "All days"
+        d["days_merged"] = bool(getattr(self, "days_merged", False))
+        if getattr(self, "merged_route", None):
+            d["merged_route"] = dict(self.merged_route)
         if self.saved_home_label:
             d["saved_home_label"] = self.saved_home_label
         if self.saved_home_coords:
@@ -117,6 +122,9 @@ class RouteState:
         self.pickup_index = int(data.get("pickup_index", 0))
         raw_filter = str(data.get("map_day_filter", "All days") or "All days")
         self.map_day_filter = "All days" if raw_filter == "All maps" else raw_filter
+        self.days_merged = bool(data.get("days_merged", False))
+        raw_merged = data.get("merged_route")
+        self.merged_route = dict(raw_merged) if isinstance(raw_merged, dict) else None
         self.saved_home_label = str(data.get("saved_home_label", "") or "")
         shc = data.get("saved_home_coords")
         self.saved_home_coords = (
@@ -192,6 +200,8 @@ class RouteState:
         self.active_files = []
         self.route = {"polyline": [], "miles": 0.0, "legs": [], "graph": False}
         self.routes_by_map = {}
+        self.days_merged = False
+        self.merged_route = None
         self.current_index = 0
         self.pickup_index = 0
         if wipe_upload_paths:

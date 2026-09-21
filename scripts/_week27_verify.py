@@ -1,6 +1,7 @@
 """Verify Week 27 IG restamp: dates, times, TFC names, photo names. Exit 1 on failure."""
 from __future__ import annotations
 
+import re
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -199,13 +200,28 @@ def main() -> int:
         if p.name[:1].isdigit() and p.name.split("-")[0].split(".")[0].isdigit()
     )
     print("named", [p.name for p in named])
-    if len(named) != 7:
-        errs.append(f"expected 7 site-named JPGs, got {len(named)}")
+    d1 = [p for p in named if re.match(r"^\d{4}(-|\.)", p.name)]
+    d2 = [p for p in named if re.match(r"^\d{5}", p.name)]
+    print("day1", [p.name for p in d1], "day2", [p.name for p in d2])
+    if len(named) not in {6, 7}:
+        errs.append(f"expected 6–7 site-named JPGs, got {len(named)}")
+    if len(d1) != 4:
+        errs.append(f"expected 4 Day 1 JPGs, got {len(d1)}")
+    if len(d2) != 2:
+        errs.append(f"expected 2 Day 2 JPGs, got {len(d2)}")
+    want_d1 = {"4927.jpg", "4987.jpg", "4907.jpg", "4977.jpg"}
+    want_d2 = {"11113.jpg", "11116.jpg"}
+    got = {p.name for p in named}
+    if not want_d1 <= got:
+        errs.append(f"Day 1 names missing {sorted(want_d1 - got)}")
+    if not want_d2 <= got:
+        errs.append(f"Day 2 names missing {sorted(want_d2 - got)}")
     for p in named:
         dt = read_datetime_original(p)
         print(f"  {p.name} Date Taken {dt}")
-        if dt.date() != DAY1_START:
-            errs.append(f"{p.name} Date Taken {dt.date()} != {DAY1_START}")
+        want = DAY2_START if p in d2 else DAY1_START
+        if dt.date() != want:
+            errs.append(f"{p.name} Date Taken {dt.date()} != {want}")
 
     print()
     print(f"=== ERRORS {len(errs)} ===")

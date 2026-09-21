@@ -6,7 +6,7 @@ Keep original clock times. Drop rows/hits past the window.
 
 Day 2 Apple pins (guides.htm) matched to TFC sites via Map 1.est; LAT/LON written.
 60min CSVs: Traficam serial -> TFC '{site}{n|e} ' prefix.
-Photos: named from Day 1 beginning installed sites (TFC order); Date Taken -> Day 1 start.
+Photos: Day 1 shots -> first Day 1 TFC sites; Day 2 shots -> first Day 2 TFC sites.
 
 Default folder: C:\\Users\\isaac\\Downloads\\week 27\\week 27
 Backs up data to _week27_backup/ and photos to _week27_photo_backup/.
@@ -271,10 +271,10 @@ def stamp_tfc(
     return {"day1": n1, "day2": n2, "dirs": n_dir, "apple_gps": n_apple, "est_gps": n_est}
 
 
-def day1_beginning_sites(tfc: Path) -> list[tuple[str, str]]:
-    """Installed Day 1 sites in TFC order -> (site, dir)."""
+def beginning_sites(tfc: Path, sheet: str, day: int) -> list[tuple[str, str]]:
+    """Installed sites in TFC order -> (site, dir)."""
     wb = openpyxl.load_workbook(tfc, data_only=True)
-    ws = _sheet(wb, DAY1_SHEET, day=1)
+    ws = _sheet(wb, sheet, day=day)
     out: list[tuple[str, str]] = []
     for row in range(2, ws.max_row + 1):
         site = _cell_id(ws.cell(row, 2).value)
@@ -287,23 +287,27 @@ def day1_beginning_sites(tfc: Path) -> list[tuple[str, str]]:
     return out
 
 
-def rename_photos(folder: Path, backup: Path, sites: list[tuple[str, str]], lines: list[str]) -> list[str]:
-    photos = list_photos(folder)
-    errors: list[str] = []
-    if not photos:
-        errors.append("no PXL_*.jpg photos")
-        return errors
+def day1_beginning_sites(tfc: Path) -> list[tuple[str, str]]:
+    return beginning_sites(tfc, DAY1_SHEET, 1)
 
-    # Day 1 beginning: ignore the calendar date, keep clock. Burst (≤30s) shares a site.
-    photos = sorted(photos, key=lambda p: (read_datetime_original(p).time(), p.name))
-    assignments: list[tuple[Path, str]] = []
+
+def day2_beginning_sites(tfc: Path) -> list[tuple[str, str]]:
+    return beginning_sites(tfc, DAY2_SHEET, 2)
+
+
+def _assign_clock_order(
+    photos: list[Path], sites: list[tuple[str, str]]
+) -> tuple[list[tuple[Path, str]], list[str]]:
+    errors: list[str] = []
+    ordered = sorted(photos, key=lambda p: (read_datetime_original(p).time(), p.name))
+    out: list[tuple[Path, str]] = []
     site_i = 0
     prev_dt: datetime | None = None
     current_site = ""
-    for src in photos:
+    for src in ordered:
         dt = read_datetime_original(src)
         if site_i >= len(sites):
-            errors.append(f"more photos than Day 1 beginning sites: {src.name}")
+            errors.append(f"more photos than beginning sites: {src.name}")
             continue
         if prev_dt is not None and abs((dt - prev_dt).total_seconds()) <= 30:
             sid = current_site
@@ -312,41 +316,124 @@ def rename_photos(folder: Path, backup: Path, sites: list[tuple[str, str]], line
             site_i += 1
             current_site = sid
         prev_dt = dt
-        assignments.append((src, sid))
+        out.append((src, sid))
+    return out, errors
 
-    used: dict[str, int] = {}
-    for src, sid in assignments:
-        dest_bak = backup / src.name
-        if not dest_bak.exists():
-            shutil.copy2(src, dest_bak)
-        old_dt = read_datetime_original(src)
-        new_dt = datetime.combine(DAY1_START, old_dt.time())
-        raw = src.read_bytes()
-        patched, counts = shift_jpeg_dates(raw, old_dt, new_dt)
-        if patched == raw and old_dt.date() != new_dt.date():
-            errors.append(f"{src.name}: no date bytes patched")
-            continue
-        src.write_bytes(patched)
-        set_file_times(src, new_dt)
-        check = read_datetime_original(src)
-        if check.date() != DAY1_START or check.time() != old_dt.time():
-            errors.append(f"{src.name}: Date Taken {check} want {new_dt}")
-            continue
-        used[sid] = used.get(sid, 0) + 1
-        suffix = "" if used[sid] == 1 else f"-{used[sid]}"
-        new_name = f"{sid}{suffix}.jpg"
+
+def _stamp_and_rename(
+    src: Path,
+    sid: str,
+    backup: Path,
+    stamp_day: date,
+    used: dict[str, int],
+    lines: list[str],
+) -> str | None:
+    dest_bak = backup / src.name
+    if not dest_bak.exists():
+        shutil.copy2(src, dest_bak)
+    old_dt = read_datetime_original(src)
+    new_dt = datetime.combine(stamp_day, old_dt.time())
+    raw = src.read_bytes()
+    patched, counts = shift_jpeg_dates(raw, old_dt, new_dt)
+    if patched == raw and old_dt.date() != new_dt.date():
+        return f"{src.name}: no date bytes patched"
+    src.write_bytes(patched)
+    set_file_times(src, new_dt)
+    check = read_datetime_original(src)
+    if check.date() != stamp_day or check.time() != old_dt.time():
+        return f"{src.name}: Date Taken {check} want {new_dt}"
+    used[sid] = used.get(sid, 0) + 1
+    suffix = "" if used[sid] == 1 else f"-{used[sid]}"
+    new_name = f"{sid}{suffix}.jpg"
+    dest = src.with_name(new_name)
+    if dest.exists() and dest.resolve() != src.resolve():
+        tmp = src.with_name(f"_tmp_{sid}{suffix}.jpg")
+        src.rename(tmp)
+        src = tmp
         dest = src.with_name(new_name)
         if dest.exists() and dest.resolve() != src.resolve():
-            errors.append(f"photo dest exists: {src.name} -> {new_name}")
-            continue
-        if dest != src:
-            src.rename(dest)
-        msg = (
-            f"PHOTO {src.name} -> {new_name}: {old_dt} -> {check} "
-            f"(exif={counts['exif_dt']} iso={counts['iso_date']})"
-        )
-        print(msg)
-        lines.append(msg)
+            return f"photo dest exists: {src.name} -> {new_name}"
+    if dest != src:
+        src.rename(dest)
+    msg = (
+        f"PHOTO {dest_bak.name} -> {new_name}: {old_dt} -> {check} "
+        f"(exif={counts['exif_dt']} iso={counts['iso_date']})"
+    )
+    print(msg)
+    lines.append(msg)
+    return None
+
+
+def rename_photos(
+    folder: Path,
+    backup: Path,
+    day1_sites: list[tuple[str, str]],
+    day2_sites: list[tuple[str, str]],
+    lines: list[str],
+    *,
+    day2_names: set[str] | None = None,
+) -> list[str]:
+    """Name photos from first TFC sites. Day 1 suburban / Day 2 high-desert.
+
+    Pixel GPS is stripped. Split: PXL_ filename date, or Director day2_names,
+    or 5-digit Day 2 site names already applied.
+    """
+    errors: list[str] = []
+    pxl = list_photos(folder)
+    named = [
+        p
+        for p in sorted(folder.glob("*.jpg"))
+        if p.name[:1].isdigit()
+    ]
+    if pxl:
+        day1_photos, day2_photos = [], []
+        for p in pxl:
+            m = re.match(r"PXL_(\d{8})", p.name)
+            raw_day = datetime.strptime(m.group(1), "%Y%m%d").date() if m else None
+            if raw_day and raw_day >= date(2026, 9, 17):
+                day2_photos.append(p)
+            else:
+                day1_photos.append(p)
+    elif named:
+        flagged = {n.lower() for n in (day2_names or set())}
+        day1_photos, day2_photos = [], []
+        for p in named:
+            sid = re.match(r"(\d+)", p.name)
+            site = sid.group(1) if sid else ""
+            if p.name.lower() in flagged:
+                day2_photos.append(p)
+            elif len(site) >= 5:
+                day2_photos.append(p)
+            else:
+                day1_photos.append(p)
+    else:
+        return ["no photos to rename"]
+
+    a1, e1 = _assign_clock_order(day1_photos, day1_sites)
+    a2, e2 = _assign_clock_order(day2_photos, day2_sites)
+    errors.extend(e1)
+    errors.extend(e2)
+
+    used: dict[str, int] = {}
+    # Day 2 first so Day 1 can take 4977.jpg after the desert shot is moved.
+    pending = [(src, sid, DAY2_START) for src, sid in a2] + [
+        (src, sid, DAY1_START) for src, sid in a1
+    ]
+    # Two-pass: rename everyone to temps, then to final names.
+    temps: list[tuple[Path, str, date]] = []
+    for src, sid, stamp in pending:
+        tmp = src.with_name(f"_w27_{src.stem}.jpg")
+        n = 0
+        while tmp.exists():
+            n += 1
+            tmp = src.with_name(f"_w27_{src.stem}_{n}.jpg")
+        if tmp != src:
+            src.rename(tmp)
+        temps.append((tmp, sid, stamp))
+    for src, sid, stamp in temps:
+        err = _stamp_and_rename(src, sid, backup, stamp, used, lines)
+        if err:
+            errors.append(err)
     return errors
 
 
@@ -545,10 +632,14 @@ def main() -> int:
     log(f"renamed={len(renamed)} already={len(skipped)} errors={len(rename_err)}")
     log()
 
-    log("=== Photos -> Day 1 beginning sites ===")
-    begin = day1_beginning_sites(tfc)
-    log("Day 1 beginning (installed TFC order): " + ", ".join(s for s, _ in begin[:10]))
-    photo_err = rename_photos(folder, photo_backup, begin, lines)
+    log("=== Photos -> first sites (Day 1 and Day 2) ===")
+    begin1 = day1_beginning_sites(tfc)
+    begin2 = day2_beginning_sites(tfc)
+    log("Day 1 beginning: " + ", ".join(s for s, _ in begin1[:8]))
+    log("Day 2 beginning: " + ", ".join(s for s, _ in begin2[:8]))
+    photo_err = rename_photos(
+        folder, photo_backup, begin1, begin2, lines, day2_names={"4977.jpg", "4941.jpg"}
+    )
     for e in photo_err:
         errors.append(e)
         log(f"  FAIL {e}")

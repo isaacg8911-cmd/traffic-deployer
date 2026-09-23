@@ -32,7 +32,7 @@ MODULE_MARKERS: dict[str, tuple[str, ...]] = {
     ),
     "ui.controllers.map_sync": (
         "_parse_stop_click", "_push_state", "_on_map_follow_toggled", "_map_follow",
-        "_ask_route_build_mode", "_offer_merge_days",
+        "_nearest_unpicked_stop", "_offer_merge_days",
     ),
     "ui.controllers.setup": ("_commit_home_start", "_ready_offline"),
     "ui.controllers.install": ("_commit_install", "_begin_manual_grab", "_clear_field_gps", "Tap Next"),

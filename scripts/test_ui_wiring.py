@@ -146,7 +146,6 @@ ORPHAN_HANDLER_ALLOW = frozenset({
     "_ensure_pick_by_map",
     "_section_stops_for_legs",
     "_section_pick_tag",
-    "_ask_route_build_mode",
     "_offer_merge_days",
     "_merge_days_best_route",
     "_continue_pick_or_merge",

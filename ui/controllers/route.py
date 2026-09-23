@@ -137,43 +137,24 @@ class RouteControllerMixin:
         self._refresh_day_filter()
         self._refresh_route_list()
         self._push_state(fit=True)
-        mode = self._ask_route_build_mode()
-        if mode not in ("auto", "pick"):
-            self._restore_build_button_if_idle()
-            return
+        # Stop order is always the operator's map clicks. No auto-order.
         two_maps = len(labels) >= 2 and rebuild_sheet is None
         self._offer_merge_after_build = two_maps
         self._pick_build_queue = []
-        if mode == "pick":
-            if rebuild_sheet:
-                self._set_route_section(rebuild_sheet, persist=False)
-                self._pick_build_queue = []
-                self._offer_merge_after_build = False
-            elif two_maps:
-                self._pick_build_queue = list(labels)
-                self._set_route_section(labels[0], persist=False)
-            else:
-                self._focus_route_section_for_pick()
-            self._restore_build_button_if_idle()
-            self._begin_route_pick(self.state.stops)
-            return
-        jobs: list[tuple[str, list[dict]]] = []
         if rebuild_sheet:
-            jobs = [(rebuild_sheet, route_sections.stops_for_section(
-                self.state.stops, rebuild_sheet))]
-        elif len(labels) >= 2:
-            jobs = [
-                (lab, route_sections.stops_for_section(self.state.stops, lab))
-                for lab in labels
-            ]
-        if jobs:
-            self._start_auto_build_queue(jobs, stay_all_days=rebuild_sheet is None)
-        else:
+            self._set_route_section(rebuild_sheet, persist=False)
+            self._pick_build_queue = []
             self._offer_merge_after_build = False
-            self._optimize_and_route(self.state.stops)
+        elif two_maps:
+            self._pick_build_queue = list(labels)
+            self._set_route_section(labels[0], persist=False)
+        else:
+            self._focus_route_section_for_pick()
+        self._restore_build_button_if_idle()
+        self._begin_route_pick(self.state.stops)
 
     def _start_pick_route_from_route_tab(self) -> None:
-        """Manual pick order — alternative to auto-optimize BUILD ROUTE."""
+        """Manual pick order — same click-to-order path as Build."""
         stops = self._stops_from_uploads_merged() or list(self.state.stops)
         if not stops:
             self._warn("Load Excel + .EST on Setup first (or resume a saved shift).")
@@ -405,10 +386,6 @@ class RouteControllerMixin:
         if hasattr(self, "sec_pick") and self.sec_pick is not None and SIMPLE_MODE:
             self.sec_pick.setVisible(on)
         self.btn_pick_apply.setEnabled(on and n > 0 and n >= total)
-        if hasattr(self, "btn_pick_auto"):
-            partial = on and 0 < n < total
-            self.btn_pick_auto.setVisible(partial)
-            self.btn_pick_auto.setEnabled(partial)
         self.btn_pick_clear.setEnabled(on and n > 0)
         if hasattr(self, "btn_pick_order_win"):
             self.btn_pick_order_win.setEnabled(on)
@@ -446,7 +423,7 @@ class RouteControllerMixin:
             pick_text = f"{self._section_pick_tag()}All {total} stops picked on the map. Tap Apply route."
         else:
             pick_text = (
-                f"{self._pick_prompt_text()} — pick Begin/End below or tap dots on map. "
+                f"{self._pick_prompt_text()} — tap a blue (begin) or red (end) dot. "
                 f"Order updates in the popup.")
         apply_active(self.lbl_pick_status, True, pick_text)
         if sync_dialog and on and self._route_pick_dialog is not None:
@@ -504,62 +481,43 @@ class RouteControllerMixin:
             self._route_pick_add_from_list(str(uid))
 
     def _set_pick_side_mode(self, mode: str) -> None:
-        """Begin / End / Auto — applies to the next left-list or combo pick."""
-        if mode not in ("begin", "end", "auto"):
+        """Begin / End — applies to the next left-list or combo pick.
+
+        Map dots ignore this and use the end you tapped (blue = begin, red = end).
+        """
+        if mode not in ("begin", "end"):
             return
         self._pick_side_mode = mode
         self._sync_pick_side_buttons()
         labels = {
-            "begin": "Begin (blue) — next stop uses the begin end of the segment",
-            "end": "End (red) — next stop uses the end of the segment",
-            "auto": "Auto — route picks the nearest end when you Apply",
+            "begin": "Begin (blue) — next list pick uses the begin end of the segment",
+            "end": "End (red) — next list pick uses the end of the segment",
         }
         self.statusBar().showMessage(labels[mode], 6000)
 
     def _sync_pick_side_buttons(self) -> None:
-        mode = getattr(self, "_pick_side_mode", "auto")
+        mode = getattr(self, "_pick_side_mode", "begin")
+        if mode not in ("begin", "end"):
+            mode = "begin"
+            self._pick_side_mode = mode
         for attr, val in (
             ("btn_pick_side_begin", "begin"),
             ("btn_pick_side_end", "end"),
-            ("btn_pick_side_auto", "auto"),
         ):
             btn = getattr(self, attr, None)
             if btn is not None:
                 btn.setChecked(mode == val)
 
-    def _auto_pick_side(self, stop: dict) -> str:
-        """Nearest begin/end from the previous pick (or home) — preview only until Apply."""
-        from road_router import _haversine_m
-
-        if self._route_pick_uids:
-            by_uid = {str(s.get("uid") or ""): s for s in self.state.stops}
-            prev = by_uid.get(self._route_pick_uids[-1])
-            if prev and prev.get("cross_lat") is not None and prev.get("cross_lon") is not None:
-                cur = (float(prev["cross_lat"]), float(prev["cross_lon"]))
-            else:
-                cur = tuple(self.state.home)
-        else:
-            cur = tuple(self.state.home)
-        bl, blo = stop.get("begin_lat"), stop.get("begin_lon")
-        el, elo = stop.get("end_lat"), stop.get("end_lon")
-        if bl is None or blo is None or el is None or elo is None:
-            return "begin"
-        db = _haversine_m(cur[0], cur[1], float(bl), float(blo))
-        de = _haversine_m(cur[0], cur[1], float(el), float(elo))
-        return "begin" if db <= de else "end"
-
     def _route_pick_add_from_list(self, uid: str) -> None:
-        """Left list / combo — honor Begin/End/Auto mode."""
+        """Left list / combo — Begin or End only. Map clicks set the side themselves."""
         by_uid = {str(s.get("uid") or ""): s for s in self.state.stops}
         stop = by_uid.get(uid)
         if stop is None:
             return
-        mode = getattr(self, "_pick_side_mode", "auto")
-        if mode in ("begin", "end"):
-            self._route_pick_add(uid, side=mode, lock_side=True)
-        else:
-            side = self._auto_pick_side(stop)
-            self._route_pick_add(uid, side=side, lock_side=False)
+        mode = getattr(self, "_pick_side_mode", "begin")
+        if mode not in ("begin", "end"):
+            mode = "begin"
+        self._route_pick_add(uid, side=mode, lock_side=True)
 
     def _route_pick_add(
         self, uid: str, *, side: str | None = None, lock_side: bool | None = None,
@@ -600,8 +558,7 @@ class RouteControllerMixin:
         self._push_state()
         side_note = ""
         if side in ("begin", "end"):
-            locked = uid in self._route_pick_sides
-            side_note = f" ({side}{'' if locked else ', auto preview'})"
+            side_note = f" ({side})"
         if n >= total:
             self.statusBar().showMessage(
                 f"Stop {n}{side_note} added — all sites chosen. Tap Apply route.", 8000)
@@ -623,30 +580,6 @@ class RouteControllerMixin:
         self._push_state()
         self.statusBar().showMessage(
             f"Picks cleared — {self._pick_prompt_text()}.", 6000)
-
-    def _route_pick_auto_finish(self) -> None:
-        if not self._route_pick_mode or not self.state.stops:
-            return
-        import road_router
-        from core.map_display import auto_finish_order
-
-        if not road_router.has_graph(DATA_DIR):
-            self.statusBar().showMessage(
-                "No road map — Suggest order uses straight-line miles. "
-                "Download road map on Setup for Dijkstra routing.", 9000)
-        pool = self._pick_pool_stops()
-        by_uid = {s["uid"]: s for s in pool}
-        picked = [by_uid[u] for u in self._route_pick_uids if u in by_uid]
-        remaining = [s for s in pool if s["uid"] not in self._route_pick_uids]
-        ordered = auto_finish_order(tuple(self.state.home), picked, remaining, DATA_DIR)
-        self._route_pick_uids = [s["uid"] for s in ordered]
-        self._refresh_route_pick_ui()
-        self._refresh_route_list()
-        self._push_state()
-        graph_note = "road miles" if road_router.has_graph(DATA_DIR) else "straight-line"
-        self.statusBar().showMessage(
-            f"Suggest order ({graph_note}) — {len(self._route_pick_uids)} stops. Tap Apply route.",
-            8000)
 
     def _sync_pick_order_from_dialog(self) -> None:
         """Adopt the order window's list order (source of truth for sequence).

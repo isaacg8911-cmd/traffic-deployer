@@ -64,9 +64,9 @@ Audit tab: **shift summary** + export.
      or coordinates. Wrong home = wrong route order.
    - **Choose** your Excel/CSV (site coordinates) and your `.EST` map file(s).
      Map names come from the upload filename (e.g. `Day5.EST` → Day5).
-     **Two maps:** Build asks Auto or Pick. Each day is built separately first.
-     Then you can **Merge** — one new best driving order from every site, by
-     location from your start (not Day 1 then Day 2 glued together).
+     **Two maps:** Build opens the map. Tap stop order yourself — blue dot = begin,
+     red dot = end. Pick Day 1, then Day 2. Then you can **Merge** — one new best
+     driving order from every site, by location from your start.
      Cycle **Map ◀ ▶** to work one day at a time; merge is optional.
    - **Download road map** for these sites (or import `.graphml` from home PC if work Wi‑Fi blocks download).
    - **BUILD OPTIMIZED ROUTE**, then **READY FOR OFFLINE** before you leave.
@@ -148,7 +148,7 @@ label fonts.
 ## One-laptop field checklist (raises readiness)
 
 1. Run **`SMOKE.bat`** (or `.\scripts\smoke_test.ps1` for smoke + demo + preflight) after any update.
-2. Setup: Excel + `.EST` → **Download road map** → **Build**. Two maps auto-build **each day separately** and show **All days together**. HTML install lists write merged + per-day into `tds_data/exports/`.
+2. Setup: Excel + `.EST` → **Download road map** → **Build**. Build opens click-to-order (blue = begin, red = end). Two maps: pick each day, then optional Merge. HTML install lists are **HTML route** on the Route tab (`tds_data/exports/`).
 3. Route tab: **Map** filter = one day (that day’s pins) or **All days** (both). **HTML route** can save merged or separate lists.
 4. Install: **Grab GPS** fills street from internet or **offline road map**; use compass when stopped.
 5. End: Audit export (includes MapDay, cross point, wide-street warning).

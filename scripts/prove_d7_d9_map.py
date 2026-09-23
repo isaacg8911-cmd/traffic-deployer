@@ -74,10 +74,10 @@ def main() -> int:
     else:
         fail("D8 empty-pick optimize path")
 
-    if "Suggest order" in route_py and "Dijkstra" in route_py:
-        ok("D8 suggest order warns without graph")
+    if "Suggest order" not in route_py and "_route_pick_auto_finish" not in route_py:
+        ok("D8 suggest-order button removed")
     else:
-        fail("D8 suggest order graph warning")
+        fail("D8 suggest order still exposed in route UI")
 
     from core import ingest
     from core.map_display import auto_finish_order

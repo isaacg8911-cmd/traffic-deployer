@@ -197,7 +197,7 @@ def test_left_list_click_no_install_jump() -> None:
             self._route_pick_mode = True
             self._route_pick_uids: list[str] = []
             self._route_pick_sides: dict[str, str] = {}
-            self._pick_side_mode = "auto"
+            self._pick_side_mode = "begin"
             self._route_pick_dialog = None
             self._manual_grab_mode = False
             self._map_preview_stops: list[dict] = []

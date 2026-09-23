@@ -1,4 +1,4 @@
-"""Prove D1–D3: no route tour traces, BUILD ROUTE auto-optimizes, Fleet nav hidden.
+"""Prove D1–D3: no route tour traces, BUILD ROUTE opens manual map pick, Fleet nav hidden.
 
 Site begin↔end dashed chords are allowed (Install Pins look; cheap geometry).
 Gate: load job (Week 18 via TD_JOB_* env when present, else bundled validation job)
@@ -34,7 +34,7 @@ def fail(name: str, detail: str = "") -> None:
 
 
 def main() -> int:
-    print("PROVE D1-D3 (map traces off, auto-build, Fleet hidden)\n")
+    print("PROVE D1-D3 (map traces off, manual map pick, Fleet hidden)\n")
 
     from PySide6.QtCore import QUrl, QTimer
     from PySide6.QtWebChannel import QWebChannel
@@ -83,7 +83,7 @@ def main() -> int:
         return 1
     ok("job load", f"{job.label} ({job.source}) — {len(stops)} stops")
 
-    # --- D2: BUILD ROUTE auto-optimizes (Pick on map stays on Route tab) -----
+    # --- D2: BUILD ROUTE opens click-to-order (no auto-order) -----------------
     class BuildWin(MapSyncControllerMixin, RouteControllerMixin):
         def __init__(self) -> None:
             self.excel_paths = [job.xls]
@@ -97,6 +97,11 @@ def main() -> int:
                 "theme": "light",
                 "offline_mode": False,
             })()
+            self.state.index_of = lambda uid: next(
+                (i for i, s in enumerate(self.state.stops)
+                 if str(s.get("uid") or "") == str(uid)),
+                -1,
+            )
             self.current_index = 0
             self._route_pick_mode = False
             self._route_pick_uids = []
@@ -107,6 +112,7 @@ def main() -> int:
             self._pick_layout_active = False
             self._pick_splitter_saved = None
             self._map_js_ready = True
+            self.bridge = type("B", (), {"fly_to": staticmethod(lambda *_a, **_k: None)})()
             self._gps_follow = False
             self._map_follow = False
             self._route_thread = None
@@ -156,22 +162,49 @@ def main() -> int:
         def _warn(self, _msg: str) -> None:
             return
 
-        def _ask_route_build_mode(self):
-            return "auto"
-
         def _offer_merge_days(self):
             return False
 
         def _optimize_and_route(self, _stops, **_kw):
             self._optimize_called = True
 
+        def _push_state(self, fit: bool = False) -> None:
+            _ = fit
+
     app = QApplication.instance() or QApplication(sys.argv)
     bw = BuildWin()
     bw._build_route_from_uploads()
-    if bw._optimize_called and not bw._route_pick_mode:
-        ok("D2 BUILD ROUTE -> auto-optimize", "not pick-first")
+    if bw._route_pick_mode and not bw._optimize_called and not bw._route_pick_uids:
+        ok("D2 BUILD ROUTE -> manual pick", "waiting for map clicks")
     else:
-        fail("D2 BUILD ROUTE -> auto-optimize", f"pick={bw._route_pick_mode} optimize={bw._optimize_called}")
+        fail(
+            "D2 BUILD ROUTE -> manual pick",
+            f"pick={bw._route_pick_mode} optimize={bw._optimize_called} uids={bw._route_pick_uids}",
+        )
+
+    pool = bw._pick_pool_stops()
+    if pool:
+        s0 = pool[0]
+        uid0 = str(s0["uid"])
+        bw._on_stop_clicked(f"{uid0}|begin")
+        if bw._route_pick_uids == [uid0] and bw._route_pick_sides.get(uid0) == "begin":
+            ok("D2 blue-dot click adds stop 1", uid0)
+        else:
+            fail(
+                "D2 blue-dot click adds stop 1",
+                f"uids={bw._route_pick_uids} sides={bw._route_pick_sides}",
+            )
+        if len(pool) > 1 and pool[1].get("end_lat") is not None:
+            s1 = pool[1]
+            bw._on_map_clicked(float(s1["end_lat"]), float(s1["end_lon"]))
+            uid1 = str(s1["uid"])
+            if bw._route_pick_uids[-1:] == [uid1] and bw._route_pick_sides.get(uid1) == "end":
+                ok("D2 red-dot map click adds stop 2", uid1)
+            else:
+                fail(
+                    "D2 red-dot map click adds stop 2",
+                    f"uids={bw._route_pick_uids} sides={bw._route_pick_sides}",
+                )
 
     # --- map push + layer probe ----------------------------------------------
     ensure_qwebchannel_js()

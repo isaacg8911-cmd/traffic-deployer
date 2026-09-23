@@ -36,7 +36,7 @@ def _stub_window():
         "_save_default_home", "_load_default_home", "_origin_from_address",
         "_use_saved_home", "_origin_from_coords", "_pick_excel", "_pick_est",
         "_clear_files", "_download_basemap", "_download_roads", "_import_roads",
-        "_build_route_from_uploads", "_toggle_drive", "_route_pick_auto_finish",
+        "_build_route_from_uploads", "_toggle_drive",
         "_route_pick_clear", "_route_pick_apply", "_show_route_pick_dialog",
         "_start_pick_route_from_route_tab",
         "_offer_merge_days",

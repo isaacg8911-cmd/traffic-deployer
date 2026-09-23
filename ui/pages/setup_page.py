@@ -227,8 +227,8 @@ def build_setup_page(win) -> QWidget:
     win.btn_build = QPushButton(BUILD_LABEL)
     win.btn_build.setObjectName("primary")
     win.btn_build.setToolTip(
-        "Build: Auto (best route per day) or Pick on map. Two .EST maps: Day 1 "
-        "and Day 2 separately first, then optional Merge into one best route. "
+        "Opens the map so you tap stop order: blue dot = begin, red dot = end. "
+        "Two .EST maps: pick Day 1, then Day 2. Optional Merge after both are picked. "
         "Writes HTML install lists (merged + one file per day).")
     win.btn_build.clicked.connect(win._build_route_from_uploads)
     button_row(sec_route, win.btn_build)

@@ -52,7 +52,7 @@ class ShellStartupMixin:
         self._route_pick_sides: dict[str, str] = {}
         self._route_pick_by_map: dict[str, dict] = {}
         self._day_filter_prev: str = getattr(self.state, "map_day_filter", "") or "All days"
-        self._pick_side_mode = "auto"  # begin | end | auto — for left-list / combo picks
+        self._pick_side_mode = "begin"  # begin | end — list picks only; map dots set the side
         self._route_pick_dialog: RoutePickOrderDialog | None = None
         self._manual_grab_mode = False
         self._follow_before_manual_grab = False

@@ -358,21 +358,22 @@
       try {
         bridge.onStopClick(payload);
         return;
-      } catch (e) { /* fall through to tdstop:// */ }
+      } catch (e) { /* fall through to http click fallback */ }
     }
-    window.location.href = 'tdstop://' + encodeURIComponent(payload);
+    window.location.href = 'http://tdstop.local/pick?p=' + encodeURIComponent(payload);
   }
 
   // Empty-map clicks must reach Python even when QWebChannel never connected
-  // (work-laptop case): fall back to the tdmap:// scheme the page intercepts.
+  // (work-laptop case). WebEngine drops custom schemes, so this is a normal
+  // http URL the page cancels before it loads.
   function fireMapClick(lat, lon) {
     if (bridge && typeof bridge.onMapClick === 'function') {
       try {
         bridge.onMapClick(lat, lon);
         return;
-      } catch (e) { /* fall through to tdmap:// */ }
+      } catch (e) { /* fall through to http click fallback */ }
     }
-    window.location.href = 'tdmap://point?lat=' +
+    window.location.href = 'http://tdmap.local/point?lat=' +
       encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon);
   }
 
@@ -1188,6 +1189,8 @@
   // Test seams: exercise the exact JS->Python click paths headlessly.
   window.__fireStopClick = function (payload) { fireStopClick(payload); };
   window.__fireMapClick = function (lat, lon) { fireMapClick(lat, lon); };
+  // Page-level `bridge = null` does not touch this closure. Tests use this.
+  window.__dropBridge = function () { bridge = null; };
 
   window.__tdPushState = renderState;
   window.__tdPushGps = renderGps;

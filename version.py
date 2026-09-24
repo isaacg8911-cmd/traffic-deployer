@@ -1,5 +1,5 @@
 """Traffic Deployer release identity."""
 APP_NAME = "Traffic Deployer"
-APP_VERSION = "1.0.18"
-APP_BUILD_STAMP = "2026-09-24T02:46Z"
+APP_VERSION = "1.0.19"
+APP_BUILD_STAMP = "2026-09-24T13:23Z"
 APP_TAGLINE = "Offline field routing & install tracking — data stays on this laptop."

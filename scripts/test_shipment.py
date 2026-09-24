@@ -181,6 +181,8 @@ def check_web_shipped(handoff: str) -> None:
         "fromPython",
         "siteDotLabel",
         "s.id",
+        "tdstop.local",
+        "tdmap.local",
     )
     for needle in needles:
         ok(f"app.js {needle}") if needle in body else fail(f"app.js missing {needle}")

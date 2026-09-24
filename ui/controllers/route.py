@@ -311,11 +311,10 @@ class RouteControllerMixin:
         dlg = self._ensure_route_pick_dialog()
         if not dlg.isVisible():
             dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
         if self.isVisible():
             margin = 20
-            x = self.geometry().right() - dlg.width() - margin
+            # Left side — the map is on the right, and this window must not cover the dots.
+            x = self.geometry().left() + margin
             y = self.geometry().top() + 72
             dlg.move(max(margin, x), max(margin, y))
 
@@ -347,22 +346,17 @@ class RouteControllerMixin:
 
         self.state.stops = list(stops)
         self._focus_route_section_for_pick()
-        section = self._day_filter_value() if self._day_filter_active() else ""
-        if section:
-            self._ensure_pick_by_map().pop(section, None)
-            self._ensure_routes_by_map().pop(section, None)
-            self.state.route = route_sections.empty_route()
-        elif not self._route_section_active():
-            self.state.route = route_sections.empty_route()
         self._route_pick_mode = True
         self._route_pick_uids = []
         self._route_pick_sides = {}
+        # Drop a finished line on this map. Otherwise the first site click is
+        # ignored ("route already applied") while the status line still changes.
+        self._clear_visible_section_route_for_pick()
         if self.chk_show_segments.isChecked():
             enrich_segment_paths(self.state.stops, DATA_DIR)
         self._go_page(1)
         self._enter_pick_map_focus()
         self._refresh_route_pick_ui()
-        self._show_route_pick_dialog()
         self._refresh_route_list()
         self._push_state(fit=True)
         extra = ""
@@ -375,6 +369,54 @@ class RouteControllerMixin:
             f"Pick route on map — {self._pick_prompt_text()}. "
             f"Blue = begin, red = end.{extra}",
             14000)
+
+    def _clear_visible_section_route_for_pick(self) -> None:
+        """Forget this map's applied line so the next site click is stop 1."""
+        section = self._day_filter_value() if self._day_filter_active() else ""
+        if section:
+            self._ensure_pick_by_map().pop(section, None)
+            self._ensure_routes_by_map().pop(section, None)
+        self.state.route = route_sections.empty_route()
+
+    def _route_pick_click(self, uid: str, side: str | None, *, from_list: bool = False) -> None:
+        """Map or list click during pick — always starts or extends the order.
+
+        A stored route used to make ``_section_pick_active`` false, so the click
+        only changed the status bar. That was a false update: no stop was added.
+        """
+        if not getattr(self, "_route_pick_mode", False):
+            return
+        uid = str(uid or "").strip()
+        if not uid:
+            return
+        by_uid = {str(s.get("uid") or ""): s for s in self.state.stops}
+        stop = by_uid.get(uid)
+        if stop is None:
+            self.statusBar().showMessage(
+                "That site is not in this job — pick a blue or red dot on the map.",
+                5000,
+            )
+            return
+        pool = {str(s.get("uid") or "") for s in self._pick_pool_stops()}
+        if uid not in pool:
+            if self._route_pick_uids:
+                sheet = stop.get("sheet") or "the other map"
+                self.statusBar().showMessage(
+                    f"That site is on {sheet} — finish this map, or Cycle Map.",
+                    7000,
+                )
+                return
+            sheet = str(stop.get("sheet") or "")
+            if sheet and not route_sections.is_all_days(sheet):
+                self._set_route_section(sheet, persist=False)
+            self._clear_visible_section_route_for_pick()
+        elif not self._section_pick_active():
+            self._clear_visible_section_route_for_pick()
+        if from_list or side not in ("begin", "end"):
+            self._route_pick_add_from_list(uid)
+        else:
+            self._route_pick_add(uid, side=side)
+        self._zoom_to_stop_click(stop, side if side in ("begin", "end") else None)
 
     def _refresh_route_pick_ui(self, *, sync_dialog: bool = True) -> None:
         if not hasattr(self, "lbl_pick_status"):
@@ -424,11 +466,12 @@ class RouteControllerMixin:
         else:
             pick_text = (
                 f"{self._pick_prompt_text()} — tap a blue (begin) or red (end) dot. "
-                f"Order updates in the popup.")
+                f"Order updates in the stop list.")
         apply_active(self.lbl_pick_status, True, pick_text)
-        if sync_dialog and on and self._route_pick_dialog is not None:
+        dlg = self._route_pick_dialog
+        if sync_dialog and on and dlg is not None and dlg.isVisible():
             by_uid = {s["uid"]: s for s in self._pick_pool_stops()}
-            self._route_pick_dialog.sync_from_parent(
+            dlg.sync_from_parent(
                 uids=list(self._route_pick_uids),
                 stops_by_uid=by_uid,
                 letters=letters,
@@ -437,7 +480,6 @@ class RouteControllerMixin:
                 prompt=self._pick_prompt_text(),
                 pick_sides=dict(self._route_pick_sides),
             )
-            self._show_route_pick_dialog()
 
     def _refresh_pick_site_combo(self) -> None:
         if not hasattr(self, "combo_pick_site"):
@@ -1191,15 +1233,19 @@ class RouteControllerMixin:
     def _route_item_clicked(self, item):
         # While picking a route, the left list mirrors the map dots. Clicking a
         # row must build the pick order — never jump to Install (P: field bug).
-        if self._section_pick_active():
+        if getattr(self, "_route_pick_mode", False):
             uid = item.data(Qt.ItemDataRole.UserRole)
             uid = str(uid) if uid else ""
             if not uid:
+                self.statusBar().showMessage(
+                    "Click a blue (begin) or red (end) dot on the map to start the order.",
+                    5000,
+                )
                 return
             if uid in self._route_pick_uids:
                 self._select_pick_in_dialog(uid)
             else:
-                self._route_pick_add_from_list(uid)
+                self._route_pick_click(uid, None, from_list=True)
             return
         row = self.list_route.row(item)
         visible = self._visible_stop_indices()

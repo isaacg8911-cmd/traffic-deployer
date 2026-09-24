@@ -354,12 +354,9 @@
 
   function fireStopClick(payload) {
     if (!payload) return;
-    if (bridge && typeof bridge.onStopClick === 'function') {
-      try {
-        bridge.onStopClick(payload);
-        return;
-      } catch (e) { /* fall through to http click fallback */ }
-    }
+    // Always use the page navigation the app cancels. QWebChannel
+    // onStopClick can exist and return without delivering, so a toast
+    // used to claim the site was picked while the order never changed.
     window.location.href = 'http://tdstop.local/pick?p=' + encodeURIComponent(payload);
   }
 
@@ -367,12 +364,8 @@
   // (work-laptop case). WebEngine drops custom schemes, so this is a normal
   // http URL the page cancels before it loads.
   function fireMapClick(lat, lon) {
-    if (bridge && typeof bridge.onMapClick === 'function') {
-      try {
-        bridge.onMapClick(lat, lon);
-        return;
-      } catch (e) { /* fall through to http click fallback */ }
-    }
+    // Same as site clicks: do not trust a QWebChannel slot that returns
+    // without delivering. The page cancels this URL and keeps the map.
     window.location.href = 'http://tdmap.local/point?lat=' +
       encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon);
   }
@@ -1146,7 +1139,6 @@
       payload = nearestPickAt(e.lngLat.lat, e.lngLat.lng);
     }
     if (payload) {
-      showSiteInfoToast(payload);
       fireStopClick(payload);
       return;
     }

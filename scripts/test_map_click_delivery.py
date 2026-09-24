@@ -201,10 +201,10 @@ def main() -> int:
 
     if received:
         via, payload = received[-1]
-        if str(payload).split("|", 1)[0] == uid0:
+        if via == "scheme" and str(payload).split("|", 1)[0] == uid0:
             ok("dot click reached Python", f"via {via}: {payload}")
         else:
-            fail("dot click wrong uid", f"via {via}: {payload}")
+            fail("dot click must use http fallback, not a silent bridge", f"via {via}: {payload}")
     else:
         fail("dot click NEVER reached Python",
              "this is the field 'dots dead' bug")

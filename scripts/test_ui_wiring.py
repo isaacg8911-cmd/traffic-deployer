@@ -308,7 +308,7 @@ def test_bridge_and_map():
         "zoomInBtn.addEventListener",
         "zoomOutBtn.addEventListener",
         "nextSiteBtn.addEventListener",
-        "bridge.onMapClick",
+        "http://tdmap.local/point",
         "fireStopClick",
         "map.on('click'",
         "alreadyPicked",

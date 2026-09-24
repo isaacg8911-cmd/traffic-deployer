@@ -807,9 +807,10 @@ class MapSyncControllerMixin:
         if not getattr(self, "_map_js_ready", False):
             return
         coords = self._stop_click_coords(stop, side)
-        if coords:
+        bridge = getattr(self, "bridge", None)
+        if coords and bridge is not None and hasattr(bridge, "fly_to"):
             lat, lon = coords
-            self.bridge.fly_to(lat, lon, SITE_CLICK_ZOOM)
+            bridge.fly_to(lat, lon, SITE_CLICK_ZOOM)
 
     @staticmethod
     def _stop_anchor_coords(s: dict) -> tuple[float, float] | None:
@@ -863,24 +864,14 @@ class MapSyncControllerMixin:
         if self._manual_grab_mode:
             self._manual_grab_at(lat, lon)
             return
-        if not self._section_pick_active():
-            if getattr(self, "_route_pick_mode", False):
-                self.statusBar().showMessage(
-                    "This map already has a route — Cycle Map to pick the other, "
-                    "or Clear route on Route tab to re-pick.",
-                    7000,
-                )
+        if not getattr(self, "_route_pick_mode", False):
             return
         uid, side = self._nearest_unpicked_stop(lat, lon)
         if uid:
-            idx = self.state.index_of(uid)
-            stop = self.state.stops[idx] if idx >= 0 else None
-            self._route_pick_add(uid, side=side)
-            if stop is not None:
-                self._zoom_to_stop_click(stop, side)
+            self._route_pick_click(uid, side)
             return
         self.statusBar().showMessage(
-            "No site near that click — tap the blue or red dot (or lettered orange ring).",
+            "No site near that click — tap the blue or red dot.",
             5000,
         )
 
@@ -907,24 +898,8 @@ class MapSyncControllerMixin:
                     self._select_install_stop(idx)
             return
         uid, side = self._parse_stop_click(str(uid).strip())
-        if self._section_pick_active():
-            by_uid = {str(s.get("uid") or ""): s for s in self.state.stops}
-            if uid not in by_uid:
-                self.statusBar().showMessage(
-                    "That site is not in this job — pick a blue or red dot on the map.",
-                    5000,
-                )
-                return
-            pool = {str(s.get("uid") or "") for s in self._pick_pool_stops()}
-            if uid not in pool:
-                sheet = by_uid[uid].get("sheet") or "the other map"
-                self.statusBar().showMessage(
-                    f"That site is on {sheet} — cycle Map to pick that route.",
-                    7000,
-                )
-                return
-            self._route_pick_add(uid, side=side)
-            self._zoom_to_stop_click(by_uid[uid], side)
+        if getattr(self, "_route_pick_mode", False):
+            self._route_pick_click(uid, side)
             return
         idx, stop = self._stop_by_uid(uid)
         if stop is None:

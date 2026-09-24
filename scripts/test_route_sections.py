@@ -308,6 +308,29 @@ def test_pick_scoped_to_one_map() -> None:
     else:
         fail("cycle back", str(win._route_pick_uids))
 
+    # A finished line used to eat the first site click: status changed, order did not.
+    win._route_pick_uids = []
+    win._route_pick_sides = {}
+    win.state.routes_by_map["Day5"] = {
+        "polyline": [[34.0, -118.0], [34.01, -118.01]],
+        "miles": 3.0,
+        "graph": True,
+    }
+    win.state.route = dict(win.state.routes_by_map["Day5"])
+    if win._section_pick_active():
+        fail("stored route should block pick-active before the click")
+    else:
+        ok("stored route looks applied before click")
+    win._on_stop_clicked(f"{a[0]['uid']}|begin")
+    cleared = not (win._ensure_routes_by_map().get("Day5") or {}).get("miles")
+    if win._route_pick_uids == [a[0]["uid"]] and cleared:
+        ok("first site click starts the order")
+    else:
+        fail(
+            "first site click starts the order",
+            f"uids={win._route_pick_uids} miles={win.state.routes_by_map.get('Day5')}",
+        )
+
     from core import route_sections
     applied_b = list(reversed(b))
     merged = route_sections.merge_section_order(list(all_stops), applied_b)

@@ -350,11 +350,220 @@ def test_pick_scoped_to_one_map() -> None:
     _ = app
 
 
+def _site(sid: str, sheet: str, lat: float, lon: float) -> dict:
+    return {
+        "begin_lat": lat, "begin_lon": lon,
+        "end_lat": lat + 0.001, "end_lon": lon + 0.001,
+        "lat": lat, "lon": lon,
+        "street": sid,
+        "excel_sheet": sheet,
+    }
+
+
+def test_excel_day_not_only_together() -> None:
+    print("\n[Day 1 and Day 2 are separate; Together is both]")
+    import tempfile
+    from pathlib import Path
+
+    from core import ingest, route_sections
+
+    sec, src = route_sections.section_for_site(
+        excel_sheet="Week 27 Day 2 Isaac",
+        est_label="Map 1",
+        est_index=0,
+        est_count=2,
+    )
+    if sec == "Day 2" and src == "excel":
+        ok("excel sheet names the day, not Map 1")
+    else:
+        fail("excel sheet names the day", f"{sec} {src}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        map1 = root / "Map 1.est"
+        map2 = root / "Map 2.est"
+        # Both files mention both ids — still one stop per site, day from Excel.
+        map1.write_text("pins 4001 and 10001", encoding="latin-1")
+        map2.write_text("pins 4001 and 10001", encoding="latin-1")
+        sites = {
+            "4001": _site("4001", "Week 27 Day 1 Isaac", 34.0, -118.0),
+            "10001": _site("10001", "Week 27 Day 2 Isaac", 34.2, -117.3),
+        }
+        stops = ingest.match_est_files(
+            [
+                {"path": str(map1), "label": "Map 1"},
+                {"path": str(map2), "label": "Map 2"},
+            ],
+            sites,
+            (34.0, -118.0),
+        )
+    sheets = {s["id"]: s["sheet"] for s in stops}
+    if sheets == {"4001": "Day 1", "10001": "Day 2"} and len(stops) == 2:
+        ok("one stop per site, Excel day", str(sheets))
+    else:
+        fail("one stop per site, Excel day", str(sheets))
+    labels = route_sections.section_labels(stops, ["Map 1", "Map 2"])
+    if labels == ["Day 1", "Day 2"]:
+        ok("filenames with no sites are not extra days", str(labels))
+    else:
+        fail("filenames with no sites are not extra days", str(labels))
+    d1 = [s["id"] for s in route_sections.stops_for_section(stops, "Day 1")]
+    d2 = [s["id"] for s in route_sections.stops_for_section(stops, "Week 27 Day 2 Isaac")]
+    both = route_sections.stops_for_section(stops, "Together")
+    if d1 == ["4001"] and d2 == ["10001"] and len(both) == 2:
+        ok("Day 1, Day 2, and Together each return the right sites")
+    else:
+        fail("day filters", f"d1={d1} d2={d2} both={len(both)}")
+
+    from ui.controllers.map_sync import MapSyncControllerMixin
+
+    class Win(MapSyncControllerMixin):
+        pass
+
+    win = Win()
+    win.state = type("S", (), {})()
+    win.state.stops = [
+        _stop("Week 27 Day 1 Isaac", "4001", 34.0, -118.0),
+        _stop("Week 27 Day 2 Isaac", "10001", 34.2, -117.3),
+    ]
+    win.state.active_files = ["Map 1", "Map 2"]
+    win.state.map_day_filter = "Day 1"
+    shown = [s["id"] for s in win._stops_matching_day_filter()]
+    win.state.map_day_filter = "Together"
+    together = [s["id"] for s in win._stops_matching_day_filter()]
+    if shown == ["4001"] and together == ["4001", "10001"]:
+        ok("map filter: Day 1 alone, Together is both")
+    else:
+        fail("map filter", f"day1={shown} together={together}")
+    if win._route_section_labels() == ["Day 1", "Day 2"]:
+        ok("switcher labels are Day 1 and Day 2")
+    else:
+        fail("switcher labels", str(win._route_section_labels()))
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QComboBox, QHBoxLayout, QWidget
+
+    from ui.controllers.route import RouteControllerMixin
+
+    class PickWin(MapSyncControllerMixin, RouteControllerMixin):
+        def __init__(self) -> None:
+            self._route_pick_mode = False
+            self._route_pick_uids = []
+            self._route_pick_sides = {}
+            self._route_pick_by_map = {}
+            self._route_pick_dialog = None
+            self._manual_grab_mode = False
+            self._map_preview_stops = []
+            self._pick_layout_active = False
+            self._map_js_ready = False
+            self._gps_follow = False
+            self._map_follow = False
+            self._day_filter_prev = "All days"
+            self.current_index = 0
+            self.pickup_index = 0
+            self.pages = type("P", (), {"currentIndex": lambda _s: 1})()
+            self.chk_show_segments = type("C", (), {"isChecked": lambda _s: False})()
+            self._day_btn_host = QWidget()
+            self._day_btn_lay = QHBoxLayout(self._day_btn_host)
+            self.combo_day = QComboBox()
+            self.combo_day.currentTextChanged.connect(self._on_day_filter_changed)
+            self.state = type("S", (), {})()
+            self.state.stops = [
+                _stop("Week 27 Day 1 Isaac", "4001", 34.0, -118.0),
+                _stop("Week 27 Day 2 Isaac", "10001", 34.2, -117.3),
+            ]
+            self.state.active_files = ["Map 1", "Map 2"]
+            self.state.map_day_filter = "All days"
+            self.state.routes_by_map = {}
+            self.state.route = {"polyline": [], "miles": 0.0, "graph": False}
+            self.state.days_merged = False
+            self.state.merged_route = None
+            self.state.home = (34.0, -118.0)
+            self.state.theme = "light"
+            self.state.index_of = lambda uid: next(
+                (i for i, s in enumerate(self.state.stops) if s.get("uid") == uid), -1)
+
+        def _push_state(self, fit: bool = False) -> None:
+            _ = fit
+
+        def _refresh_route_list(self) -> None:
+            return
+
+        def _refresh_route_pick_ui(self, *, sync_dialog: bool = True) -> None:
+            _ = sync_dialog
+
+        def _go_page(self, _i: int) -> None:
+            return
+
+        def _enter_pick_map_focus(self) -> None:
+            return
+
+        def _exit_pick_map_focus(self) -> None:
+            return
+
+        def _end_manual_grab(self, *, silent: bool = True) -> None:
+            _ = silent
+
+        def _hide_route_pick_dialog(self) -> None:
+            return
+
+        def _installed_stops(self):
+            return []
+
+        def statusBar(self):
+            return type("B", (), {"showMessage": lambda *_a, **_k: None})()
+
+    _ = QApplication.instance() or QApplication(sys.argv)
+    pick = PickWin()
+    pick._refresh_day_filter()
+    from PySide6.QtWidgets import QPushButton
+    captions = [b.text() for b in pick._day_btn_host.findChildren(QPushButton)]
+    if captions == ["Day 1", "Day 2", "Together"]:
+        ok("buttons are Day 1, Day 2, Together", str(captions))
+    else:
+        fail("buttons are Day 1, Day 2, Together", str(captions))
+    pick._select_day_button("Day 1")
+    pick._begin_route_pick(list(pick.state.stops))
+    if pick._route_pick_mode and pick._day_filter_value() == "Day 1" and pick._pick_pool_total() == 1:
+        ok("Build route starts on Day 1, one day's sites")
+    else:
+        fail(
+            "Build route starts on Day 1",
+            f"mode={pick._route_pick_mode} day={pick._day_filter_value()} n={pick._pick_pool_total()}",
+        )
+    pick._on_stop_clicked(f"{pick.state.stops[0]['uid']}|begin")
+    if pick._route_pick_uids == [pick.state.stops[0]["uid"]]:
+        ok("Day 1 site click starts the order")
+    else:
+        fail("Day 1 site click starts the order", str(pick._route_pick_uids))
+    pick._select_day_button("Day 2")
+    day2 = [s["id"] for s in pick._stops_matching_day_filter()]
+    if pick._day_filter_value() == "Day 2" and day2 == ["10001"] and pick._route_pick_mode:
+        ok("Day 2 shows only its sites and stays clickable")
+    else:
+        fail(
+            "Day 2 shows only its sites",
+            f"day={pick._day_filter_value()} ids={day2} pick={pick._route_pick_mode}",
+        )
+    pick._on_stop_clicked(f"{pick.state.stops[1]['uid']}|end")
+    if pick._route_pick_uids == [pick.state.stops[1]["uid"]]:
+        ok("Day 2 site click starts that day's order")
+    else:
+        fail("Day 2 site click starts that day's order", str(pick._route_pick_uids))
+    pick._select_day_button("Together")
+    both_ids = [s["id"] for s in pick._stops_matching_day_filter()]
+    if pick._day_filter_value() == "All days" and both_ids == ["4001", "10001"]:
+        ok("Together shows both days")
+    else:
+        fail("Together shows both days", f"day={pick._day_filter_value()} ids={both_ids}")
+
+
 def main() -> int:
     print("ROUTE SECTIONS — two maps, two independent builds\n")
     test_core_helpers()
     test_days_merged_view()
     test_pick_scoped_to_one_map()
+    test_excel_day_not_only_together()
     print()
     if FAILURES:
         print(f"FAIL ({len(FAILURES)})")

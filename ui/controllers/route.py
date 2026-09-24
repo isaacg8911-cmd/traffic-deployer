@@ -101,10 +101,23 @@ class RouteControllerMixin:
                 self._restore_build_button_if_idle()
                 return
 
-        self.state.active_files = [c["label"] for c in cfgs]
+        self.state.active_files = route_sections.section_labels(stops)
 
         old_by_uid = {s["uid"]: s for s in self.state.stops}
-        merged = [ingest.merge_stop_progress(old_by_uid.get(f["uid"]), f) for f in stops]
+        old_by_day = {
+            (route_sections.canonical_section(s.get("sheet")), str(s.get("id") or "")): s
+            for s in self.state.stops
+        }
+
+        def _prior(fresh: dict) -> dict | None:
+            hit = old_by_uid.get(fresh.get("uid"))
+            if hit is not None:
+                return hit
+            return old_by_day.get(
+                (route_sections.canonical_section(fresh.get("sheet")), str(fresh.get("id") or ""))
+            )
+
+        merged = [ingest.merge_stop_progress(_prior(f), f) for f in stops]
         kept = sum(1 for f in merged if f["uid"] in old_by_uid
                    and (old_by_uid[f["uid"]].get("installed") or old_by_uid[f["uid"]].get("skipped")))
         if kept:
@@ -114,14 +127,19 @@ class RouteControllerMixin:
         rebuild_sheet = None
         labels = route_sections.section_labels(merged, self.state.active_files)
         if route_sections.multi_section(merged, self.state.active_files):
-            cur = getattr(self.state, "map_day_filter", "") or ""
+            cur = route_sections.canonical_section(getattr(self.state, "map_day_filter", "") or "")
             if not route_sections.is_all_days(cur) and cur in labels:
                 rebuild_sheet = cur
         self.state.stops = route_sections.preserve_other_section_orders(
             list(old_by_uid.values()), merged, rebuild_sheet=rebuild_sheet)
         keep = set(self.state.active_files)
         stored = getattr(self.state, "routes_by_map", None) or {}
-        self.state.routes_by_map = {k: v for k, v in stored.items() if k in keep}
+        remapped: dict = {}
+        for key, route in stored.items():
+            canon = route_sections.canonical_section(key)
+            if canon in keep and canon not in remapped:
+                remapped[canon] = route
+        self.state.routes_by_map = remapped
         if rebuild_sheet:
             self.state.routes_by_map.pop(rebuild_sheet, None)
         else:
@@ -364,7 +382,9 @@ class RouteControllerMixin:
         if len(queue) > 1:
             extra = f" After Apply, pick {queue[1]} next."
         elif self._route_section_active():
-            extra = " Cycle Map for the other .EST — that route stays as you left it."
+            extra = " Use Day 1, Day 2, or Together — each day keeps its own route."
+        if any(str(s.get("day_source") or "") == "order" for s in self.state.stops):
+            extra += " Day 1 is the first .EST file, Day 2 the second."
         self.statusBar().showMessage(
             f"Pick route on map — {self._pick_prompt_text()}. "
             f"Blue = begin, red = end.{extra}",

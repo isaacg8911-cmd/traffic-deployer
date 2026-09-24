@@ -1,12 +1,19 @@
 """Independent route sections when two (or more) .EST maps are loaded.
 
-Each map keeps its own pick order and polyline. Cycling the Map control
-must not rebuild or wipe the other section.
+Each map keeps its own pick order and polyline. Day 1 and Day 2 are separate
+sections. Together (All days) shows both without mixing their routes.
 """
 from __future__ import annotations
 
+import re
+
 DAY_FILTER_ALL = "All days"
-DAY_FILTER_ALL_ALIASES = frozenset({DAY_FILTER_ALL, "All maps", ""})
+TOGETHER_LABEL = "Together"
+DAY_FILTER_ALL_ALIASES = frozenset({
+    DAY_FILTER_ALL, "All maps", "", TOGETHER_LABEL, "together",
+})
+
+_DAY_NUM = re.compile(r"\bday\s+(\d+)\b", re.I)
 
 
 def empty_route() -> dict:
@@ -14,24 +21,90 @@ def empty_route() -> dict:
 
 
 def is_all_days(label: str | None) -> bool:
-    return str(label or "") in DAY_FILTER_ALL_ALIASES
+    return str(label or "").strip() in DAY_FILTER_ALL_ALIASES
+
+
+def day_number(label: str | None) -> int | None:
+    """``Week 27 Day 1 Isaac`` → 1. Names with no day number stay None."""
+    m = _DAY_NUM.search(str(label or ""))
+    if not m:
+        return None
+    return int(m.group(1))
+
+
+def canonical_section(label: str | None) -> str:
+    """One key for a day. ``Week 14 Day 1 Isaac`` and ``Day 1`` are the same section."""
+    raw = str(label or "").strip()
+    if is_all_days(raw):
+        return DAY_FILTER_ALL
+    n = day_number(raw)
+    if n is not None:
+        return f"Day {n}"
+    return raw
+
+
+def section_for_site(
+    *,
+    excel_sheet: str = "",
+    est_label: str = "",
+    est_index: int = 0,
+    est_count: int = 1,
+) -> tuple[str, str]:
+    """Return ``(section, source)``.
+
+    Excel sheet wins when it says Day N (Map 1.est is often Day 2).
+    Otherwise the .EST filename, otherwise upload order: first file = Day 1.
+    """
+    for src, kind in ((excel_sheet, "excel"), (est_label, "est")):
+        if day_number(src) is not None:
+            return canonical_section(src), kind
+    if est_count >= 2:
+        return f"Day {est_index + 1}", "order"
+    return (str(est_label or "").strip() or "Day 1"), "est"
+
+
+def _order_days(labels: list[str]) -> list[str]:
+    nums = [day_number(x) for x in labels]
+    if labels and all(n is not None for n in nums):
+        return [lab for _, lab in sorted(zip(nums, labels), key=lambda pair: pair[0])]
+    return labels
 
 
 def section_labels(stops: list[dict], active_files: list[str] | None = None) -> list[str]:
-    """Stable map names: upload labels first, then any extra sheets on stops."""
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in list(active_files or []):
-        name = str(raw or "").strip()
-        if name and name not in seen and not is_all_days(name):
-            out.append(name)
-            seen.add(name)
+    """Day names that actually have sites.
+
+    A filename with no matching sites is left out, so Day 1 / Day 2 are not
+    empty entries next to a Together view that has every pin.
+    """
+    stop_names: list[str] = []
+    seen_stops: set[str] = set()
     for stop in stops or []:
-        name = str(stop.get("sheet") or "").strip()
-        if name and name not in seen and not is_all_days(name):
+        name = canonical_section(stop.get("sheet"))
+        if name and not is_all_days(name) and name not in seen_stops:
+            stop_names.append(name)
+            seen_stops.add(name)
+    if not stop_names:
+        out: list[str] = []
+        seen: set[str] = set()
+        for raw in list(active_files or []):
+            name = canonical_section(raw)
+            if name and not is_all_days(name) and name not in seen:
+                out.append(name)
+                seen.add(name)
+        return _order_days(out)
+
+    out = []
+    seen = set()
+    for raw in list(active_files or []):
+        name = canonical_section(raw)
+        if name in seen_stops and name not in seen:
             out.append(name)
             seen.add(name)
-    return out
+    for name in stop_names:
+        if name not in seen:
+            out.append(name)
+            seen.add(name)
+    return _order_days(out)
 
 
 def multi_section(stops: list[dict], active_files: list[str] | None = None) -> bool:
@@ -41,18 +114,22 @@ def multi_section(stops: list[dict], active_files: list[str] | None = None) -> b
 def stops_for_section(stops: list[dict], label: str) -> list[dict]:
     if is_all_days(label):
         return list(stops or [])
-    return [s for s in (stops or []) if str(s.get("sheet") or "") == str(label)]
+    want = canonical_section(label)
+    return [
+        s for s in (stops or [])
+        if canonical_section(s.get("sheet")) == want
+    ]
 
 
 def merge_section_order(all_stops: list[dict], section_ordered: list[dict]) -> list[dict]:
     """Replace one map's visit order; leave every other map's order untouched."""
     if not section_ordered:
         return list(all_stops or [])
-    sheet = str(section_ordered[0].get("sheet") or "")
+    sheet = canonical_section(section_ordered[0].get("sheet"))
     inserted = False
     out: list[dict] = []
     for stop in all_stops or []:
-        if str(stop.get("sheet") or "") == sheet:
+        if canonical_section(stop.get("sheet")) == sheet:
             if not inserted:
                 out.extend(section_ordered)
                 inserted = True
@@ -72,15 +149,15 @@ def preserve_other_section_orders(
     """On re-match, keep visit order for maps that are not being rebuilt."""
     fresh_by_sheet: dict[str, list[dict]] = {}
     for stop in fresh_stops or []:
-        fresh_by_sheet.setdefault(str(stop.get("sheet") or ""), []).append(stop)
+        fresh_by_sheet.setdefault(canonical_section(stop.get("sheet")), []).append(stop)
     old_uids_by_sheet: dict[str, list[str]] = {}
     for stop in old_stops or []:
-        old_uids_by_sheet.setdefault(str(stop.get("sheet") or ""), []).append(stop["uid"])
+        old_uids_by_sheet.setdefault(canonical_section(stop.get("sheet")), []).append(stop["uid"])
 
     sheets: list[str] = []
     seen: set[str] = set()
     for stop in old_stops or []:
-        sheet = str(stop.get("sheet") or "")
+        sheet = canonical_section(stop.get("sheet"))
         if sheet not in seen:
             sheets.append(sheet)
             seen.add(sheet)
@@ -91,7 +168,7 @@ def preserve_other_section_orders(
 
     fresh_by_uid = {s["uid"]: s for s in (fresh_stops or [])}
     out: list[dict] = []
-    rebuild = str(rebuild_sheet or "")
+    rebuild = canonical_section(rebuild_sheet) if rebuild_sheet else ""
     for sheet in sheets:
         group = fresh_by_sheet.get(sheet, [])
         if not group:

@@ -311,6 +311,11 @@ QPushButton#themeBtn {
     background: #1a3a5c; color: #cbd5e1; border: 1px solid #3d5a80;
 }
 QPushButton#themeBtn:checked { background: #c45f14; color: #fff; border: none; }
+QPushButton#dayBtn {
+    padding: 6px 12px; font-size: 12px; font-weight: 700; min-width: 72px;
+    background: #1a3a5c; color: #e2e8f0; border: 1px solid #3d5a80;
+}
+QPushButton#dayBtn:checked { background: #c45f14; color: #fff; border: none; }
 QLineEdit, QPlainTextEdit, QComboBox, QDoubleSpinBox, QSpinBox {
     background: #ffffff; border: 1px solid #94a3b8; border-radius: 6px;
     padding: 6px 8px; color: #0f2744; font-size: 13px;

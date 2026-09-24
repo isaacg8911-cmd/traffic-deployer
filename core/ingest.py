@@ -118,7 +118,7 @@ def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
             file_errors.append(_file_read_hint(path, exc))
             continue
 
-        for _, df in frames.items():
+        for sheet_name, df in frames.items():
             if df is None or df.empty:
                 continue
             cols = list(df.columns)
@@ -160,10 +160,39 @@ def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
                     "end_lat": elat, "end_lon": elon,
                     "lat": (blat + elat) / 2.0, "lon": (blon + elon) / 2.0,
                     "street": street,
+                    "excel_sheet": str(sheet_name or ""),
                 })
     if not sites and file_errors:
         raise IngestFileReadError("\n".join(file_errors))
     return sites
+
+
+def _est_hits(est_configs: list[dict]) -> list[tuple[int, str, str]]:
+    """``(index, label, file text)`` for each .EST that can be read."""
+    loaded: list[tuple[int, str, str]] = []
+    for i, cfg in enumerate(est_configs or []):
+        path, label = cfg.get("path") or "", str(cfg.get("label") or "")
+        try:
+            with open(path, "rb") as f:
+                raw = f.read().decode("latin-1", errors="ignore")
+        except Exception:
+            continue
+        loaded.append((i, label, raw))
+    return loaded
+
+
+def _pick_est(hits: list[tuple[int, str]], day: str) -> tuple[int, str]:
+    """Prefer the .EST whose name is this day. Otherwise a file with no day number."""
+    from core.route_sections import canonical_section, day_number
+
+    if day:
+        named = [(i, lab) for i, lab in hits if canonical_section(lab) == day]
+        if named:
+            return named[0]
+        neutral = [(i, lab) for i, lab in hits if day_number(lab) is None]
+        if neutral:
+            return neutral[0]
+    return hits[0]
 
 
 def match_est_files(est_configs: list[dict], excel_sites: dict[str, dict],
@@ -171,23 +200,52 @@ def match_est_files(est_configs: list[dict], excel_sites: dict[str, dict],
     """Match site IDs found inside .EST map files to the Excel coordinates.
 
     est_configs: list of {"path": str, "label": str}.
-    Returns a list of stop dicts (unordered) ready for the route engine:
-        {id, uid, sheet, street, lat, lon, ...workflow fields...}
-    Overlapping coordinates are nudged apart so pins don't stack (as before).
+    Each stop's ``sheet`` is Day 1 / Day 2 when the Excel sheet (or the .EST
+    name) says so. Map 1.est is not assumed to be Day 1.
+    One site becomes one stop even if its id appears in both map files.
     """
-    stops: list[dict] = []
-    for cfg in est_configs:
-        path, label = cfg["path"], cfg["label"]
-        try:
-            with open(path, "rb") as f:
-                raw = f.read().decode("latin-1", errors="ignore")
-        except Exception:
-            continue
+    _ = home
+    from core.route_sections import canonical_section, day_number, section_for_site
 
-        for sid, data in excel_sites.items():
-            if not re.search(r"\b" + re.escape(sid) + r"\b", raw):
-                continue
-            stops.append(new_stop(sid, label, data))
+    loaded = _est_hits(est_configs)
+    est_count = len(est_configs or [])
+    buckets: dict[str, list[dict]] = {}
+    seen: set[tuple[str, str]] = set()
+    for sid, data in excel_sites.items():
+        hits = [
+            (i, label) for i, label, raw in loaded
+            if re.search(r"\b" + re.escape(str(sid)) + r"\b", raw)
+        ]
+        if not hits:
+            continue
+        excel_sheet = str((data or {}).get("excel_sheet") or "")
+        if day_number(excel_sheet) is not None:
+            day = canonical_section(excel_sheet)
+            chosen_i, chosen_label = _pick_est(hits, day)
+        else:
+            chosen_i, chosen_label = hits[0]
+        section, source = section_for_site(
+            excel_sheet=excel_sheet,
+            est_label=chosen_label,
+            est_index=chosen_i,
+            est_count=est_count,
+        )
+        key = (section, str(sid))
+        if key in seen:
+            continue
+        seen.add(key)
+        stop = new_stop(sid, section, data)
+        stop["est_label"] = chosen_label
+        stop["day_source"] = source
+        buckets.setdefault(section, []).append(stop)
+
+    order = list(buckets)
+    nums = [day_number(name) for name in order]
+    if order and all(n is not None for n in nums):
+        order = [name for _, name in sorted(zip(nums, order), key=lambda pair: pair[0])]
+    stops: list[dict] = []
+    for name in order:
+        stops.extend(buckets[name])
     return stops
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QPushButton
 
 from core import crash_log, geo, ingest
 from core import route_sections
@@ -355,25 +355,30 @@ class MapSyncControllerMixin:
                     or float(composed.get("miles") or 0) > 0
                 ) else route_sections.empty_route()
             return
-        stored = self._ensure_routes_by_map().get(day)
+        key = route_sections.canonical_section(day)
+        stored = self._ensure_routes_by_map().get(key) or self._ensure_routes_by_map().get(day)
         if stored:
             self.state.route = dict(stored)
         elif self._route_pick_mode:
             self.state.route = route_sections.empty_route()
 
     def _set_route_section(self, label: str, *, persist: bool = True) -> None:
-        prev = getattr(self, "_day_filter_prev", None)
-        if prev and prev != label:
+        label = route_sections.canonical_section(label)
+        prev = route_sections.canonical_section(getattr(self, "_day_filter_prev", None))
+        if prev and prev != label and not route_sections.is_all_days(prev):
             self._stash_route_section(prev)
         self.state.map_day_filter = label
         if hasattr(self, "combo_day"):
             idx = self.combo_day.findText(label)
+            if idx < 0:
+                idx = self.combo_day.findText(route_sections.canonical_section(label))
             if idx >= 0 and self.combo_day.currentIndex() != idx:
                 self.combo_day.blockSignals(True)
                 self.combo_day.setCurrentIndex(idx)
                 self.combo_day.blockSignals(False)
         self._day_filter_prev = label
         self._restore_route_section(label)
+        self._sync_day_buttons()
         if persist:
             try:
                 self.state.save()
@@ -403,9 +408,9 @@ class MapSyncControllerMixin:
         elif self.pages.currentIndex() == 3:
             self._refresh_pickup()
         self._push_state(fit=True)
-        n = labels.index(nxt) + 1 if nxt in labels else 1
+        n = len(self._stops_matching_day_filter())
         self.statusBar().showMessage(
-            f"Map {n}/{len(labels)} — {nxt}. Route for this map only.", 8000)
+            f"{self._day_button_caption(nxt)} — {n} sites. This day only.", 8000)
 
     def _cycle_map_prev(self) -> None:
         self._cycle_route_section(-1)
@@ -431,6 +436,72 @@ class MapSyncControllerMixin:
         elif self.pages.currentIndex() == 3:
             self._refresh_pickup()
         self._push_state(fit=True)
+        if self._day_filter_active() and not self._stops_matching_day_filter():
+            self.statusBar().showMessage(f"{label} has no sites.", 6000)
+
+    def _day_button_caption(self, label: str) -> str:
+        if route_sections.is_all_days(label):
+            return route_sections.TOGETHER_LABEL
+        return route_sections.canonical_section(label) or label
+
+    def _select_day_button(self, caption: str) -> None:
+        label = route_sections.DAY_FILTER_ALL if caption == route_sections.TOGETHER_LABEL else caption
+        if not hasattr(self, "combo_day"):
+            self._set_route_section(label)
+            return
+        idx = self.combo_day.findText(label)
+        if idx < 0:
+            idx = self.combo_day.findText(route_sections.canonical_section(label))
+        if idx < 0:
+            return
+        if self.combo_day.currentIndex() != idx:
+            self.combo_day.setCurrentIndex(idx)
+        else:
+            self._on_day_filter_changed()
+
+    def _sync_day_buttons(self) -> None:
+        host = getattr(self, "_day_btn_host", None)
+        if host is None or not hasattr(self, "combo_day"):
+            return
+        current = self.combo_day.currentText() if self.combo_day.count() else ""
+        for btn in host.findChildren(QPushButton):
+            btn.setChecked(btn.text() == self._day_button_caption(current))
+
+    def _rebuild_day_buttons(self) -> None:
+        lay = getattr(self, "_day_btn_lay", None)
+        host = getattr(self, "_day_btn_host", None)
+        if lay is None or host is None or not hasattr(self, "combo_day"):
+            return
+        while lay.count():
+            item = lay.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        labels = [
+            self.combo_day.itemText(i)
+            for i in range(self.combo_day.count())
+            if self.combo_day.itemText(i)
+        ]
+        use_buttons = 2 <= sum(1 for lab in labels if not route_sections.is_all_days(lab)) <= 4
+        host.setVisible(use_buttons)
+        if hasattr(self, "combo_day"):
+            self.combo_day.setVisible(not use_buttons)
+        for lab in labels:
+            if not use_buttons:
+                break
+            caption = self._day_button_caption(lab)
+            btn = QPushButton(caption)
+            btn.setObjectName("dayBtn")
+            btn.setCheckable(True)
+            btn.setMinimumWidth(76)
+            if route_sections.is_all_days(lab):
+                btn.setToolTip("Both days on the map. Each day still has its own route.")
+            else:
+                btn.setToolTip(f"{caption} sites only. Build route, then click the blue and red dots.")
+            btn.clicked.connect(lambda _checked=False, cap=caption: self._select_day_button(cap))
+            lay.addWidget(btn)
+        self._sync_day_buttons()
 
     def _day_filter_value(self) -> str:
         if hasattr(self, "combo_day") and self.combo_day.count():
@@ -461,8 +532,12 @@ class MapSyncControllerMixin:
             return True
         if self._route_pick_uids:
             return True
-        day = self._day_filter_value()
-        stored = self._ensure_routes_by_map().get(day) or {}
+        day = route_sections.canonical_section(self._day_filter_value())
+        stored = (
+            self._ensure_routes_by_map().get(day)
+            or self._ensure_routes_by_map().get(self._day_filter_value())
+            or {}
+        )
         if stored.get("polyline") or float(stored.get("miles") or 0) > 0:
             return False
         return True
@@ -473,43 +548,50 @@ class MapSyncControllerMixin:
         day = self._day_filter_value()
         if route_sections.is_all_days(day):
             return list(range(len(self.state.stops)))
-        return [i for i, s in enumerate(self.state.stops) if s.get("sheet") == day]
+        want = route_sections.canonical_section(day)
+        return [
+            i for i, s in enumerate(self.state.stops)
+            if route_sections.canonical_section(s.get("sheet")) == want
+        ]
 
     def _stops_matching_day_filter(self, stops: list[dict] | None = None) -> list[dict]:
         base = stops if stops is not None else self.state.stops
         if not base:
             return []
-        day = self._day_filter_value()
-        if route_sections.is_all_days(day):
-            return list(base)
-        return [s for s in base if s.get("sheet") == day]
+        return route_sections.stops_for_section(base, self._day_filter_value())
 
     def _refresh_day_filter(self):
         if not hasattr(self, "combo_day"):
             return
-        cur = self.state.map_day_filter or self.combo_day.currentText()
-        if cur == "All maps":
-            cur = DAY_FILTER_ALL
+        cur = route_sections.canonical_section(
+            self.state.map_day_filter or self.combo_day.currentText() or DAY_FILTER_ALL)
         self.combo_day.blockSignals(True)
         self.combo_day.clear()
-        self.combo_day.addItem(DAY_FILTER_ALL)
         for label in self._route_section_labels():
             if label and self.combo_day.findText(label) < 0:
                 self.combo_day.addItem(label)
+        day_count = self.combo_day.count()
+        if day_count >= 2:
+            self.combo_day.addItem(DAY_FILTER_ALL)
         idx = self.combo_day.findText(cur)
-        self.combo_day.setCurrentIndex(idx if idx >= 0 else 0)
+        if idx < 0:
+            idx = 0
+        self.combo_day.setCurrentIndex(idx if self.combo_day.count() else -1)
         self.combo_day.blockSignals(False)
-        self.state.map_day_filter = self.combo_day.currentText()
+        if self.combo_day.count():
+            self.state.map_day_filter = self.combo_day.currentText()
         self._day_filter_prev = self.state.map_day_filter
-        show = self.combo_day.count() > 2
+        show = day_count >= 2
         if hasattr(self, "_day_filter_wrap"):
             self._day_filter_wrap.setVisible(show)
         if hasattr(self, "lbl_day_filter"):
-            self.lbl_day_filter.setText("Map" if show else "Sites")
+            self.lbl_day_filter.setText("Show" if show else "Sites")
+        self._rebuild_day_buttons()
+        use_buttons = bool(getattr(self, "_day_btn_host", None) and self._day_btn_host.isVisible())
         for attr in ("btn_map_prev", "btn_map_next"):
             btn = getattr(self, attr, None)
             if btn is not None:
-                btn.setVisible(show)
+                btn.setVisible(show and not use_buttons)
         if hasattr(self, "btn_merge_days"):
             self.btn_merge_days.setVisible(self._route_section_active())
 
@@ -542,10 +624,8 @@ class MapSyncControllerMixin:
     def _section_pick_tag(self) -> str:
         if not self._route_section_active() or not self._day_filter_active():
             return ""
-        labels = self._route_section_labels()
-        day = self._day_filter_value()
-        n = labels.index(day) + 1 if day in labels else 1
-        return f"Map {n}/{len(labels)} {day} — "
+        day = route_sections.canonical_section(self._day_filter_value())
+        return f"{day} — "
 
     def _pick_prompt_text(self) -> str:
         n = len(self._route_pick_uids)

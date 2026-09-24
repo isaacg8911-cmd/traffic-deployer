@@ -60,11 +60,30 @@ def _est_sheet_label(est_path: str) -> str:
 
 
 def _stops_for_sheet(stops: list[dict], sheet: str) -> list[dict]:
+    """Match an .EST filename to its sites.
+
+    New jobs store ``sheet`` as Day 1 / Day 2 and ``est_label`` as the file
+    stem. Older jobs stored the file stem in ``sheet``.
+    """
+    from core.route_sections import canonical_section, day_number
+
     want = _normalize_sheet_name(sheet)
-    return [
+    by_est = [
         s for s in stops
-        if _normalize_sheet_name(str(s.get("sheet", ""))) == want
+        if _normalize_sheet_name(str(s.get("est_label") or "")) == want
     ]
+    if by_est:
+        return by_est
+    by_sheet = [
+        s for s in stops
+        if _normalize_sheet_name(str(s.get("sheet") or "")) == want
+    ]
+    if by_sheet:
+        return by_sheet
+    if day_number(want) is None:
+        return []
+    day = canonical_section(want)
+    return [s for s in stops if canonical_section(s.get("sheet")) == day]
 
 
 def _installed_missing_gps(stops: list[dict]) -> list[str]:

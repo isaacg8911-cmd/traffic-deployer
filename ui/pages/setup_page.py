@@ -284,8 +284,8 @@ def build_setup_page(win) -> QWidget:
     win.btn_build.setObjectName("primary")
     win.btn_build.setToolTip(
         "Opens the map so you tap stop order: blue dot = begin, red dot = end. "
-        "Two .EST maps: pick Day 1, then Day 2. Optional Merge after both are picked. "
-        "Writes HTML install lists (merged + one file per day).")
+        "Day 1 and Day 2 each show their own sites. Together shows both. "
+        "Optional Merge after both days are picked.")
     win.btn_build.clicked.connect(win._build_route_from_uploads)
     win.btn_build.setMinimumHeight(44)
     button_row(sec_route, win.btn_build)

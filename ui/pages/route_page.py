@@ -15,11 +15,15 @@ from PySide6.QtWidgets import (
 )
 
 from ui.simple_mode import SIMPLE_MODE
-from ui.widgets import button_row, numbered_section, page_column, section_group, section_heading
+from ui.widgets import button_row, more_panel, numbered_section, page_column, page_with_footer, section_group
 
 
 def build_route_page(win) -> QWidget:
-    w, v = page_column()
+    if SIMPLE_MODE:
+        w, v, foot, _footer = page_with_footer()
+    else:
+        w, v = page_column()
+        foot = v
 
     win.lbl_route_summary = QLabel("")
     win.lbl_route_summary.setObjectName("tabContextLine")
@@ -37,28 +41,25 @@ def build_route_page(win) -> QWidget:
     win.lbl_drive_banner.hide()
     v.addWidget(win.lbl_drive_banner)
 
-    if SIMPLE_MODE:
-        sec_drive, _ = numbered_section(1, "Navigate", v)
-    else:
-        sec_drive = section_group("Navigate", v)
     win.btn_start = QPushButton("Follow GPS")
     win.btn_start.setObjectName("go")
     win.btn_start.setToolTip("GPS marker stays live; map recenters only when you tap Follow.")
     win.btn_start.clicked.connect(win._toggle_drive)
     if SIMPLE_MODE:
+        win.btn_start.setMinimumHeight(44)
+        foot.addWidget(win.btn_start)
         win.btn_pick_on_map = QPushButton("Pick on map")
         win.btn_pick_on_map.setObjectName("secondary")
         win.btn_pick_on_map.setToolTip(
             "Choose stop order by tapping blue (begin) and red (end) dots on the map.")
         win.btn_pick_on_map.clicked.connect(win._start_pick_route_from_route_tab)
-        button_row(sec_drive, win.btn_start, win.btn_pick_on_map)
         win.btn_merge_days = QPushButton("Merge days")
         win.btn_merge_days.setObjectName("secondary")
         win.btn_merge_days.setToolTip(
             "After Day 1 and Day 2 exist: one new best driving order from all sites, by location.")
         win.btn_merge_days.clicked.connect(win._offer_merge_days)
-        sec_drive.addWidget(win.btn_merge_days)
     else:
+        sec_drive = section_group("Navigate", v)
         sec_drive.addWidget(win.btn_start)
 
     sec_pick_lay = section_group("Plan route", v)
@@ -110,6 +111,7 @@ def build_route_page(win) -> QWidget:
     win.btn_pick_clear.clicked.connect(win._route_pick_clear)
     win.btn_pick_apply = QPushButton("Apply route")
     win.btn_pick_apply.setObjectName("primary")
+    win.btn_pick_apply.setMinimumHeight(44)
     win.btn_pick_apply.clicked.connect(win._route_pick_apply)
     button_row(sec_pick_lay, win.btn_pick_clear, win.btn_pick_apply)
     win.btn_pick_order_win = QPushButton("Route order window")
@@ -120,12 +122,6 @@ def build_route_page(win) -> QWidget:
     if SIMPLE_MODE and sec_pick is not None:
         sec_pick.hide()
 
-    map_step = 2 if SIMPLE_MODE else None
-    if SIMPLE_MODE:
-        sec_map_lay, _ = numbered_section(map_step, "Map", v)
-    else:
-        sec_map_lay = section_group("Map", v)
-    sec_map = sec_map_lay.parentWidget() if not SIMPLE_MODE else None
     win.chk_show_segments = QCheckBox("Site lines")
     win.chk_show_segments.setChecked(False)
     win.chk_show_segments.hide()
@@ -133,13 +129,15 @@ def build_route_page(win) -> QWidget:
     b_fit = QPushButton("Zoom all")
     b_fit.setObjectName("secondary")
     b_fit.clicked.connect(lambda: win._push_state(fit=True))
-    button_row(sec_map_lay, win.chk_show_segments, b_fit)
 
-    stops_step = 3 if SIMPLE_MODE else None
     if SIMPLE_MODE:
-        sec_stops_lay, _ = numbered_section(stops_step, "Stops", v)
+        sec_stops_lay, _ = numbered_section(1, "Stops", v)
+        sec_map = None
         sec_stops = None
     else:
+        sec_map_lay = section_group("Map", v)
+        sec_map = sec_map_lay.parentWidget()
+        button_row(sec_map_lay, win.chk_show_segments, b_fit)
         sec_stops_lay = section_group("Stops", v, stretch=1)
         sec_stops = sec_stops_lay.parentWidget()
     win.list_route = QListWidget()
@@ -165,18 +163,6 @@ def build_route_page(win) -> QWidget:
     b_reset = QPushButton("Clear shift…")
     b_reset.setObjectName("secondary")
     b_reset.clicked.connect(win._reset_route)
-    button_row(sec_stops_lay, b_up, b_dn, b_retrace)
-    button_row(sec_stops_lay, b_reopt, b_reset)
-
-    phone_heading = "Export" if SIMPLE_MODE else "Phone links"
-    if SIMPLE_MODE:
-        sec_phone_lay = QVBoxLayout()
-        section_heading(phone_heading, v)
-        v.addLayout(sec_phone_lay)
-        sec_phone = None
-    else:
-        sec_phone_lay = section_group(phone_heading, v)
-        sec_phone = sec_phone_lay.parentWidget()
     b_install_links = QPushButton("HTML route")
     b_install_links.setObjectName("secondary")
     b_install_links.setToolTip(
@@ -187,10 +173,26 @@ def build_route_page(win) -> QWidget:
     b_pickup_links.setObjectName("secondary")
     b_pickup_links.setToolTip("Save HTML with one link per installed site, oldest first.")
     b_pickup_links.clicked.connect(win._save_pickup_nav_links)
-    button_row(sec_phone_lay, b_install_links, b_pickup_links)
+
+    if SIMPLE_MODE:
+        _more_btn, more_lay = more_panel(v)
+        button_row(more_lay, win.btn_pick_on_map, win.btn_merge_days)
+        button_row(more_lay, b_fit)
+        more_lay.addWidget(win.chk_show_segments)
+        button_row(more_lay, b_up, b_dn, b_retrace)
+        button_row(more_lay, b_reopt, b_reset)
+        button_row(more_lay, b_install_links, b_pickup_links)
+        sec_phone = None
+        win._route_fold_boxes = []
+    else:
+        button_row(sec_stops_lay, b_up, b_dn, b_retrace)
+        button_row(sec_stops_lay, b_reopt, b_reset)
+        sec_phone_lay = section_group("Phone links", v)
+        sec_phone = sec_phone_lay.parentWidget()
+        button_row(sec_phone_lay, b_install_links, b_pickup_links)
+        win._route_fold_boxes = [sec_pick, sec_map, sec_stops]
+        if sec_phone is not None:
+            win._route_fold_boxes.append(sec_phone)
 
     win.lbl_stat_stops = win.lbl_stat_miles = win.lbl_stat_kind = None
-    win._route_fold_boxes = [sec_pick, sec_map, sec_stops]
-    if sec_phone is not None:
-        win._route_fold_boxes.append(sec_phone)
     return w

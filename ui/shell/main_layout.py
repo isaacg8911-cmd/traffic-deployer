@@ -235,6 +235,8 @@ class ShellLayoutMixin:
 
     def _page_shell(self, w: QWidget) -> QWidget:
         """Scrollable tab body — prevents overlap when panel height is tight."""
+        if w.property("ownsScroll"):
+            return w
         scroll = QScrollArea()
         scroll.setObjectName("pageScroll")
         scroll.setWidgetResizable(True)

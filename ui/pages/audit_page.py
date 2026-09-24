@@ -12,11 +12,15 @@ from PySide6.QtWidgets import (
 
 from ui.simple_mode import COMPACT_UI
 from ui.spacing import apply_grid
-from ui.widgets import button_row, page_column
+from ui.widgets import button_row, more_panel, page_column, page_with_footer
 
 
 def build_audit_page(win) -> QWidget:
-    w, v = page_column()
+    if COMPACT_UI:
+        w, v, foot, _footer = page_with_footer()
+    else:
+        w, v = page_column()
+        foot = v
 
     win.lbl_shift_summary = QLabel("")
     win.lbl_shift_summary.setWordWrap(True)
@@ -27,11 +31,6 @@ def build_audit_page(win) -> QWidget:
     win.lbl_audit.setWordWrap(True)
     win.lbl_audit.setObjectName("hint")
     v.addWidget(win.lbl_audit)
-
-    b_refresh_sum = QPushButton("Refresh")
-    b_refresh_sum.setObjectName("secondary")
-    b_refresh_sum.clicked.connect(win._refresh_audit)
-    button_row(v, b_refresh_sum)
 
     lbl_sheet = QLabel("Live shift data — same columns as handoff Excel")
     lbl_sheet.setObjectName("hint")
@@ -53,17 +52,27 @@ def build_audit_page(win) -> QWidget:
 
     b_xlsx = QPushButton("Handoff export")
     b_xlsx.setObjectName("primary")
+    b_xlsx.setMinimumHeight(44)
     b_xlsx.clicked.connect(win._export_excel)
 
     if COMPACT_UI:
+        _more_btn, more_lay = more_panel(v)
+        b_refresh_sum = QPushButton("Refresh")
+        b_refresh_sum.setObjectName("secondary")
+        b_refresh_sum.clicked.connect(win._refresh_audit)
         b_xlsx_quick = QPushButton("Quick handoff")
         b_xlsx_quick.clicked.connect(win._export_excel_quick)
         b_csv_quick = QPushButton("Quick CSV")
         b_csv_quick.setObjectName("secondary")
         b_csv_quick.clicked.connect(win._export_csv_quick)
-        button_row(v, b_xlsx, b_xlsx_quick)
-        button_row(v, b_csv_quick)
+        button_row(more_lay, b_refresh_sum)
+        button_row(more_lay, b_xlsx_quick, b_csv_quick)
+        foot.addWidget(b_xlsx)
     else:
+        b_refresh_sum = QPushButton("Refresh")
+        b_refresh_sum.setObjectName("secondary")
+        b_refresh_sum.clicked.connect(win._refresh_audit)
+        button_row(v, b_refresh_sum)
         grid = QGridLayout()
         apply_grid(grid)
         grid.addWidget(b_xlsx, 0, 0, 1, 2)

@@ -97,6 +97,39 @@ def main() -> int:
             fails.append(f"{name}@{width}px: " + "; ".join(bad[:6]))
         else:
             print(f"  OK  {name} @{width}px — no truncated buttons")
+        page = builder(w)
+        for btn in page.findChildren(QPushButton):
+            if btn.text().strip() == "Show more":
+                btn.click()
+                QApplication.instance().processEvents()
+                break
+        bad_more = _truncated_buttons(page, width)
+        if bad_more:
+            fails.append(f"{name} more @{width}px: " + "; ".join(bad_more[:6]))
+        else:
+            print(f"  OK  {name} more @{width}px — no truncated buttons")
+    must_show = {
+        "setup": "USB GPS",
+        "route": "Follow GPS",
+        "install": "INSTALL  (I)",
+        "pickup": "SECURED",
+    }
+    pages = {
+        "setup": build_setup_page(w),
+        "route": build_route_page(w),
+        "install": build_install_page(w),
+        "pickup": build_pickup_page(w),
+    }
+    for name, label in must_show.items():
+        texts = {
+            btn.text().strip()
+            for btn in pages[name].findChildren(QPushButton)
+            if not btn.isHidden()
+        }
+        if label not in texts:
+            fails.append(f"{name} missing visible primary {label!r}")
+        else:
+            print(f"  OK  {name} primary {label!r} visible")
     if fails:
         for f in fails:
             print(f"  FAIL {f}")

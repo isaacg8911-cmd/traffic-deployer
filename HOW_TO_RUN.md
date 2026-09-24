@@ -31,8 +31,9 @@ The app has two modes:
 | **Home setup (online)** | Default when you open the app at home | Address search, download road map, BUILD ROUTE |
 | **Field mode (offline)** | After you tap **Go offline** (top bar) | Map, GPS, driving, installs, export — all local; no internet calls |
 
-**At home or on Tailscale:** leave the app in online mode until setup is done, then tap **Go offline** (top bar)
-(Setup → *Before you leave*). Status bar shows `Home setup · online`.
+**At home or on Tailscale:** leave the app in online mode until setup is done, then tap **Go offline**
+(top bar, or the bottom of Setup once the route is built). Each tab keeps one main button.
+Extra tools sit under **Show more**.
 
 **App update (work laptop):** on the home PC run **`UPDATE_LAPTOP.bat`**. On the laptop keep Tailscale
 connected, then **OPEN_APP.bat** or **WIFI_UPDATE_NOW.bat**. Map and shift data in `tds_data\` stay put.

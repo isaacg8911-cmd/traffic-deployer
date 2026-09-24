@@ -236,6 +236,19 @@ class ShellTopbarMixin:
             lbl.setObjectName(f"stepHeader{step['status'].title()}")
             lbl.style().unpolish(lbl)
             lbl.style().polish(lbl)
+        blocks = getattr(self, "_setup_step_blocks", None)
+        if blocks:
+            more_open = bool(getattr(self, "_setup_more_open", False))
+            current = next((s["id"] for s in steps if s["status"] == "current"), "drive")
+            for sid, block in blocks.items():
+                block.setVisible(more_open or sid == current)
+            go = getattr(self, "btn_setup_go_offline", None)
+            if go is not None:
+                show_go = current == "drive" and not bool(self.state.offline_mode)
+                foot = getattr(self, "_setup_footer", None)
+                if foot is not None:
+                    foot.setVisible(show_go)
+                go.setVisible(show_go)
 
     def _refresh_field_ready(self):
         if not hasattr(self, "lbl_field_score"):

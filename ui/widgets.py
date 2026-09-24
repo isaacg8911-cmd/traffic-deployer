@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -52,6 +54,75 @@ class WorkflowStrip(QFrame):
                 arr.setObjectName("workflowArrow")
                 arr.setAlignment(Qt.AlignCenter)
                 self._lay.addWidget(arr)
+
+
+def page_with_footer() -> tuple[QWidget, QVBoxLayout, QVBoxLayout, QWidget]:
+    """Scrolling job column plus a commit bar that stays on screen."""
+    outer = QWidget()
+    outer.setProperty("ownsScroll", True)
+    outer_lay = QVBoxLayout(outer)
+    outer_lay.setContentsMargins(0, 0, 0, 0)
+    outer_lay.setSpacing(0)
+    scroll = QScrollArea()
+    scroll.setObjectName("pageScroll")
+    scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll.setFrameShape(QFrame.NoFrame)
+    inner, inner_lay = page_column()
+    inner.setMinimumWidth(300)
+    scroll.setWidget(inner)
+    footer = QWidget()
+    footer.setObjectName("pageFooter")
+    foot = QVBoxLayout(footer)
+    apply_page_layout(foot)
+    outer_lay.addWidget(scroll, 1)
+    outer_lay.addWidget(footer)
+    return outer, inner_lay, foot, footer
+
+
+def more_body() -> tuple[QWidget, QVBoxLayout]:
+    """Hidden tool stack. Call attach_more when the page is ready to place it."""
+    body = QWidget()
+    lay = QVBoxLayout(body)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(ROW_GAP)
+    body.hide()
+    return body, lay
+
+
+def attach_more(parent_layout: QVBoxLayout, body: QWidget, on_toggle=None) -> QPushButton:
+    """Place Show more, then the tool stack, at the end of the job column."""
+    toggle = QPushButton("Show more")
+    toggle.setObjectName("secondary")
+    toggle.setCheckable(True)
+
+    def _toggle(checked: bool) -> None:
+        body.setVisible(checked)
+        toggle.setText("Hide more" if checked else "Show more")
+        if on_toggle is not None:
+            on_toggle(checked)
+
+    toggle.toggled.connect(_toggle)
+    parent_layout.addWidget(toggle)
+    parent_layout.addWidget(body)
+    return toggle
+
+
+def more_panel(parent_layout: QVBoxLayout) -> tuple[QPushButton, QVBoxLayout]:
+    """Collapsed extra tools. The returned layout is where those tools go."""
+    body, lay = more_body()
+    toggle = attach_more(parent_layout, body)
+    return toggle, lay
+
+
+def step_block(parent_layout: QVBoxLayout) -> tuple[QWidget, QVBoxLayout]:
+    """One setup step that can be shown or hidden as a unit."""
+    box = QWidget()
+    lay = QVBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(ROW_GAP)
+    parent_layout.addWidget(box)
+    return box, lay
 
 
 def page_column(parent: QWidget | None = None) -> tuple[QWidget, QVBoxLayout]:

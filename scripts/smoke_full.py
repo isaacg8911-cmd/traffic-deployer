@@ -550,7 +550,7 @@ def test_web_assets():
         text=True,
     )
     check("ui button layout", proc_btn.returncode == 0, (proc_btn.stdout or proc_btn.stderr or "")[-400:])
-    for _name in ("test_site_bind.py", "test_bug_sweep.py"):
+    for _name in ("test_site_bind.py", "test_bug_sweep.py", "test_qa_ledger.py"):
         _p = subprocess.run(
             [sys.executable, os.path.join(ROOT, "scripts", _name)],
             cwd=ROOT, capture_output=True, text=True,

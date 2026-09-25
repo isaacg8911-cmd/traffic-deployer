@@ -20,6 +20,14 @@ Read **SCOPE.md** and **SCOPE_PACKAGES.md**. Workflow: **HOW_TO_RUN.md**, **STAR
 - `SMOKE.bat` or `python scripts/smoke_full.py` for routing/core/persistence/web.
 - `START.bat` for UI/map changes.
 
+## Before any AppUpdate ships (`FP-SHIP-UNREVIEWED`)
+
+1. Adversarial review of every change since the last shipped version — parallel reviewers hunting failure modes (GPS loss, missing/locked files, double taps, thread races, partial writes, stale state). Your own tests are not the review.
+2. Fix each finding or add it to `qa/bug_ledger.json` (severity `field-critical` | `major` | `minor`).
+3. `python scripts/qa_ledger.py record-review --since <last shipped version> --summary "..."`.
+4. `scripts/pre_app_update_gate.py` must pass — it blocks on a stale review or any open field-critical bug (Director waiver = `director_waiver` on that bug).
+5. Ship report + `[Cursor Log]` end with `python scripts/qa_ledger.py report` (ranked **Next up**) — never a bare "what next?".
+
 ## Structure
 
 - **core/** logic · **main.py** shell (target ≤1200 lines; use **P46** before new feature packages) · **web/** map · **scripts/** smoke

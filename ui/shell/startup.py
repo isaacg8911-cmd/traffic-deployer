@@ -55,6 +55,7 @@ class ShellStartupMixin:
         self._pick_side_mode = "begin"  # begin | end — list picks only; map dots set the side
         self._route_pick_dialog: RoutePickOrderDialog | None = None
         self._manual_grab_mode = False
+        self._pin_flush_busy = False
         self._follow_before_manual_grab = False
         self._picocount_thread = None
         self._counter_serial_grab_uid: str | None = None

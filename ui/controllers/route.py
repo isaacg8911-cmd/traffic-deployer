@@ -1269,10 +1269,14 @@ class RouteControllerMixin:
             return
         row = self.list_route.row(item)
         visible = self._visible_stop_indices()
-        if row < len(visible):
-            self.current_index = visible[row]
-        else:
-            self.current_index = row
+        idx = visible[row] if row < len(visible) else row
+        if not (0 <= idx < len(self.state.stops)):
+            return
+        if self.pages.currentIndex() == 2:
+            # Already on Install: flush form + end Drop pin before switching.
+            self._select_install_stop(idx)
+            return
+        self.current_index = idx
         self._go_page(2)
         self._center_current()
 

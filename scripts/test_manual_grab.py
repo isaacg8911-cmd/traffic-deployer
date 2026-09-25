@@ -58,6 +58,7 @@ def main() -> int:
     from main import MainWindow
 
     w = Win()
+    w._site_window_ok = lambda idx, la, lo: MainWindow._site_window_ok(w, idx, la, lo)
     ok = MainWindow._save_field_position(w, 33.77, -117.94, source="manual")
     s = w.state.stops[0]
     if not ok or s.get("field_lat") != 33.77 or s.get("field_coord_source") != "manual":

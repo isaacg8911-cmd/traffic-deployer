@@ -1002,6 +1002,10 @@ def test_gps_only():
     rc, out = _run_script("test_grab_gps_safe.py")
     check("test_grab_gps_safe.py", rc == 0, out[-400:])
 
+    print("[gps / pin bound to chosen site]")
+    rc, out = _run_script("test_site_bind.py")
+    check("test_site_bind.py", rc == 0, out[-400:])
+
     print("[gps wiring]")
     appjs = open(os.path.join(WEB_DIR, "app.js"), encoding="utf-8").read()
     sm_src = open(os.path.join(ROOT, "ui", "simple_mode.py"), encoding="utf-8").read()

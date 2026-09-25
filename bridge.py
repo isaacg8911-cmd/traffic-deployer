@@ -99,12 +99,12 @@ class MapBridge(QObject):
         draggable: bool = False,
     ) -> None:
         """Place the install field pin immediately — distinct from the live GPS dot."""
-        _ = (uid, site_id, pending)
+        _ = (site_id, pending)
         src = _dumps(str(source or "gps"))
         drag = "true" if draggable else "false"
         self._run(
             f"window.__tdSetFieldPin && window.__tdSetFieldPin("
-            f"{float(lat)}, {float(lon)}, {src}, {drag})"
+            f"{float(lat)}, {float(lon)}, {src}, {drag}, {_dumps(str(uid or ''))})"
         )
 
     def clear_field_pin(self) -> None:

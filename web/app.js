@@ -203,7 +203,8 @@
     var draggable = !!opts.draggable;
     if (fieldPinMarker) {
       var same = fieldPinMarker._tdLat === lat && fieldPinMarker._tdLon === lon &&
-        fieldPinMarker._tdSource === src && fieldPinMarker._tdDraggable === draggable;
+        fieldPinMarker._tdSource === src && fieldPinMarker._tdDraggable === draggable &&
+        fieldPinMarker._tdUid === (opts.uid || '');
       if (same) return;
       fieldPinMarker.remove();
       fieldPinMarker = null;
@@ -245,6 +246,11 @@
   }
 
   function syncFieldPinFromState(state) {
+    // A pin always belongs to one site — never carry it onto the next one.
+    if (fieldPinMarker && state && fieldPinMarker._tdUid &&
+        fieldPinMarker._tdUid !== (state.current_uid || '')) {
+      clearFieldPinMarker();
+    }
     if (!state || !state.on_install || !state.current_uid) {
       if (!state || state.map_mode !== 'manual_grab') clearFieldPinMarker();
       return;
@@ -1192,11 +1198,10 @@
     map.flyTo({ center: [lon, lat], zoom: z, duration: 600 });
   };
   window.__tdSetFollow = function (on) { setFollow(!!on, true); };
-  window.__tdSetFieldPin = function (lat, lon, source, draggable) {
-    var uid = '';
+  window.__tdSetFieldPin = function (lat, lon, source, draggable, pinUid) {
+    var uid = pinUid || (lastState && lastState.current_uid) || '';
     var siteId = '';
-    if (lastState && lastState.current_uid) {
-      uid = lastState.current_uid;
+    if (uid && lastState) {
       (lastState.stops || []).forEach(function (s, i) {
         if (s.uid === uid) siteId = siteIdLabel(s, i);
       });
@@ -1211,7 +1216,7 @@
   window.__tdClearFieldPin = function () { clearFieldPinMarker(); };
   window.__tdConfirmDropPin = function () {
     if (!fieldPinMarker) return null;
-    return { lat: fieldPinMarker._tdLat, lon: fieldPinMarker._tdLon };
+    return { lat: fieldPinMarker._tdLat, lon: fieldPinMarker._tdLon, uid: fieldPinMarker._tdUid || '' };
   };
   window.__tdFrameNextSite = frameNextSite;
   window.__spreadCollocated = spreadCollocated;

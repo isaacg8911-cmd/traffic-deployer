@@ -39,6 +39,12 @@ class ShortcutsControllerMixin:
     def _undo_last_action(self):
         if not self._undo_stack:
             return
+        if getattr(self, "_pin_flush_busy", False):
+            self.statusBar().showMessage("Saving pin — tap Undo again.", 3000)
+            return
+        if getattr(self, "_manual_grab_mode", False):
+            self._end_manual_grab(silent=True, then=self._undo_last_action)
+            return
         entry = self._undo_stack.pop()
         idx = self.state.index_of(entry["uid"])
         if idx < 0:

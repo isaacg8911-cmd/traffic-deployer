@@ -90,7 +90,24 @@ def candidate_gps_ports(preferred_port: str | None = None) -> list[str]:
     ports = list_serial_ports()
     usable = [p for p in ports if p and not _is_skip_port(p)]
     gps_like = [p for p in usable if _is_likely_gps_port(p)]
-    return gps_like or usable
+    if gps_like:
+        return gps_like
+    # Never probe the PicoCount FTDI cable as a GPS — it locks the counter's COM port.
+    return [p for p in usable if "vid_0403" not in _port_blob(p) and "ftdi" not in _port_blob(p)]
+
+
+FIX_STALE_S = 5.0
+
+
+def _reports_no_fix(msg) -> bool:
+    """RMC/GLL status 'V' or GGA quality 0 — receiver says it lost the fix."""
+    if getattr(msg, "status", None) == "V":
+        return True
+    qual = getattr(msg, "gps_qual", None)
+    try:
+        return qual not in (None, "") and int(qual) == 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _valid_fix(msg) -> tuple[float, float] | None:
@@ -99,6 +116,8 @@ def _valid_fix(msg) -> tuple[float, float] | None:
     if lat is None or lon is None:
         return None
     if lat == 0.0 and lon == 0.0:
+        return None
+    if _reports_no_fix(msg):
         return None
     # RMC/GLL expose .status ('A' = valid, 'V' = void). GGA has no status attr.
     status = getattr(msg, "status", "A")
@@ -213,6 +232,7 @@ class GPSStream:
                        "heading_locked": None, "heading_mode": "none", "speed_mps": 0.0}
         self._heading_buf: list[float] = []
         self._last_pos: tuple[float, float] | None = None
+        self._last_fix_t: float | None = None
         if HAS_SERIAL:
             import threading
             self._lock = threading.Lock()
@@ -236,8 +256,13 @@ class GPSStream:
     def latest(self) -> dict:
         if self._lock is None:
             return dict(self._state)
+        import time as _t
         with self._lock:
             out = dict(self._state)
+            last = self._last_fix_t
+            if out.get("fix") and (last is None or _t.monotonic() - last > FIX_STALE_S):
+                out["fix"] = False
+                out["stale"] = True
             h = out.get("heading_locked") if out.get("heading_mode") == "locked" else out.get("heading")
             if h is not None:
                 out["heading_display"] = h
@@ -298,6 +323,9 @@ class GPSStream:
     def _apply_motion(self, fix: tuple[float, float], msg):
         lat, lon = fix
         spd = self._speed_mps_from_msg(msg)
+        if spd is None:
+            # GGA/GLL carry no speed — keep the last RMC/VTG value instead of flickering to 0.
+            spd = float(self._state.get("speed_mps") or 0.0)
         hdg = self._heading_from_msg(msg)
         if hdg is None:
             hdg = self._bearing_from_motion(lat, lon)
@@ -335,16 +363,25 @@ class GPSStream:
         """Find a port/baud that produces NMEA data and return an open Serial."""
         for port in candidate_gps_ports(self.preferred_port):
             for baud in self.bauds:
+                if self._stop:
+                    return None
+                ser = None
                 try:
                     ser = serial.Serial(port, baud, timeout=2.0)
                     for _ in range(30):
+                        if self._stop:
+                            break
                         raw = ser.readline().decode("ascii", errors="replace").strip()
                         if raw.startswith("$"):
                             self._update(connected=True, port=port)
                             return ser
-                    ser.close()
                 except Exception:
-                    continue
+                    pass
+                if ser is not None:
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
         return None
 
     def _run(self):
@@ -377,7 +414,11 @@ class GPSStream:
                             self._push_heading_sample(h_only)
                         fix = _valid_fix(msg)
                         if fix:
+                            import time as _t
+                            self._last_fix_t = _t.monotonic()
                             self._apply_motion(fix, msg)
+                        elif _reports_no_fix(msg):
+                            self._update(fix=False)
             except Exception:
                 self._update(connected=False, fix=False)
                 import time as _t

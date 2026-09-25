@@ -12,6 +12,8 @@ class ShellLifecycleMixin:
             self._hide_route_pick_dialog()
             for attr in ("_picocount_thread", "_route_thread", "_retrace_thread", "_dl_thread", "_geocode_thread", "_field_street_thread"):
                 self._stop_worker(getattr(self, attr, None))
+            for t in list(getattr(self, "_field_street_threads", None) or ()):
+                self._stop_worker(t, 1500)
             if self.pages.currentIndex() == 2:
                 self._flush_install_form()
             self._persist_shift(quiet=True)

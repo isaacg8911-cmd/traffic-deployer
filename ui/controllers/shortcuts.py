@@ -45,6 +45,8 @@ class ShortcutsControllerMixin:
         if getattr(self, "_manual_grab_mode", False):
             self._end_manual_grab(silent=True, then=self._undo_last_action)
             return
+        if self.pages.currentIndex() == 2:
+            self._flush_install_form()
         entry = self._undo_stack.pop()
         idx = self.state.index_of(entry["uid"])
         if idx < 0:
@@ -55,12 +57,13 @@ class ShortcutsControllerMixin:
         s.update(entry["snapshot"])
         kind = entry["kind"]
         if kind in ("install", "skip"):
-            self.current_index = entry.get("current_index", idx)
+            self.current_index = idx
             self._go_page(2)
             self._refresh_install()
             self._center_current()
         elif kind == "pickup":
             self.pickup_index = entry.get("pickup_index", 0)
+            self._pickup_uid = entry["uid"]
             self._go_page(3)
             self._refresh_pickup()
         self._persist_shift(quiet=True)

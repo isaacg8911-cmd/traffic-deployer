@@ -43,6 +43,13 @@ class MapSyncControllerMixin:
                 QTimer.singleShot(200, self._poll_map_ready)
         self.view.page().runJavaScript("!!window.__mapLoaded", cb)
 
+    def _on_bridge_map_ready(self):
+        """QWebChannel ready — same once-only guard as the page-load poll."""
+        if getattr(self, "_map_js_ready", False):
+            return
+        self._map_js_ready = True
+        self._on_map_ready()
+
     def _on_map_ready(self):
         self._hide_map_load_overlay()
         self.bridge.set_follow(bool(self._map_follow))
@@ -282,6 +289,12 @@ class MapSyncControllerMixin:
     def _drive_arrived_install(self) -> None:
         if not self._gps_follow:
             return
+        nxt = self._next_leg_payload()
+        target = nxt.get("index") if nxt else None
+        if isinstance(target, int) and 0 <= target < len(self.state.stops):
+            # ARRIVED opens the site we were driving to, not a stale current_index.
+            self._leave_install_site()
+            self.current_index = target
         self._go_page(2)
         self._center_current()
 
@@ -399,6 +412,7 @@ class MapSyncControllerMixin:
         self._set_route_section(nxt)
         vis = self._visible_stop_indices()
         if vis and self.current_index not in vis:
+            self._leave_install_site()
             self.current_index = vis[0]
         self._refresh_route_list()
         if self._route_pick_mode:
@@ -424,6 +438,7 @@ class MapSyncControllerMixin:
         self._set_route_section(label)
         vis = self._visible_stop_indices()
         if vis and self.current_index not in vis:
+            self._leave_install_site()
             self.current_index = vis[0]
         items = self._installed_stops()
         if items and self.pickup_index >= len(items):

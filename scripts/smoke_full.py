@@ -550,6 +550,12 @@ def test_web_assets():
         text=True,
     )
     check("ui button layout", proc_btn.returncode == 0, (proc_btn.stdout or proc_btn.stderr or "")[-400:])
+    for _name in ("test_site_bind.py", "test_bug_sweep.py"):
+        _p = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", _name)],
+            cwd=ROOT, capture_output=True, text=True,
+        )
+        check(_name, _p.returncode == 0, (_p.stdout or _p.stderr or "")[-400:])
     from core.picocount import (
         build_unit_id, counter_ports_labeled, facing_n_or_e, preferred_counter_port,
         protocol_doc_present,

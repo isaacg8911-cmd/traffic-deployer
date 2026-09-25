@@ -178,8 +178,13 @@ def export_shift_handoff(
         return result
 
     excel_path = os.path.join(folder, names["excel"])
-    with open(excel_path, "wb") as f:
-        f.write(xlsx_bytes)
+    try:
+        with open(excel_path, "wb") as f:
+            f.write(xlsx_bytes)
+    except OSError:
+        result["errors"].append(
+            f"Could not write {names['excel']} — close it in Excel and export again.")
+        return result
     result["files"]["excel"] = excel_path
 
     no_gps = _installed_missing_gps(stops)

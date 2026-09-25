@@ -220,23 +220,28 @@
     fieldPinMarker._tdDraggable = draggable;
     fieldPinMarker._tdUid = opts.uid || '';
     fieldPinMarker._tdSiteId = opts.siteId != null ? String(opts.siteId) : '';
+    var m = fieldPinMarker;
     if (draggable) {
-      fieldPinMarker.on('dragend', function () {
-        var ll = fieldPinMarker.getLngLat();
-        fieldPinMarker._tdLat = ll.lat;
-        fieldPinMarker._tdLon = ll.lng;
+      m.on('dragend', function () {
+        var ll = m.getLngLat();
+        m._tdLat = ll.lat;
+        m._tdLon = ll.lng;
+        // The mouse-up after a drag also fires 'click' — swallow it so the
+        // stop-click navigation cannot cancel this save.
+        m._tdJustDragged = Date.now();
         // Persist drag to Python immediately — otherwise Install / Next
         // re-pushes state and the pin snaps back to the pre-drag click.
         fireMapClick(ll.lat, ll.lng);
       });
     }
-    var el = fieldPinMarker.getElement();
+    var el = m.getElement();
     if (el && !el._tdClickBound) {
       el._tdClickBound = true;
       el.style.cursor = 'pointer';
       el.addEventListener('click', function (ev) {
         ev.stopPropagation();
-        var uid = fieldPinMarker._tdUid;
+        if (m._tdJustDragged && Date.now() - m._tdJustDragged < 400) return;
+        var uid = m._tdUid;
         if (!uid) return;
         var payload = 'install|' + uid;
         showSiteInfoToast(payload);

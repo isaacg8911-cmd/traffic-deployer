@@ -253,9 +253,12 @@ def _merge_stop_into_ig_row(df: pd.DataFrame, idx: int, stop: dict) -> None:
     if serial.lower() in ("nan", "none", "nat"):
         serial = ""
     if serial_col and serial:
-        try:
+        if serial.endswith(".0") and serial[:-2].isdigit():
+            serial = serial[:-2]
+        # Plain digits -> number (Excel-friendly); leading zeros / letters / "1E5" stay text.
+        if serial.isdigit() and not (len(serial) > 1 and serial.startswith("0")):
             _set_sheet_cell(df, idx, serial_col, float(serial))
-        except (ValueError, TypeError):
+        else:
             _set_sheet_cell(df, idx, serial_col, serial)
     direction = str(stop.get("direction") or "").strip()
     if dir_col and direction and direction.lower() not in ("nan", "none"):

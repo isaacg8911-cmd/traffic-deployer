@@ -545,9 +545,10 @@ class SetupControllerMixin:
         s["street"] = self.txt_street.text().strip()
         s["direction"] = self.combo_dir.currentText()
         s["lanes"] = int(self.spin_lanes.value())
+        # Form is authoritative for the site on screen — an emptied box clears the serial.
         s["serial"] = self.txt_serial.text().strip()
+        s["counter_serial"] = s["serial"]
         s["notes"] = self.txt_notes.toPlainText()
-        self._sync_counter_fields(s)
 
     def _sync_counter_fields(self, s: dict) -> None:
         """Keep stop + Excel export aligned with PicoCount serial and Unit ID."""
@@ -585,6 +586,10 @@ class SetupControllerMixin:
                 self.statusBar().showMessage(note, 3000)
             elif not quiet:
                 self.statusBar().showMessage("Shift saved on this laptop.", 2500)
+        else:
+            self.statusBar().showMessage(
+                "SAVE FAILED — shift not written to disk (file locked or disk full). "
+                "Close OneDrive/Excel on tds_data and keep the app open.", 15000)
 
     def _periodic_save_shift(self):
         try:

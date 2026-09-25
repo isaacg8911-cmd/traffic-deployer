@@ -257,6 +257,7 @@ _PROGRESS_KEYS = (
     "date", "exact_time", "street_warning", "cross_lat", "cross_lon", "cross_side",
     "install_photo_path",
     "counter_unit_id", "counter_serial", "counter_cleared_at", "counter_download_path",
+    "pick_cross_locked", "field_coord_source", "field_geocode_pending", "tvp",
 )
 
 

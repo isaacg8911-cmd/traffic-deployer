@@ -89,6 +89,9 @@ class AuditControllerMixin:
             path = os.path.join(data_dir, "shift_live.xlsx")
             with open(path, "wb") as f:
                 f.write(data)
+        except PermissionError:
+            self.statusBar().showMessage(
+                "shift_live.xlsx is open in Excel — close it so it keeps updating.", 8000)
         except Exception:
             pass
 

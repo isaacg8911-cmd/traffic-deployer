@@ -738,7 +738,7 @@ def nav_plan(G, pts, labels=None) -> dict:
         for m in leg.get("maneuvers") or []:
             if m["type"] != "arrive" or m.get("stop_index") is not None:
                 total_m += float(m.get("dist_m") or 0.0)
-            maneuvers.extend(leg.get("maneuvers") or [])
+        maneuvers.extend(leg.get("maneuvers") or [])
 
     return {"plan": maneuvers, "polyline": full_poly, "legs": legs, "miles": total_m / 1609.34}
 

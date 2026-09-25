@@ -117,6 +117,29 @@ class RouteControllerMixin:
                 (route_sections.canonical_section(fresh.get("sheet")), str(fresh.get("id") or ""))
             )
 
+        matched = {id(p) for p in (_prior(f) for f in stops) if p is not None}
+        orphans = [
+            s for s in self.state.stops
+            if id(s) not in matched and (
+                s.get("installed") or s.get("skipped") or s.get("picked_up")
+                or s.get("field_lat") is not None)
+        ]
+        if orphans:
+            names = ", ".join(
+                f"Site {s.get('id', '?')}" + (f" ({s.get('sheet')})" if s.get("sheet") else "")
+                for s in orphans[:8])
+            more = f" +{len(orphans) - 8} more" if len(orphans) > 8 else ""
+            if QMessageBox.question(
+                self, "Install data would be dropped",
+                f"{len(orphans)} site(s) with install/pickup/GPS data are NOT in the "
+                f"current Excel/.EST files:\n{names}{more}\n\n"
+                "Building now removes them from this shift (and from the export).\n"
+                "Tap No, then Export handoff first — or re-add their files.\n\n"
+                "Build anyway and drop them?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            ) != QMessageBox.Yes:
+                self._restore_build_button_if_idle()
+                return
         merged = [ingest.merge_stop_progress(_prior(f), f) for f in stops]
         kept = sum(1 for f in merged if f["uid"] in old_by_uid
                    and (old_by_uid[f["uid"]].get("installed") or old_by_uid[f["uid"]].get("skipped")))
@@ -1054,9 +1077,21 @@ class RouteControllerMixin:
         )
         self._retrace_thread = thread
         self.statusBar().showMessage("Re-tracing route on streets…", 0)
+        started_section = self._day_filter_value() if self._day_filter_active() else ""
+        started_order = [s.get("uid") for s in section_stops]
 
         def done(res: dict):
-            self._retrace_thread = None
+            if self._retrace_thread is thread:
+                self._retrace_thread = None
+            now_section = self._day_filter_value() if self._day_filter_active() else ""
+            now_order = [s.get("uid") for s in self._section_stops_for_legs()]
+            if (
+                now_section != started_section or now_order != started_order
+                or getattr(self, "_route_pick_mode", False) or not self.state.stops
+            ):
+                # Day / order / pick / clear changed while tracing — result is stale.
+                self.statusBar().showMessage("Re-trace skipped (route changed meanwhile).", 4000)
+                return
             if not res.get("ok"):
                 err = res.get("error", "re-trace failed")
                 if self.state.offline_mode:
@@ -1078,6 +1113,12 @@ class RouteControllerMixin:
                 f"Route re-traced — {miles:.1f} mi (order unchanged).", 6000)
 
         thread.finished_result.connect(done)
+        # Hold a strong ref until the QThread fully exits (done() may clear the attr first).
+        live = getattr(self, "_retrace_threads_live", None)
+        if live is None:
+            live = self._retrace_threads_live = set()
+        live.add(thread)
+        thread.finished.connect(lambda t=thread: live.discard(t))
         thread.start()
 
     def _stops_from_uploads_merged(self) -> list[dict] | None:
@@ -1105,6 +1146,11 @@ class RouteControllerMixin:
     def _nudge_stop(self, delta: int):
         if not self.state.stops:
             return
+        if getattr(self, "_route_pick_mode", False):
+            # Pick-mode list rows are pick order + pool, not visible stops.
+            self.statusBar().showMessage(
+                "Picking — drag in the order window to move a stop.", 5000)
+            return
         visible = self._visible_stop_indices()
         if not visible:
             return
@@ -1118,10 +1164,14 @@ class RouteControllerMixin:
         if j_row < 0 or j_row >= len(visible):
             return
         i, j = visible[row], visible[j_row]
+        self._leave_install_site()
         stops = list(self.state.stops)
         stops[i], stops[j] = stops[j], stops[i]
         self.state.stops = stops
         self.current_index = j
+        # Redraw now so a second quick tap reads the new row (not swap the pair back).
+        self._refresh_route_list()
+        self.list_route.setCurrentRow(j_row)
         self._retrace_route_only(select_row=j_row)
 
     def _reset_route(self):

@@ -50,7 +50,7 @@ def _atomic_write_bytes(path: str, data: bytes) -> None:
                 pass
 
 
-def _get_key(data_dir: str) -> bytes | None:
+def _get_key(data_dir: str, *, create: bool = True) -> bytes | None:
     if not HAS_CRYPTO:
         return None
     kp = _key_path(data_dir)
@@ -58,6 +58,8 @@ def _get_key(data_dir: str) -> bytes | None:
         if os.path.exists(kp):
             with open(kp, "rb") as f:
                 return f.read().strip()
+        if not create:
+            return None
         key = Fernet.generate_key()
         _atomic_write_bytes(kp, key)
         try:
@@ -82,7 +84,7 @@ def _serialize(payload: dict, data_dir: str) -> bytes:
 
 def _deserialize(blob: bytes, data_dir: str) -> dict:
     if blob[: len(MAGIC)] == MAGIC and HAS_CRYPTO:
-        key = _get_key(data_dir)
+        key = _get_key(data_dir, create=False)
         if not key:
             raise ValueError("encrypted state but no key available")
         raw = Fernet(key).decrypt(blob[len(MAGIC):])
@@ -115,8 +117,21 @@ def load_state(path: str, data_dir: str) -> dict:
                 if blob.strip():
                     return _deserialize(blob, data_dir)
         except Exception:
+            _quarantine_unreadable(candidate)
             continue
     return {}
+
+
+def _quarantine_unreadable(path: str) -> None:
+    """Keep a copy of a shift file we could not read (e.g. missing .tds_key) —
+    the next save would otherwise overwrite it and then its .bak."""
+    import time as _t
+    try:
+        dst = f"{path}.unreadable-{_t.strftime('%Y%m%d-%H%M%S')}"
+        if not os.path.exists(dst):
+            shutil.copy2(path, dst)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

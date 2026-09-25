@@ -136,7 +136,7 @@ class ShellStartupMixin:
         self._web_channel = QWebChannel(self)
         self._web_channel.registerObject("bridge", self.bridge)
         page.setWebChannel(self._web_channel)
-        self.bridge.mapReady.connect(self._on_map_ready)
+        self.bridge.mapReady.connect(self._on_bridge_map_ready)
         self.bridge.followToggled.connect(self._on_map_follow_toggled)
         self.bridge.mapClicked.connect(self._on_map_clicked)
         self.bridge.stopClicked.connect(self._on_stop_clicked)

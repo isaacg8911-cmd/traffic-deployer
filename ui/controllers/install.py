@@ -252,6 +252,13 @@ class InstallControllerMixin:
             return
         self._select_install_stop(int(idx))
 
+    def _leave_install_site(self) -> None:
+        """Call before any code path moves current_index off the site on screen."""
+        if self.pages.currentIndex() == 2:
+            self._flush_install_form()
+        if self._manual_grab_mode:
+            self._end_manual_grab(silent=True)
+
     def _select_install_stop(self, idx: int) -> None:
         """Change install site — the ONLY path that moves current_index on Install.
 
@@ -378,6 +385,7 @@ class InstallControllerMixin:
         if getattr(self, "_pin_flush_busy", False):
             self.statusBar().showMessage("Saving pin — try again.", 3000)
             return
+        self._manual_grab_uid = self._current_uid()
         self._follow_before_manual_grab = bool(self._gps_follow)
         if self._gps_follow:
             self._gps_follow = False
@@ -439,6 +447,16 @@ class InstallControllerMixin:
         if not self.state.stops or self.current_index >= len(self.state.stops):
             self._end_manual_grab(silent=True)
             return
+        owner = getattr(self, "_manual_grab_uid", "") or ""
+        if owner and owner != self._current_uid():
+            # Site changed underneath Drop pin (day filter, reorder) — discard, never save cross-site.
+            self._manual_grab_mode = False
+            self._sync_manual_grab_btn()
+            self.bridge.set_manual_grab(False)
+            self.bridge.clear_field_pin()
+            self._push_state()
+            self.statusBar().showMessage("Site changed — tap Drop pin again for this site.", 6000)
+            return
         if not self._save_field_position(lat, lon, source="manual"):
             return
         s = self.state.stops[self.current_index]
@@ -492,15 +510,18 @@ class InstallControllerMixin:
         *,
         prefer_online: bool,
     ) -> None:
-        thread = getattr(self, "_field_street_thread", None)
-        if thread is not None and thread.isRunning():
-            thread.requestInterruption()
-            thread.wait(200)
-        self._field_street_thread = FieldStreetThread(
-            stop_idx, lat, lon, DATA_DIR, prefer_online=prefer_online,
-        )
-        self._field_street_thread.finished_result.connect(self._on_field_street_result)
-        self._field_street_thread.start()
+        # Keep every running lookup referenced until Qt reports it finished —
+        # dropping a running QThread aborts the app. Stale results are ignored
+        # in _on_field_street_result (coords must still match).
+        live = getattr(self, "_field_street_threads", None)
+        if live is None:
+            live = self._field_street_threads = set()
+        thread = FieldStreetThread(stop_idx, lat, lon, DATA_DIR, prefer_online=prefer_online)
+        live.add(thread)
+        thread.finished_result.connect(self._on_field_street_result)
+        thread.finished.connect(lambda t=thread: live.discard(t))
+        self._field_street_thread = thread
+        thread.start()
 
     def _on_field_street_result(
         self,
@@ -511,7 +532,6 @@ class InstallControllerMixin:
         src_tag: str,
         warning: str,
     ) -> None:
-        self._field_street_thread = None
         if not self.state.stops or stop_idx >= len(self.state.stops):
             return
         s = self.state.stops[stop_idx]
@@ -521,6 +541,7 @@ class InstallControllerMixin:
         if street:
             if stop_idx == self.current_index:
                 self.txt_street.setText(street)
+            s["street"] = street
             s["field_geocode_pending"] = False
             hint = "online" if src_tag == "online" else "offline road map"
             self.statusBar().showMessage(f"Install GPS saved — street from {hint}.", 5000)
@@ -594,11 +615,6 @@ class InstallControllerMixin:
             self.statusBar().showMessage(
                 f"Not saved — Site {s.get('id', '?')} keeps its previous GPS.", 6000)
             return False
-        thread = getattr(self, "_field_street_thread", None)
-        if thread is not None and thread.isRunning():
-            thread.requestInterruption()
-            thread.wait(200)
-            self._field_street_thread = None
         s["field_lat"], s["field_lon"] = lat, lon
         s["field_coord_source"] = source
         s["field_geocode_pending"] = True
@@ -736,6 +752,10 @@ class InstallControllerMixin:
             current_index=self.current_index,
         )
         date, exact = ca_now()
+        already = bool(s.get("installed")) if installed else bool(s.get("skipped"))
+        if already and s.get("exact_time"):
+            # Re-saving a done site (fixing a serial) must not move its export row.
+            date, exact = s.get("date") or date, s["exact_time"]
         s.update({"street": self.txt_street.text().strip(), "direction": d, "lanes": lanes,
                   "serial": s.get("serial", serial), "notes": notes,
                   "installed": installed, "skipped": not installed,

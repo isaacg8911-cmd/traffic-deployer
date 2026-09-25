@@ -1,0 +1,165 @@
+{
+  "rules": "Every bug found and not fixed goes here. status: open | fixed | waived. severity: field-critical (loses work, bricks the app, or ships wrong data) | major | minor. Ship gate blocks on open field-critical unless director_waiver is set. rank = Director-approved order.",
+  "bugs": [
+    {
+      "id": "UPD-1",
+      "rank": 1,
+      "area": "auto-updater",
+      "severity": "field-critical",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "A failed update can make the app close on every launch",
+      "detail": "Relaunch loop when a staged update fails to apply; pending state is never cleared."
+    },
+    {
+      "id": "UPD-2",
+      "rank": 2,
+      "area": "auto-updater",
+      "severity": "field-critical",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "No rollback if copying update files fails partway",
+      "detail": "Install folder can be left half old, half new."
+    },
+    {
+      "id": "UPD-3",
+      "rank": 3,
+      "area": "auto-updater",
+      "severity": "field-critical",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "A leftover older staged update can downgrade the app",
+      "detail": "Staged version is not compared against the running version before applying."
+    },
+    {
+      "id": "UPD-4",
+      "rank": 4,
+      "area": "auto-updater",
+      "severity": "field-critical",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "Updating from inside the app skips saving your work",
+      "detail": "Updater path calls sys.exit without the normal close/persist sequence."
+    },
+    {
+      "id": "RTE-1",
+      "rank": 5,
+      "area": "multi-day routes",
+      "severity": "field-critical",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "Picking in the Together view loses picks and Apply loops",
+      "detail": ""
+    },
+    {
+      "id": "RTE-2",
+      "rank": 6,
+      "area": "multi-day routes",
+      "severity": "major",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "\"Pick order...\" resets other days to file order",
+      "detail": ""
+    },
+    {
+      "id": "RTE-3",
+      "rank": 7,
+      "area": "multi-day routes",
+      "severity": "major",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "Merging days leaves each day's route out of date",
+      "detail": ""
+    },
+    {
+      "id": "RTE-4",
+      "rank": 8,
+      "area": "multi-day routes",
+      "severity": "major",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "Drive times are wrong when a day filter is on",
+      "detail": "Day-filtered time legs are indexed by absolute stop index."
+    },
+    {
+      "id": "RTE-5",
+      "rank": 9,
+      "area": "multi-day routes",
+      "severity": "major",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "Pick mode stays active after switching to the Install tab",
+      "detail": ""
+    },
+    {
+      "id": "IMP-1",
+      "rank": 10,
+      "area": "Excel/.EST import",
+      "severity": "major",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "A site ID can falsely match coordinate digits inside a map file",
+      "detail": ".EST word-boundary site-ID match hits digits inside coordinates."
+    },
+    {
+      "id": "IMP-2",
+      "rank": 11,
+      "area": "Excel/.EST import",
+      "severity": "major",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "Duplicate site IDs: import keeps the first copy, export keeps the last",
+      "detail": ""
+    },
+    {
+      "id": "IMP-3",
+      "rank": 12,
+      "area": "Excel/.EST import",
+      "severity": "major",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "A title row above the headers finds zero sites",
+      "detail": "Excel header-row detection assumes headers are on row 1."
+    },
+    {
+      "id": "MAP-1",
+      "rank": 13,
+      "area": "road map",
+      "severity": "major",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "Large or retried road downloads lose roads that cross tile edges",
+      "detail": "Routes across those edges fail."
+    },
+    {
+      "id": "ONL-1",
+      "rank": 14,
+      "area": "going online",
+      "severity": "major",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "Going online freezes the screen during street lookup and can overwrite typed streets",
+      "detail": "_retry_pending_field_geocode runs on the UI thread."
+    },
+    {
+      "id": "PERF-1",
+      "rank": 15,
+      "area": "map server",
+      "severity": "minor",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "local_server reads whole files into memory for every request",
+      "detail": ""
+    },
+    {
+      "id": "PERF-2",
+      "rank": 16,
+      "area": "counter reports",
+      "severity": "minor",
+      "status": "open",
+      "found": "2026-09-25 bug sweep",
+      "title": "volume_report / picocount_hits are O(n^2) (currently unused)",
+      "detail": ""
+    }
+  ]
+}

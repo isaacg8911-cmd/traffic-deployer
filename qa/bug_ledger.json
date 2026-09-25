@@ -6,40 +6,77 @@
       "rank": 1,
       "area": "auto-updater",
       "severity": "field-critical",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
       "title": "A failed update can make the app close on every launch",
-      "detail": "Relaunch loop when a staged update fails to apply; pending state is never cleared."
+      "detail": "Relaunch loop when a staged update fails to apply; pending state is never cleared.",
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)"
     },
     {
       "id": "UPD-2",
       "rank": 2,
       "area": "auto-updater",
       "severity": "field-critical",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
       "title": "No rollback if copying update files fails partway",
-      "detail": "Install folder can be left half old, half new."
+      "detail": "Install folder can be left half old, half new.",
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)"
     },
     {
       "id": "UPD-3",
       "rank": 3,
       "area": "auto-updater",
       "severity": "field-critical",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
       "title": "A leftover older staged update can downgrade the app",
-      "detail": "Staged version is not compared against the running version before applying."
+      "detail": "Staged version is not compared against the running version before applying.",
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)"
     },
     {
       "id": "UPD-4",
       "rank": 4,
       "area": "auto-updater",
       "severity": "field-critical",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
       "title": "Updating from inside the app skips saving your work",
-      "detail": "Updater path calls sys.exit without the normal close/persist sequence."
+      "detail": "Updater path calls sys.exit without the normal close/persist sequence.",
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)"
+    },
+    {
+      "id": "UPD-5",
+      "rank": 4,
+      "area": "auto-updater",
+      "severity": "field-critical",
+      "status": "fixed",
+      "found": "2026-09-25 updater review",
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
+      "title": "In-app update helper hung forever: launched with no console, tasklist|find never returned, so the update never installed and the app never reopened",
+      "detail": "Found by adversarial review; confirmed old flags never finish from a windowed parent. Now CREATE_NO_WINDOW + tasklist to file."
+    },
+    {
+      "id": "UPD-6",
+      "rank": 4,
+      "area": "auto-updater",
+      "severity": "field-critical",
+      "status": "fixed",
+      "found": "2026-09-25 updater review",
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
+      "title": "OPEN_APP.bat / FINISH_UPDATE.bat installed any staged update with no completeness check",
+      "detail": "Launcher now requires update_ready/.complete (written last by the app)."
+    },
+    {
+      "id": "UPD-7",
+      "rank": 4,
+      "area": "auto-updater",
+      "severity": "field-critical",
+      "status": "fixed",
+      "found": "2026-09-25 updater review",
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
+      "title": "A half-copied staged update (disk full) could be installed and leave an app that will not start",
+      "detail": "Found by second review pass. .complete sentinel; partial copy dropped without blocking re-download."
     },
     {
       "id": "RTE-1",

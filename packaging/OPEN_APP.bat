@@ -89,7 +89,8 @@ if exist "refresh_update_channel.ps1" (
 echo.
 
 REM Stalled Wi-Fi download — finish file swap before launching old exe.
-if exist "tds_data\update_ready\TrafficDeployer.exe" (
+REM .complete is written last by the app; without it the staged copy is partial.
+if exist "tds_data\update_ready\TrafficDeployer.exe" if exist "tds_data\update_ready\.complete" (
   echo Stalled update found — finishing before launch...
   if exist "FINISH_UPDATE.bat" (
     call "FINISH_UPDATE.bat" auto

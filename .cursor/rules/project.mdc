@@ -20,6 +20,10 @@ Read **SCOPE.md** and **SCOPE_PACKAGES.md**. Workflow: **HOW_TO_RUN.md**, **STAR
 - `SMOKE.bat` or `python scripts/smoke_full.py` for routing/core/persistence/web.
 - `START.bat` for UI/map changes.
 
+## Open bugs are standing DEMANDs
+
+Every `open` bug in `qa/bug_ledger.json` is a standing `DEMAND:` — Director never has to ask. Each session, after the Director's current request (or immediately if there is none), fix open bugs in ledger order (`python scripts/qa_ledger.py next`), prove, mark `fixed`, commit. Ask the Director only for real product decisions (behavior the field operator would notice, data-loss tradeoffs) — never "which should I do next?".
+
 ## Before any AppUpdate ships (`FP-SHIP-UNREVIEWED`)
 
 1. Adversarial review of every change since the last shipped version — parallel reviewers hunting failure modes (GPS loss, missing/locked files, double taps, thread races, partial writes, stale state). Your own tests are not the review.

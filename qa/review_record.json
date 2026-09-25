@@ -1,0 +1,7 @@
+{
+  "reviewed_at": "2026-09-25T21:43:39+00:00",
+  "since_version": "1.0.19",
+  "summary": "Bug sweep (4 parallel audits) + updater fixes (2 adversarial review passes, 9 findings fixed). Remaining open bugs logged in ledger.",
+  "source_fingerprint": "7ab8baadd4e7909c0d9e34c86cccc66a12c0e147fe587a89c484cb0ee5f2f164",
+  "open_bugs": 12
+}

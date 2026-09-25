@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
 
 import gps_reader
 import road_router
-from core import auto_updater, connectivity, crash_log, field_alerts, geo, ingest, setup_network
+from core import (
+    app_lifecycle, auto_updater, connectivity, crash_log, field_alerts, geo, ingest, setup_network,
+)
 from core.field_ready import check_all
 from core.offline_gate import evaluate as offline_gate_eval
 from core.setup_checklist import evaluate as setup_checklist_eval
@@ -401,6 +403,7 @@ class SetupControllerMixin:
                 APP_VERSION,
                 field_mode=False,
                 force_check=force,
+                before_exit=self._save_before_update_exit,
             )
         except Exception as exc:  # noqa: BLE001
             crash_log.log_error(exc, context="auto_update")
@@ -586,10 +589,18 @@ class SetupControllerMixin:
                 self.statusBar().showMessage(note, 3000)
             elif not quiet:
                 self.statusBar().showMessage("Shift saved on this laptop.", 2500)
-        else:
-            self.statusBar().showMessage(
-                "SAVE FAILED — shift not written to disk (file locked or disk full). "
-                "Close OneDrive/Excel on tds_data and keep the app open.", 15000)
+            return True
+        self.statusBar().showMessage(
+            "SAVE FAILED — shift not written to disk (file locked or disk full). "
+            "Close OneDrive/Excel on tds_data and keep the app open.", 15000)
+        return False
+
+    def _save_before_update_exit(self) -> bool:
+        """Same shutdown as closing the window; the updater exits the process next."""
+        if not self._shutdown_for_exit():
+            return False
+        app_lifecycle.end_session_clean(DATA_DIR)
+        return True
 
     def _periodic_save_shift(self):
         try:

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from core import app_lifecycle, update_check
@@ -26,6 +27,12 @@ STAGING_DIRNAME = "update_staging"
 READY_DIRNAME = "update_ready"
 BACKUP_DIRNAME = "backup_app"
 APPLY_BAT = "apply_update_pending.bat"
+FAILED_MARKER = ".update_failed"
+SWAP_MARKER = "update_swap.inprogress"
+# Written last by stage_bundle_for_apply; a staged copy without it is partial.
+READY_COMPLETE = ".complete"
+# Launches that may try to finish one staged update before it is dropped.
+MAX_RESUME_ATTEMPTS = 2
 # Fixed names — each download overwrites the previous (no versioned pile-up on the laptop).
 STAGING_ZIP_NAME = "update.zip"
 STAGING_EXTRACT_NAME = "extracted"
@@ -197,82 +204,208 @@ def _install_exe(src: str, dst: str) -> None:
 
 
 def _write_apply_bat(app_dir: str, ready_dir: str, version: str) -> str:
-    """Helper runs after this process exits — required on Windows."""
+    """Helper runs after this process exits — required on Windows.
+
+    Copies the new build beside the live one (`*_new`), then swaps by rename
+    only, so a failure at any point rolls back with renames (no half-deleted
+    folders). Leftover `*_old` from an interrupted run is restored first.
+    Writes tds_data/.update_applied or .update_failed, then reopens the app.
+    Runs with no console: waits use ping (not timeout) and tasklist output
+    goes to a file (no pipe).
+    """
     bat_path = os.path.join(app_dir, APPLY_BAT)
     ready = ready_dir.replace("/", "\\")
     app = app_dir.replace("/", "\\")
     log = os.path.join(app, "tds_data", "update_apply.log").replace("/", "\\")
+    failed = os.path.join(app, "tds_data", FAILED_MARKER).replace("/", "\\")
+    tl = os.path.join(app, "tds_data", "update_tasklist.txt").replace("/", "\\")
+    swap = os.path.join(app, "tds_data", SWAP_MARKER).replace("/", "\\")
+
+    def logline(text: str) -> str:
+        return f'echo [%date% %time%] {text}>> "{log}"'
+
+    exe, exe_new, exe_old = "TrafficDeployer.exe", "TrafficDeployer.exe.new", "TrafficDeployer.exe.old"
     lines = [
         "@echo off",
         "setlocal EnableExtensions",
         f'cd /d "{app}"',
         f'echo [%date% %time%] apply start v{version}> "{log}"',
         "echo Applying Traffic Deployer update v" + version + "...",
-        "echo Waiting for app to close...",
         "set /a WAITS=0",
         ":wait",
-        'tasklist /FI "IMAGENAME eq TrafficDeployer.exe" 2>nul | find /I "TrafficDeployer.exe" >nul',
-        "if not errorlevel 1 (",
-        "  set /a WAITS+=1",
-        "  if %WAITS% GEQ 120 (",
-        f'    echo [%date% %time%] FAIL: app still running after 120s>> "{log}"',
-        "    echo FAIL: TrafficDeployer.exe still running. Close it in Task Manager.",
-        "    pause",
-        "    exit /b 1",
-        "  )",
-        "  timeout /t 1 /nobreak >nul",
-        "  goto wait",
+        f'tasklist /FI "IMAGENAME eq {exe}" /NH > "{tl}" 2>nul',
+        f'find /I "{exe}" "{tl}" >nul 2>&1',
+        "if errorlevel 1 goto closed",
+        "set /a WAITS+=1",
+        "if %WAITS% GEQ 120 (",
+        "  " + logline("FAIL: app still running after 120s"),
+        f'  echo {version}> "{failed}"',
+        f'  del /f /q "{tl}" >nul 2>&1',
+        f'  del /f /q "%~f0" >nul 2>&1',
+        "  exit /b 1",
         ")",
-        "timeout /t 2 /nobreak >nul",
+        "ping -n 2 127.0.0.1 >nul",
+        "goto wait",
+        ":closed",
+        f'del /f /q "{tl}" >nul 2>&1',
+        "ping -n 3 127.0.0.1 >nul",
         f'set "READY={ready}"',
-        'if not exist "%READY%\\TrafficDeployer.exe" (',
-        f'  echo [%date% %time%] FAIL: ready exe missing>> "{log}"',
-        "  echo FAIL: update files missing in tds_data\\update_ready",
-        "  pause",
-        "  exit /b 1",
+        f'if not exist "%READY%\\{exe}" (',
+        "  " + logline("FAIL: ready exe missing"),
+        "  goto failed_untouched",
         ")",
-        "if exist TrafficDeployer.exe.old del /f /q TrafficDeployer.exe.old >nul 2>&1",
-        "if exist TrafficDeployer.exe (",
-        "  ren TrafficDeployer.exe TrafficDeployer.exe.old",
+        'if not exist "%READY%\\_internal\\" (',
+        "  " + logline("FAIL: ready _internal missing"),
+        "  goto failed_untouched",
+        ")",
+        f'if not exist "%READY%\\{READY_COMPLETE}" (',
+        "  " + logline("FAIL: staged copy incomplete"),
+        "  goto failed_untouched",
+        ")",
+        "call :clear_scratch",
+        "rem Swap marker = an earlier run died mid-swap, so *_old is the good copy.",
+        f'if exist "{swap}" (',
+        "  call :restore_old",
         "  if errorlevel 1 (",
-        f'    echo [%date% %time%] FAIL: could not rename running exe>> "{log}"',
-        "    echo FAIL: could not replace TrafficDeployer.exe - close the app and retry FINISH_UPDATE.bat",
-        "    pause",
-        "    exit /b 1",
+        "    " + logline("FAIL: could not restore leftovers from an interrupted update"),
+        "    goto failed_untouched",
+        "  )",
+        f'  del /f /q "{swap}" >nul 2>&1',
+        ") else (",
+        "  call :clear_old",
+        ")",
+        "call :clear_scratch",
+        "rem Stage 1: copy beside the live app (live files untouched).",
+        f'copy /y "%READY%\\{exe}" {exe_new} >nul',
+        f"if not exist {exe_new} (",
+        "  " + logline("FAIL: copy exe"),
+        "  goto failed_clean",
+        ")",
+        'xcopy /e /i /y /q "%READY%\\_internal" _internal_new\\ >nul',
+        "if errorlevel 1 (",
+        "  " + logline("FAIL: copy _internal"),
+        "  goto failed_clean",
+        ")",
+        'set "HAS_WEB=0"',
+        'if exist "%READY%\\web\\" set "HAS_WEB=1"',
+        'if "%HAS_WEB%"=="1" (',
+        '  xcopy /e /i /y /q "%READY%\\web" web_new\\ >nul',
+        "  if errorlevel 1 (",
+        "    " + logline("FAIL: copy web"),
+        "    goto failed_clean",
         "  )",
         ")",
-        'copy /y "%READY%\\TrafficDeployer.exe" TrafficDeployer.exe >nul',
-        "if errorlevel 1 (",
-        f'  echo [%date% %time%] FAIL: copy exe>> "{log}"',
-        "  if exist TrafficDeployer.exe.old ren TrafficDeployer.exe.old TrafficDeployer.exe",
-        "  echo FAIL: could not copy new exe",
-        "  pause",
-        "  exit /b 1",
+        "rem Stage 2: swap by rename only.",
+        f'echo {version}> "{swap}"',
+        f"if exist {exe} (",
+        f"  call :ren_retry {exe} {exe_old}",
+        "  if errorlevel 1 goto rollback",
         ")",
-        "if exist _internal_old rmdir /s /q _internal_old >nul 2>&1",
-        "if exist _internal ren _internal _internal_old",
-        'xcopy /e /i /y "%READY%\\_internal" _internal\\ >nul',
-        "if errorlevel 1 (",
-        f'  echo [%date% %time%] FAIL: xcopy _internal>> "{log}"',
-        "  echo FAIL: could not copy _internal",
-        "  pause",
-        "  exit /b 1",
+        f"call :ren_retry {exe_new} {exe}",
+        "if errorlevel 1 goto rollback",
+        "if exist _internal\\ (",
+        "  call :ren_retry _internal _internal_old",
+        "  if errorlevel 1 goto rollback",
         ")",
-        "if exist web_old rmdir /s /q web_old >nul 2>&1",
-        "if exist web ren web web_old",
-        'if exist "%READY%\\web\\" xcopy /e /i /y "%READY%\\web" web\\ >nul',
+        "call :ren_retry _internal_new _internal",
+        "if errorlevel 1 goto rollback",
+        'if "%HAS_WEB%"=="1" (',
+        "  if exist web\\ (",
+        "    call :ren_retry web web_old",
+        "    if errorlevel 1 goto rollback",
+        "  )",
+        "  call :ren_retry web_new web",
+        "  if errorlevel 1 goto rollback",
+        ")",
         'if exist "%READY%\\OPEN_APP.bat" copy /y "%READY%\\OPEN_APP.bat" OPEN_APP.bat >nul 2>&1',
         'if exist "%READY%\\VERSION.txt" copy /y "%READY%\\VERSION.txt" VERSION.txt >nul 2>&1',
         'if exist "%READY%\\READ_ME_FIRST.txt" copy /y "%READY%\\READ_ME_FIRST.txt" READ_ME_FIRST.txt >nul 2>&1',
-        "rmdir /s /q _internal_old >nul 2>&1",
-        "rmdir /s /q web_old >nul 2>&1",
-        "del /f /q TrafficDeployer.exe.old >nul 2>&1",
+        "rem Retire the previous build under *_stale so it is never mistaken for a good copy.",
+        f"if exist {exe_old} call :ren_retry {exe_old} TrafficDeployer.exe.stale",
+        "if exist _internal_old\\ call :ren_retry _internal_old _internal_stale",
+        "if exist web_old\\ call :ren_retry web_old web_stale",
+        "call :clear_scratch",
+        f'del /f /q "{swap}" >nul 2>&1',
         f'echo {version}> "tds_data\\.update_applied"',
-        f'echo [%date% %time%] OK applied v{version}>> "{log}"',
+        logline(f"OK applied v{version}"),
         "echo Update applied. Starting v" + version + "...",
-        'start "" "%~dp0TrafficDeployer.exe"',
+        "goto launch",
+        ":rollback",
+        "echo Update failed - restoring the previous version...",
+        "call :restore_old",
+        "if errorlevel 1 (",
+        "  " + logline("ROLLBACK FAILED - run the APPLY bat for this version"),
+        f'  echo {version}> "{failed}"',
+        "  echo Could not restore the previous version. Run the APPLY bat from the home PC.",
+        f'  del /f /q "%~f0" >nul 2>&1',
+        "  exit /b 1",
+        ")",
+        "call :clear_scratch",
+        f'del /f /q "{swap}" >nul 2>&1',
+        logline(f"ROLLED BACK v{version}"),
+        "goto failed_untouched",
+        ":failed_clean",
+        "call :clear_scratch",
+        ":failed_untouched",
+        f'echo {version}> "{failed}"',
+        "echo Update v" + version + " did not install. Reopening the previous version.",
+        ":launch",
+        f'if not defined TD_APPLY_NO_LAUNCH start "" "%~dp0{exe}"',
         f'del /f /q "%~f0" >nul 2>&1',
         "exit /b 0",
+        "",
+        "rem ---- subroutines ----",
+        ":restore_old",
+        "rem For each *_old: move the current copy aside as *_failed, rename *_old back.",
+        "if exist web_old\\ (",
+        "  if exist web\\ call :ren_retry web web_failed",
+        "  call :ren_retry web_old web",
+        "  if errorlevel 1 exit /b 1",
+        ")",
+        "if exist _internal_old\\ (",
+        "  if exist _internal\\ call :ren_retry _internal _internal_failed",
+        "  call :ren_retry _internal_old _internal",
+        "  if errorlevel 1 exit /b 1",
+        ")",
+        f"if exist {exe_old} (",
+        f"  if exist {exe} call :ren_retry {exe} TrafficDeployer.exe.failed",
+        f"  call :ren_retry {exe_old} {exe}",
+        "  if errorlevel 1 exit /b 1",
+        ")",
+        "exit /b 0",
+        "",
+        ":clear_old",
+        "rem No swap in progress: *_old is a stale previous build. Delete it only while",
+        "rem the live copy exists; if the live copy is missing, the old one is all we have.",
+        "for %%D in (_internal web) do (",
+        "  if exist %%D_old\\ (",
+        "    if exist %%D\\ (rmdir /s /q %%D_old >nul 2>&1) else (call :ren_retry %%D_old %%D)",
+        "  )",
+        ")",
+        f"if exist {exe_old} (",
+        f"  if exist {exe} (del /f /q {exe_old} >nul 2>&1) else (call :ren_retry {exe_old} {exe})",
+        ")",
+        "exit /b 0",
+        "",
+        ":clear_scratch",
+        "for %%D in (_internal_new web_new _internal_failed web_failed _internal_stale web_stale) do (",
+        "  if exist %%D\\ rmdir /s /q %%D >nul 2>&1",
+        ")",
+        f"for %%F in ({exe_new} TrafficDeployer.exe.failed TrafficDeployer.exe.stale) do (",
+        "  if exist %%F del /f /q %%F >nul 2>&1",
+        ")",
+        "exit /b 0",
+        "",
+        ":ren_retry",
+        "rem Rename %1 to %2; retry while a scanner or Explorer holds a file.",
+        "set /a RR=0",
+        ":ren_retry_loop",
+        'ren "%~1" "%~2" >nul 2>&1',
+        'if exist "%~2" if not exist "%~1" exit /b 0',
+        "set /a RR+=1",
+        "if %RR% GEQ 5 exit /b 1",
+        "ping -n 2 127.0.0.1 >nul",
+        "goto ren_retry_loop",
         "",
     ]
     with open(bat_path, "w", encoding="ascii", newline="\r\n") as f:
@@ -280,11 +413,33 @@ def _write_apply_bat(app_dir: str, ready_dir: str, version: str) -> str:
     return bat_path
 
 
+def _launch_helper(bat_path: str, app_dir: str) -> None:
+    """Start the helper hidden, with its own console and no inherited handles.
+
+    DETACHED_PROCESS (no console) hung tasklist/find when the parent is the
+    windowed exe, so the swap never ran.
+    """
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+    )
+    subprocess.Popen(
+        ["cmd.exe", "/c", bat_path],
+        cwd=app_dir,
+        creationflags=flags,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
+
+
 def ready_bundle_path(data_dir: str | None = None) -> str | None:
     """Return tds_data/update_ready if a staged exe is present (stalled Wi-Fi apply)."""
     data_dir = data_dir or DATA_DIR
     ready = os.path.join(data_dir, READY_DIRNAME)
-    if os.path.isfile(os.path.join(ready, "TrafficDeployer.exe")):
+    if os.path.isfile(os.path.join(ready, "TrafficDeployer.exe")) and os.path.isfile(
+        os.path.join(ready, READY_COMPLETE)
+    ):
         return ready
     return None
 
@@ -300,17 +455,34 @@ def resume_pending_apply(
     data_dir = data_dir or DATA_DIR
     ready = ready_bundle_path(data_dir)
     if not ready:
+        if os.path.isdir(os.path.join(data_dir, READY_DIRNAME)):
+            _discard_staged(data_dir, "", "", record=False)
         return None
     state = _read_state(data_dir)
     pending = str(state.get("pending_apply") or "").strip()
     version = pending or "pending"
+    if not pending or not update_check.version_gt(pending, current_version):
+        _discard_staged(data_dir, version, f"not newer than running v{current_version}")
+        return None
+    attempts = int(state.get("resume_attempts") or 0)
+    if attempts >= MAX_RESUME_ATTEMPTS:
+        _discard_staged(data_dir, version, f"did not install after {attempts} tries")
+        return UpdateRunResult(
+            checked=True,
+            error=f"Update v{version} did not install after {attempts} tries; "
+                  f"staying on v{current_version}.",
+            message=f"Update v{version} skipped; staying on v{current_version}.",
+        )
     ok, detail = validate_bundle(ready)
     if not ok:
+        _discard_staged(data_dir, version, f"invalid bundle: {detail}")
         return UpdateRunResult(
             checked=True,
             error=detail,
             message=f"Staged update invalid: {detail}",
         )
+    state["resume_attempts"] = attempts + 1
+    _write_state(data_dir, state)
     result = UpdateRunResult(
         checked=True,
         update_available=True,
@@ -346,6 +518,48 @@ def _clear_staging(data_dir: str) -> None:
             pass
 
 
+def _discard_staged(data_dir: str, version: str, reason: str, *, record: bool = True) -> None:
+    """Drop update_ready + pending so launch never loops on a bad or stale update.
+
+    record=False (partial copy, e.g. disk full) leaves the version eligible to download again.
+    """
+    ready = os.path.join(data_dir, READY_DIRNAME)
+    if os.path.isdir(ready):
+        try:
+            shutil.rmtree(ready)
+        except OSError:
+            pass
+    _clear_staging(data_dir)
+    state = _read_state(data_dir)
+    state.pop("pending_apply", None)
+    state.pop("pending_at", None)
+    state.pop("resume_attempts", None)
+    if record:
+        state["last_failed_apply"] = {
+            "version": version,
+            "reason": reason,
+            "at": update_check.utc_now_iso(),
+        }
+    _write_state(data_dir, state)
+
+
+def _consume_failed_marker(data_dir: str) -> None:
+    """Helper bat rolled back: record the failure and drop the staged bundle."""
+    marker = os.path.join(data_dir, FAILED_MARKER)
+    if not os.path.isfile(marker):
+        return
+    try:
+        with open(marker, encoding="utf-8", errors="replace") as f:
+            version = f.read().strip() or "unknown"
+    except OSError:
+        version = "unknown"
+    _discard_staged(data_dir, version, "install failed; previous version restored")
+    try:
+        os.remove(marker)
+    except OSError:
+        pass
+
+
 def stage_bundle_for_apply(bundle_root: str, data_dir: str) -> str:
     """Copy validated bundle into tds_data/update_ready for the helper bat."""
     ready = os.path.join(data_dir, READY_DIRNAME)
@@ -372,6 +586,8 @@ def stage_bundle_for_apply(bundle_root: str, data_dir: str) -> str:
         src = os.path.join(bundle_root, name)
         if os.path.isfile(src):
             shutil.copy2(src, os.path.join(ready, name))
+    with open(os.path.join(ready, READY_COMPLETE), "w", encoding="utf-8") as f:
+        f.write("ok\n")
     # Staging extract/zip no longer needed — free disk before restart.
     _clear_staging(data_dir)
     return ready
@@ -410,8 +626,14 @@ def schedule_apply_and_exit(
     app_dir: str,
     data_dir: str,
     version: str,
+    *,
+    before_exit: Callable[[], bool] | None = None,
 ) -> None:
-    """Stage files, start helper bat, exit so Windows can replace the exe."""
+    """Stage files, start helper bat, exit so Windows can replace the exe.
+
+    before_exit must save the operator's work; returning False aborts the exit
+    (the staged update stays and finishes on the next launch).
+    """
     ok, detail = validate_bundle(bundle_root)
     if not ok:
         raise RuntimeError(detail)
@@ -425,15 +647,11 @@ def schedule_apply_and_exit(
     else:
         ready = stage_bundle_for_apply(bundle_root, data_dir)
     bat = _write_apply_bat(app_dir, ready, version)
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
-        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-    )
-    subprocess.Popen(
-        ["cmd.exe", "/c", bat],
-        cwd=app_dir,
-        creationflags=flags,
-        close_fds=True,
-    )
+    if before_exit is not None and not before_exit():
+        raise RuntimeError(
+            "Shift could not be saved, so the update was not started. "
+            "It will finish next time the app opens.")
+    _launch_helper(bat, app_dir)
     sys.exit(0)
 
 
@@ -459,8 +677,12 @@ def check_and_apply(
     field_mode: bool = False,
     allow_apply: bool | None = None,
     force_check: bool = False,
+    before_exit: Callable[[], bool] | None = None,
 ) -> UpdateRunResult:
-    """Check manifest, optionally download and apply. Skips when field mode is on."""
+    """Check manifest, optionally download and apply. Skips when field mode is on.
+
+    Called from inside a running window, pass before_exit to save the shift.
+    """
     app_dir = app_dir or APP_DIR
     data_dir = data_dir or DATA_DIR
     allow_apply = IS_PORTABLE if allow_apply is None else allow_apply
@@ -493,6 +715,28 @@ def check_and_apply(
         return result
     if not info.download_url:
         result.message = f"Update {info.latest} listed but no download_url in manifest."
+        return result
+    failed = state.get("last_failed_apply") or {}
+    if isinstance(failed, dict) and failed.get("version") == info.latest:
+        result.error = (
+            f"Update v{info.latest} failed to install before ({failed.get('reason', '')}). "
+            f"Use APPLY-v{info.latest}.bat, or publish a newer build.")
+        result.message = result.error
+        return result
+    staged = ready_bundle_path(data_dir)
+    if staged and str(state.get("pending_apply") or "") == info.latest and validate_bundle(staged)[0]:
+        result.applied = True
+        result.relaunch = True
+        result.message = f"Update v{info.latest} already downloaded. Applying and restarting…"
+        try:
+            schedule_apply_and_exit(staged, app_dir, data_dir, info.latest, before_exit=before_exit)
+        except SystemExit:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            result.applied = False
+            result.relaunch = False
+            result.error = str(exc)
+            result.message = f"Update failed: {exc}"
         return result
 
     try:
@@ -534,16 +778,20 @@ def check_and_apply(
         state["last_latest"] = info.latest
         state["pending_apply"] = info.latest
         state["pending_at"] = update_check.utc_now_iso()
+        state["resume_attempts"] = 0
         _write_state(data_dir, state)
         result.applied = True
         result.relaunch = True
         result.message = f"Update v{info.latest} downloaded. Applying and restarting…"
         # Does not return — process exits so Windows can replace the exe.
         # stage_bundle_for_apply clears update_staging after copy to update_ready.
-        schedule_apply_and_exit(bundle_root, app_dir, data_dir, info.latest)
+        schedule_apply_and_exit(
+            bundle_root, app_dir, data_dir, info.latest, before_exit=before_exit)
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001
+        result.applied = False
+        result.relaunch = False
         result.error = str(exc)
         result.message = f"Update failed: {exc}"
         return result
@@ -571,6 +819,10 @@ def _clear_pending_if_current(current_version: str, data_dir: str) -> None:
         state["last_applied_at"] = update_check.utc_now_iso()
         state.pop("pending_apply", None)
         state.pop("pending_at", None)
+        state.pop("resume_attempts", None)
+        failed = state.get("last_failed_apply") or {}
+        if isinstance(failed, dict) and failed.get("version") == current_version:
+            state.pop("last_failed_apply", None)
         _write_state(data_dir, state)
         ready = os.path.join(data_dir, READY_DIRNAME)
         if os.path.isdir(ready):
@@ -588,6 +840,7 @@ def _clear_pending_if_current(current_version: str, data_dir: str) -> None:
 
 def maybe_apply_on_launch(current_version: str) -> UpdateRunResult:
     """Portable startup gate — resume stalled apply, then Wi‑Fi check (home mode)."""
+    _consume_failed_marker(DATA_DIR)
     _clear_pending_if_current(current_version, DATA_DIR)
     resumed = resume_pending_apply(current_version)
     if resumed is not None:

@@ -23,6 +23,7 @@ GATE_SCRIPTS = (
     "test_grab_gps_safe.py",
     "test_install_commit.py",
     "test_update_overwrite.py",
+    "test_updater_safety.py",
     "test_shipment.py",
 )
 

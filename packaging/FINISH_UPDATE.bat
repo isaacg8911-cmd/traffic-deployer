@@ -52,7 +52,7 @@ if not errorlevel 1 (
     exit /b 1
 )
 
-if exist "%INSTALL%\tds_data\update_ready\TrafficDeployer.exe" (
+if exist "%INSTALL%\tds_data\update_ready\TrafficDeployer.exe" if exist "%INSTALL%\tds_data\update_ready\.complete" (
     set "SRC=%INSTALL%\tds_data\update_ready"
     echo Found stalled download: tds_data\update_ready
     goto :apply

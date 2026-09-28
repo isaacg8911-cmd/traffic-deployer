@@ -687,6 +687,14 @@ def test_web_assets():
         "merge days stays optional after manual pick",
         "_merge_days_best_route" in route_ctrl and "_offer_merge_days" in main_src,
     )
+    threads_src = open(os.path.join(ROOT, "ui", "threads.py"), encoding="utf-8").read()
+    routing_src = open(os.path.join(ROOT, "core", "routing.py"), encoding="utf-8").read()
+    check(
+        "merge refreshes each day's route",
+        "_commit_merged_day_routes" in route_ctrl
+        and "refresh_sections" in threads_src
+        and "def build_routes_by_section" in routing_src,
+    )
     check("map cycle controls", "_cycle_map_next" in main_src and "btn_map_next" in main_src)
     from ui.simple_mode import BUILD_LABEL, SIMPLE_MODE
     check("simple mode default", SIMPLE_MODE)

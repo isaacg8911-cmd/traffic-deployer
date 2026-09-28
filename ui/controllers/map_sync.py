@@ -377,7 +377,8 @@ class MapSyncControllerMixin:
         stored = self._ensure_routes_by_map().get(key) or self._ensure_routes_by_map().get(day)
         if stored:
             self.state.route = dict(stored)
-        elif self._route_pick_mode:
+        elif self._route_pick_mode or self._route_section_active():
+            # No line for this day. Do not keep the merged (or other day) route.
             self.state.route = route_sections.empty_route()
 
     def _set_route_section(self, label: str, *, persist: bool = True) -> None:

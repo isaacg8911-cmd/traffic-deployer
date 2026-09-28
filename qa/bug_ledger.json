@@ -105,10 +105,11 @@
       "rank": 7,
       "area": "multi-day routes",
       "severity": "major",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_route_sections.py)",
       "title": "Merging days leaves each day's route out of date",
-      "detail": ""
+      "detail": "Merge reordered every site but left each day's saved line on the old visit order. Each day is now retraced in the new order; a day that fails to trace drops the old line."
     },
     {
       "id": "RTE-4",

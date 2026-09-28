@@ -299,6 +299,36 @@ class RouteControllerMixin:
         self._set_route_section(route_sections.DAY_FILTER_ALL, persist=False)
         self._optimize_and_route(stops)
 
+    def _commit_merged_day_routes(
+        self,
+        ordered: list[dict],
+        route: dict,
+        routes_by_section: dict,
+    ) -> None:
+        """Save the merged line and a fresh route for each day in that new order.
+
+        Days missing from ``routes_by_section`` lose their pre-merge line so
+        Day view cannot keep showing a route for the old visit order.
+        """
+        self.state.stops = list(ordered)
+        self.state.days_merged = True
+        self.state.merged_route = dict(route)
+        self.state.route = dict(route)
+        stored = self._ensure_routes_by_map()
+        labels = route_sections.section_labels(
+            self.state.stops, getattr(self.state, "active_files", None))
+        fresh = {
+            route_sections.canonical_section(key): value
+            for key, value in (routes_by_section or {}).items()
+            if isinstance(value, dict)
+        }
+        for key in list(stored):
+            if route_sections.canonical_section(key) in labels:
+                stored.pop(key, None)
+        for label in labels:
+            built = fresh.get(label)
+            stored[label] = dict(built) if isinstance(built, dict) else route_sections.empty_route()
+
     @staticmethod
     def _street_label(s: dict) -> str:
         st = str(s.get("street", "")).strip()
@@ -895,7 +925,9 @@ class RouteControllerMixin:
 
             start = fix_from_snapshot(self.gps.latest())
         thread = RouteOptimizeThread(
-            list(stops), tuple(self.state.home), DATA_DIR, start=start)
+            list(stops), tuple(self.state.home), DATA_DIR, start=start,
+            refresh_sections=bool(getattr(self, "_merge_build_pending", False)),
+        )
         self._route_thread = thread
         build_section = section
         queued = bool(getattr(self, "_auto_build_queue", None))
@@ -930,7 +962,12 @@ class RouteControllerMixin:
                     print(res["trace"])
                 return
             ordered = res["order"]
-            if build_section and not route_sections.is_all_days(build_section):
+            if getattr(self, "_merge_build_pending", False):
+                self._merge_build_pending = False
+                self._commit_merged_day_routes(
+                    ordered, res["route"], res.get("routes_by_section") or {})
+                self._set_route_section(route_sections.DAY_FILTER_ALL, persist=False)
+            elif build_section and not route_sections.is_all_days(build_section):
                 self.state.stops = route_sections.merge_section_order(
                     self.state.stops, ordered)
                 self._ensure_routes_by_map()[build_section] = dict(res["route"])
@@ -939,11 +976,6 @@ class RouteControllerMixin:
             else:
                 self.state.stops = ordered
                 self.state.route = res["route"]
-            if getattr(self, "_merge_build_pending", False):
-                self._merge_build_pending = False
-                self.state.days_merged = True
-                self.state.merged_route = dict(res["route"])
-                self._set_route_section(route_sections.DAY_FILTER_ALL, persist=False)
             self.current_index = min(self.current_index, max(0, len(self.state.stops) - 1))
             self._persist_shift(quiet=True)
             self._refresh_route_list()

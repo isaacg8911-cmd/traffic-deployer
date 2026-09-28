@@ -186,6 +186,146 @@ def test_days_merged_view() -> None:
         )
     _ = display_route_for_map
 
+    # Merged order reverses Day5 (101 then 100) and keeps Day6 (200 then 201).
+    ordered = [win.state.stops[1], win.state.stops[2], win.state.stops[0], win.state.stops[3]]
+    win._commit_merged_day_routes(
+        ordered,
+        {"polyline": [[34.0, -118.0], [34.2, -117.3]], "miles": 20.0, "graph": True},
+        {
+            "Day5": {
+                "polyline": [[34.01, -118.01], [34.0, -118.0]],
+                "miles": 8.0,
+                "graph": True,
+                "ids": ["101", "100"],
+            },
+            "Day6": {
+                "polyline": [[34.2, -117.3], [34.21, -117.31]],
+                "miles": 9.0,
+                "graph": True,
+                "ids": ["200", "201"],
+            },
+        },
+    )
+    win._set_route_section("Day5", persist=False)
+    day5_ids = [s["id"] for s in win._stops_matching_day_filter()]
+    if day5_ids == ["101", "100"] and abs(float(win.state.route.get("miles") or 0) - 8.0) < 0.01:
+        ok("Day5 route matches the merged visit order")
+    else:
+        fail(
+            "Day5 route matches the merged visit order",
+            f"ids={day5_ids} miles={win.state.route.get('miles')}",
+        )
+    win._set_route_section("Day6", persist=False)
+    if abs(float(win.state.route.get("miles") or 0) - 9.0) < 0.01:
+        ok("Day6 route replaced, not the pre-merge line")
+    else:
+        fail("Day6 route replaced", f"miles={win.state.route.get('miles')}")
+    win._set_route_section("All days", persist=False)
+    if abs(float(win.state.route.get("miles") or 0) - 20.0) < 0.01:
+        ok("Together still shows the merged route")
+    else:
+        fail("Together still shows the merged route", f"miles={win.state.route.get('miles')}")
+
+    # A day the merge did not trace must not keep its old line, even under an alias key.
+    win.state.active_files = ["Week 27 Day 1 Isaac", "Week 27 Day 2 Isaac"]
+    win.state.routes_by_map = {
+        "Day 1": {"polyline": [[1.0, 2.0]], "miles": 3.0, "graph": True},
+        "Week 27 Day 2 Isaac": {"polyline": [[9.0, 8.0]], "miles": 4.5, "graph": True},
+    }
+    win.state.stops = [
+        _stop("Week 27 Day 1 Isaac", "100", 34.0, -118.0),
+        _stop("Week 27 Day 1 Isaac", "101", 34.01, -118.01),
+        _stop("Week 27 Day 2 Isaac", "200", 34.2, -117.3),
+        _stop("Week 27 Day 2 Isaac", "201", 34.21, -117.31),
+    ]
+    win._commit_merged_day_routes(
+        list(win.state.stops),
+        {"polyline": [[1, 2]], "miles": 11.0, "graph": False},
+        {"Day 1": {"polyline": [[34.0, -118.0]], "miles": 1.5, "graph": False}},
+    )
+    win._set_route_section("Day 2", persist=False)
+    stale = float(win.state.route.get("miles") or 0)
+    alias_left = "Week 27 Day 2 Isaac" in win.state.routes_by_map
+    if abs(stale) < 0.01 and not (win.state.route.get("polyline") or []) and not alias_left:
+        ok("untraced day drops the pre-merge route")
+    else:
+        fail(
+            "untraced day drops the pre-merge route",
+            f"miles={stale} alias={alias_left} route={win.state.route}",
+        )
+    if abs(float((win.state.routes_by_map.get("Day 1") or {}).get("miles") or 0) - 1.5) < 0.01:
+        ok("traced day keeps the new route")
+    else:
+        fail("traced day keeps the new route", str(win.state.routes_by_map.get("Day 1")))
+
+
+def test_build_routes_by_section() -> None:
+    print("\n[each day route from merged order]")
+    from core import routing
+
+    a = [_stop("Day5", "100", 34.0, -118.0), _stop("Day5", "101", 34.01, -118.01)]
+    b = [_stop("Day6", "200", 34.2, -117.3), _stop("Day6", "201", 34.21, -117.31)]
+    ordered = [a[1], b[0], a[0], b[1]]
+    real = routing.build_route
+
+    def fake(stops, home, data_dir, abort=None):
+        _ = (home, data_dir, abort)
+        ids = [s["id"] for s in stops]
+        if ids == ["200", "201"]:
+            raise RuntimeError("day trace failed")
+        return {
+            "polyline": [[s["lat"], s["lon"]] for s in stops],
+            "miles": 8.0,
+            "graph": False,
+            "ids": ids,
+        }
+
+    routing.build_route = fake
+    try:
+        built = routing.build_routes_by_section(ordered, (34.0, -118.0), "")
+    finally:
+        routing.build_route = real
+    day5 = built.get("Day5") or {}
+    day6 = built.get("Day6") or {}
+    if day5.get("ids") == ["101", "100"] and abs(float(day5.get("miles") or 0) - 8.0) < 0.01:
+        ok("section route follows merged Day5 order")
+    else:
+        fail("section route follows merged Day5 order", str(day5))
+    if not (day6.get("polyline") or []) and float(day6.get("miles") or 0) == 0.0:
+        ok("failed day trace is empty, not the old route")
+    else:
+        fail("failed day trace is empty", str(day6))
+
+    calls = {"n": 0}
+
+    def counting(stops, home, data_dir, abort=None):
+        _ = (stops, home, data_dir, abort)
+        calls["n"] += 1
+        return {"polyline": [[1, 2]], "miles": float(calls["n"]), "graph": False}
+
+    routing.build_route = counting
+    try:
+        partial = routing.build_routes_by_section(
+            ordered, (34.0, -118.0), "", abort=lambda: calls["n"] >= 1)
+    finally:
+        routing.build_route = real
+    if list(partial) == ["Day5"] and calls["n"] == 1:
+        ok("abort keeps only days finished before the stop")
+    else:
+        fail("abort keeps only days finished before the stop", f"{list(partial)} n={calls['n']}")
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from ui.threads import RouteOptimizeThread
+
+    _ = QApplication.instance() or QApplication(sys.argv)
+    thread = RouteOptimizeThread([], (34.0, -118.0), "", refresh_sections=True)
+    if thread.refresh_sections and callable(thread.start):
+        ok("merge worker can refresh each day without shadowing start")
+    else:
+        fail("merge worker refresh", f"flag={thread.refresh_sections} start={thread.start}")
+
 
 def test_pick_scoped_to_one_map() -> None:
     print("\n[pick scoped to one map]")
@@ -614,6 +754,7 @@ def main() -> int:
     print("ROUTE SECTIONS — two maps, two independent builds\n")
     test_core_helpers()
     test_days_merged_view()
+    test_build_routes_by_section()
     test_pick_scoped_to_one_map()
     test_excel_day_not_only_together()
     print()

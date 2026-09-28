@@ -1489,3 +1489,32 @@ def build_route(
     }
     time_est.attach_to_route(out, ordered, home, None)
     return out
+
+
+def build_routes_by_section(
+    ordered_stops: list[dict],
+    home: tuple[float, float],
+    data_dir: str,
+    *,
+    abort=None,
+) -> dict[str, dict]:
+    """One route per day, in the order those sites appear in a merged visit list.
+
+    A failed day is an empty route so the pre-merge line is not left on screen.
+    If ``abort`` becomes true, the dict only has days finished before the stop;
+    the caller must not save that partial set.
+    """
+    from core import route_sections
+
+    out: dict[str, dict] = {}
+    for label in route_sections.section_labels(ordered_stops):
+        if abort and abort():
+            return out
+        group = route_sections.stops_for_section(ordered_stops, label)
+        if not group:
+            continue
+        try:
+            out[label] = build_route(group, home, data_dir, abort=abort)
+        except Exception:  # noqa: BLE001 — a failed day must not keep the old line
+            out[label] = route_sections.empty_route()
+    return out

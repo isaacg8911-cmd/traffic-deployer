@@ -225,6 +225,7 @@ class RouteOptimizeThread(QThread):
         data_dir: str,
         *,
         start: tuple[float, float] | None = None,
+        refresh_sections: bool = False,
     ):
         super().__init__()
         self.stops = stops
@@ -232,6 +233,7 @@ class RouteOptimizeThread(QThread):
         self.data_dir = data_dir
         # Must not be named `start` — that shadows QThread.start().
         self.start_ll = start
+        self.refresh_sections = refresh_sections
 
     def run(self):
         import traceback
@@ -254,10 +256,20 @@ class RouteOptimizeThread(QThread):
                 ordered, self.home, self.data_dir, abort=self.isInterruptionRequested)
             if self.isInterruptionRequested():
                 return
-            self.finished_result.emit({
+            routes_by_section: dict = {}
+            if self.refresh_sections:
+                self.progress_text.emit("Updating each day's route for the new order...")
+                routes_by_section = routing.build_routes_by_section(
+                    ordered, self.home, self.data_dir, abort=self.isInterruptionRequested)
+                if self.isInterruptionRequested():
+                    return
+            payload = {
                 "ok": True, "order": ordered, "route": route, "graph": res["graph"],
                 **{k: res[k] for k in ("zoned", "used_gps", "anchor") if k in res},
-            })
+            }
+            if self.refresh_sections:
+                payload["routes_by_section"] = routes_by_section
+            self.finished_result.emit(payload)
         except Exception as exc:  # noqa: BLE001
             if not self.isInterruptionRequested():
                 self.finished_result.emit({

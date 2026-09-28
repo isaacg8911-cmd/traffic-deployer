@@ -750,11 +750,75 @@ def test_excel_day_not_only_together() -> None:
         )
 
 
+def test_day_filter_drive_time() -> None:
+    print("\n[day filter drive times use that day's legs]")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from ui.controllers.map_sync import MapSyncControllerMixin
+    from ui.controllers.route import RouteControllerMixin
+
+    class Win(MapSyncControllerMixin, RouteControllerMixin):
+        pass
+
+    _ = QApplication.instance() or QApplication(sys.argv)
+    a = [_stop("Day5", "100", 34.0, -118.0), _stop("Day5", "101", 34.01, -118.01)]
+    b = [_stop("Day6", "200", 34.2, -117.3), _stop("Day6", "201", 34.21, -117.31)]
+    win = Win()
+    win.state = type("S", (), {})()
+    win.state.stops = a + b
+    win.state.active_files = ["Day5", "Day6"]
+    win.state.map_day_filter = "Day6"
+    win.state.home = None
+    win.state.routes_by_map = {}
+    # Legs are Day6 only. Absolute index 2 is past this list.
+    win.state.route = {
+        "miles": 4.0,
+        "graph": False,
+        "est_version": 2,
+        "job_drive_min": 9.0,
+        "home_back_min": 12.0,
+        "site_legs": [
+            {
+                "to_uid": b[0]["uid"],
+                "drive_min": 0.0,
+                "from_home_min": 15.0,
+                "to_home_min": 0.0,
+                "miles": 0.0,
+            },
+            {
+                "to_uid": b[1]["uid"],
+                "drive_min": 9.0,
+                "from_home_min": 0.0,
+                "to_home_min": 12.0,
+                "miles": 4.0,
+            },
+        ],
+    }
+    first = win._stop_time_suffix(2, "--", leg_index=0)
+    second = win._stop_time_suffix(3, "--", leg_index=1)
+    if "from home 15 min" in first and "9 min drive" not in first:
+        ok("Day6 first stop uses that day's from-home clock")
+    else:
+        fail("Day6 first stop uses that day's from-home clock", first)
+    if "9 min drive" in second and "then 12 min home" in second:
+        ok("Day6 second stop uses that day's drive and home clock")
+    else:
+        fail("Day6 second stop uses that day's drive and home clock", second)
+    # The old absolute index read off the end of the day legs.
+    stale = win._stop_time_suffix(2, "--")
+    if "from home" not in stale and "9 min drive" not in stale:
+        ok("absolute index is not a Day6 leg")
+    else:
+        fail("absolute index is not a Day6 leg", stale)
+
+
 def main() -> int:
     print("ROUTE SECTIONS — two maps, two independent builds\n")
     test_core_helpers()
     test_days_merged_view()
     test_build_routes_by_section()
+    test_day_filter_drive_time()
     test_pick_scoped_to_one_map()
     test_excel_day_not_only_together()
     print()

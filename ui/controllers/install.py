@@ -219,20 +219,7 @@ class InstallControllerMixin:
             sfx = ""
             if mark == "--":
                 try:
-                    from core import time_est
-                    time_est.ensure(
-                        self.state.route, self.state.stops, getattr(self.state, "home", None))
-                    legs = self.state.route.get("site_legs") or []
-                    leg = legs[idx] if idx < len(legs) else None
-                    pending = time_est.pending_stops(self.state.stops)
-                    last_uid = pending[-1].get("uid") if pending else None
-                    sfx = time_est.stop_suffix(
-                        leg,
-                        first=idx == 0,
-                        last=bool(last_uid) and s.get("uid") == last_uid,
-                        remaining=True,
-                        home_back_min=float(self.state.route.get("home_back_min") or 0),
-                    )
+                    sfx = self._stop_time_suffix(idx, mark, leg_index=seq - 1)
                 except Exception:
                     sfx = " · ~6 min setup"
             item = QListWidgetItem(

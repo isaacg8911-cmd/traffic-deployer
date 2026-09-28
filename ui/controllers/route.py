@@ -336,20 +336,32 @@ class RouteControllerMixin:
             return f"Site {s.get('id', '')}"
         return st
 
-    def _stop_time_suffix(self, stop_index: int, mark: str) -> str:
-        """Drive + setup clock on a route-list row (open stops only)."""
+    def _stop_time_suffix(self, stop_index: int, mark: str, *, leg_index: int | None = None) -> str:
+        """Drive + setup clock on a route-list row (open stops only).
+
+        ``leg_index`` is the stop's place in the route on screen. A day filter's
+        legs are 0..n-1 for that day, not the index in the full stop list.
+        """
         try:
             from core import time_est
+            section = self._section_stops_for_legs()
             time_est.ensure(
-                self.state.route, self.state.stops, getattr(self.state, "home", None))
+                self.state.route, section, getattr(self.state, "home", None))
             legs = self.state.route.get("site_legs") or []
-            leg = legs[stop_index] if stop_index < len(legs) else None
-            pending = time_est.pending_stops(self.state.stops)
+            li = stop_index if leg_index is None else leg_index
+            leg = legs[li] if 0 <= li < len(legs) else None
+            pending = time_est.pending_stops(section)
             last_uid = pending[-1].get("uid") if pending else None
+            if 0 <= li < len(section):
+                uid = section[li].get("uid")
+            elif 0 <= stop_index < len(self.state.stops):
+                uid = self.state.stops[stop_index].get("uid")
+            else:
+                uid = None
             return time_est.stop_suffix(
                 leg,
-                first=stop_index == 0,
-                last=bool(last_uid) and self.state.stops[stop_index].get("uid") == last_uid,
+                first=li == 0,
+                last=bool(last_uid) and uid == last_uid,
                 remaining=mark == "--",
                 home_back_min=float(self.state.route.get("home_back_min") or 0),
             )
@@ -1308,7 +1320,7 @@ class RouteControllerMixin:
             sheet = f" · {s.get('sheet')}" if s.get("sheet") and not self._day_filter_active() else ""
             self.list_route.addItem(
                 f"[{mark}] {seq}.{ztxt} Site {s['id']}{sheet} — {self._street_label(s)}"
-                f"{self._stop_time_suffix(i, mark)}")
+                f"{self._stop_time_suffix(i, mark, leg_index=seq - 1)}")
         miles = float(self.state.route.get("miles", 0.0) or 0)
         on_graph = bool(self.state.route.get("graph"))
         shown = len(visible)

@@ -116,10 +116,11 @@
       "rank": 8,
       "area": "multi-day routes",
       "severity": "major",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_route_sections.py)",
       "title": "Drive times are wrong when a day filter is on",
-      "detail": "Day-filtered time legs are indexed by absolute stop index."
+      "detail": "Day-filtered time legs were indexed by the full stop list. Route and install clocks now use that day's own order."
     },
     {
       "id": "RTE-5",

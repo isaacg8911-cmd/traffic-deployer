@@ -112,6 +112,16 @@ def main() -> int:
             json={"lat": glat + 0.0002, "lon": glon + 0.0002, "source": "manual"},
         )
         check("pin_fallback_grab", r.status_code == 200 and r.json()["stop"]["field_source"] == "manual")
+        r = client.post(
+            f"/api/jobs/{job_id}/stops/{uid2}/grab",
+            headers=auth,
+            json={"clear": True},
+        )
+        cleared = r.status_code == 200 and r.json()["stop"]["field_lat"] is None
+        check("clear_wrong_site_grab", cleared, str(r.status_code))
+        still = client.get(f"/api/jobs/{job_id}", headers=auth).json()["state"]
+        kept = still["stops"][0].get("field_lat") is not None
+        check("clear_leaves_other_site", kept)
 
     # 7. grab outside CA rejected (error path)
     r = client.post(

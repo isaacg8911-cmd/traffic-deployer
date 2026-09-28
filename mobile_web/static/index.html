@@ -157,40 +157,43 @@
     </div>
   </section>
 
-  <!-- Install tab -->
+  <!-- Install tab: grab picks the site, then the form, then back to waiting -->
   <section id="installScreen" class="screen tab hidden">
     <div class="panel">
-      <div id="installTitle" class="stop-title">No stop selected.</div>
-      <div id="installSub" class="muted"></div>
-      <div class="row">
-        <button id="btnGrab" class="primary">Grab GPS</button>
-        <button id="btnDropPin" class="secondary">Drop pin</button>
+      <div id="grabWait">
+        <div id="installWaitTitle" class="stop-title">At the site</div>
+        <p id="installWaitSub" class="muted">Grab GPS. The app links it to the site you are standing at.</p>
+        <button id="btnGrab" class="field-primary" type="button">Grab GPS</button>
+        <button id="btnDropPin" class="secondary" type="button">Drop pin</button>
+        <div id="grabInfo" class="msg"></div>
+        <ul id="matchChoices" class="list hidden"></ul>
       </div>
-      <div id="grabInfo" class="msg"></div>
-      <label class="field">Street
-        <input id="fStreet" type="text" />
-      </label>
-      <div class="row">
-        <label class="field grow">Direction
-          <select id="fDir"></select>
+      <div id="siteForm" class="hidden">
+        <div id="installTitle" class="stop-title">Site</div>
+        <div id="installSub" class="muted"></div>
+        <div id="grabSaved" class="msg"></div>
+        <label class="field">Street
+          <input id="fStreet" type="text" />
         </label>
-        <label class="field narrow">Lanes
-          <input id="fLanes" type="number" min="1" max="20" value="2" />
+        <div class="row">
+          <label class="field grow">Direction
+            <select id="fDir"></select>
+          </label>
+          <label class="field narrow">Lanes
+            <input id="fLanes" type="number" min="1" max="20" value="2" />
+          </label>
+        </div>
+        <label class="field">Serial #
+          <input id="fSerial" type="text" inputmode="numeric" />
         </label>
-      </div>
-      <label class="field">Serial #
-        <input id="fSerial" type="text" inputmode="numeric" />
-      </label>
-      <label class="field">Notes
-        <textarea id="fNotes" rows="2"></textarea>
-      </label>
-      <div class="row">
-        <button id="btnInstall" class="field-primary">INSTALL</button>
-        <button id="btnSkip" class="field-skip">SKIP</button>
-      </div>
-      <div class="row">
-        <button id="btnPrev" class="secondary">← Prev</button>
-        <button id="btnNext" class="secondary">Next →</button>
+        <label class="field">Notes
+          <textarea id="fNotes" rows="2"></textarea>
+        </label>
+        <div class="row">
+          <button id="btnInstall" class="field-primary" type="button">INSTALL</button>
+          <button id="btnSkip" class="field-skip" type="button">SKIP</button>
+        </div>
+        <button id="btnWrong" class="ghost" type="button">Wrong site</button>
       </div>
     </div>
   </section>
@@ -240,7 +243,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/vendor/maplibre-gl.js"></script>
-  <script src="/local.js?v=1"></script>
-  <script src="/app.js?v=11"></script>
+  <script src="/local.js?v=2"></script>
+  <script src="/app.js?v=12"></script>
 </body>
 </html>

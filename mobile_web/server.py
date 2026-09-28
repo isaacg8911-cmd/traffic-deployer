@@ -511,11 +511,36 @@ async def patch_stop(job_id: str, uid: str, request: Request) -> dict:
     return {"stop": map_state.public_stop(stop), "state": _job_state(job)}
 
 
+def _find_stop(job: dict, uid: str) -> dict | None:
+    for stop in job.get("stops") or []:
+        if stop.get("uid") == uid:
+            return stop
+    return None
+
+
 @app.post("/api/jobs/{job_id}/stops/{uid}/grab")
 async def grab_location(job_id: str, uid: str, request: Request) -> dict:
-    """Store an exact location from the phone browser geolocation (or a dropped pin)."""
+    """Store an exact location from the phone browser geolocation (or a dropped pin).
+
+    ``{"clear": true}`` drops a grab that was linked to the wrong site.
+    """
     job = _authorize(request, job_id)
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object.")
+    found = _find_stop(job, uid)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Stop not found.")
+    if body.get("clear"):
+        found["field_lat"] = None
+        found["field_lon"] = None
+        found["field_coord_source"] = ""
+        found["field_accuracy_m"] = None
+        store.save(job)
+        return {"stop": map_state.public_stop(found), "state": _job_state(job)}
     try:
         lat = float(body["lat"])
         lon = float(body["lon"])
@@ -525,22 +550,14 @@ async def grab_location(job_id: str, uid: str, request: Request) -> dict:
         raise HTTPException(status_code=422, detail="Location outside California bounds.")
     source = str(body.get("source") or "phone_gps")
     accuracy = body.get("accuracy")
-
-    found = None
-    for stop in job["stops"]:
-        if stop.get("uid") == uid:
-            stop["field_lat"] = lat
-            stop["field_lon"] = lon
-            stop["field_coord_source"] = source if source in ("phone_gps", "manual") else "phone_gps"
-            if accuracy is not None:
-                try:
-                    stop["field_accuracy_m"] = round(float(accuracy), 1)
-                except (TypeError, ValueError):
-                    pass
-            found = stop
-            break
-    if found is None:
-        raise HTTPException(status_code=404, detail="Stop not found.")
+    found["field_lat"] = lat
+    found["field_lon"] = lon
+    found["field_coord_source"] = source if source in ("phone_gps", "manual") else "phone_gps"
+    if accuracy is not None:
+        try:
+            found["field_accuracy_m"] = round(float(accuracy), 1)
+        except (TypeError, ValueError):
+            pass
     store.save(job)
     return {"stop": map_state.public_stop(found), "state": _job_state(job)}
 

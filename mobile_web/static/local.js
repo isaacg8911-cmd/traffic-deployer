@@ -244,10 +244,11 @@
       serial: pub.serial, lanes: pub.lanes,
       installed: pub.installed, skipped: pub.skipped, picked_up: pub.picked_up
     });
-    if (pub.field_lat != null) {
+    if (Object.prototype.hasOwnProperty.call(pub, 'field_lat')) {
       raw.field_lat = pub.field_lat;
       raw.field_lon = pub.field_lon;
-      raw.field_coord_source = pub.field_source || raw.field_coord_source;
+      raw.field_coord_source = pub.field_lat == null ? '' : (pub.field_source || raw.field_coord_source || '');
+      if (pub.field_lat == null) raw.field_accuracy_m = null;
     }
   }
 
@@ -295,6 +296,140 @@
       Math.cos(lat1 * toR) * Math.cos(lat2 * toR) *
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  // Keep in sync with mobile_web/site_match.py
+  var AUTO_M = 80;
+  var CONFIRM_M = 200;
+  var AMBIGUOUS_GAP_M = 35;
+  var DONE_CLOSER_M = 10;
+  var FUZZY_ACCURACY_M = 65;
+
+  function finiteNum(v) {
+    var n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function havM(lat1, lon1, lat2, lon2) {
+    var R = 6371000;
+    var toR = Math.PI / 180;
+    var dLat = (lat2 - lat1) * toR, dLon = (lon2 - lon1) * toR;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * toR) * Math.cos(lat2 * toR) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function localXY(lat, lon, lat0, lon0) {
+    var mLat = 111320.0;
+    var mLon = 111320.0 * Math.cos(lat0 * Math.PI / 180);
+    return [(lon - lon0) * mLon, (lat - lat0) * mLat];
+  }
+
+  function segmentDistanceM(plat, plon, aLat, aLon, bLat, bLon) {
+    var a = localXY(aLat, aLon, aLat, aLon);
+    var b = localXY(bLat, bLon, aLat, aLon);
+    var p = localXY(plat, plon, aLat, aLon);
+    var abx = b[0] - a[0], aby = b[1] - a[1];
+    var apx = p[0] - a[0], apy = p[1] - a[1];
+    var ab2 = abx * abx + aby * aby;
+    if (ab2 < 1e-6) return havM(plat, plon, aLat, aLon);
+    var t = (apx * abx + apy * aby) / ab2;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    var cx = a[0] + t * abx, cy = a[1] + t * aby;
+    var dx = p[0] - cx, dy = p[1] - cy;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function siteSegment(stop) {
+    var blat = finiteNum(stop.begin_lat), blon = finiteNum(stop.begin_lon);
+    if (blat == null || blon == null) {
+      blat = finiteNum(stop.lat); blon = finiteNum(stop.lon);
+    }
+    if (blat == null || blon == null) return null;
+    var elat = finiteNum(stop.end_lat), elon = finiteNum(stop.end_lon);
+    if (elat == null || elon == null) { elat = blat; elon = blon; }
+    return [blat, blon, elat, elon];
+  }
+
+  function packMatch(row) {
+    return {
+      uid: row.uid, id: row.id, street: row.street, distance_m: row.distance_m,
+      installed: row.installed, skipped: row.skipped
+    };
+  }
+
+  function matchSite(stops, lat, lon, accuracy) {
+    var ranked = [];
+    (stops || []).forEach(function (stop) {
+      var seg = siteSegment(stop);
+      if (!seg) return;
+      var distance = segmentDistanceM(lat, lon, seg[0], seg[1], seg[2], seg[3]);
+      ranked.push({
+        uid: stop.uid, id: stop.id, street: String(stop.street || ''),
+        distance_m: Math.round(distance * 10) / 10,
+        installed: !!stop.installed, skipped: !!stop.skipped,
+        done: !!(stop.installed || stop.skipped)
+      });
+    });
+    ranked.sort(function (a, b) { return a.distance_m - b.distance_m; });
+    var pending = ranked.filter(function (r) { return !r.done; });
+    var finished = ranked.filter(function (r) { return r.done; });
+    var empty = { status: 'none', reason: 'empty', options: [], nearest: null, nearby_done: null };
+    if (!ranked.length) return empty;
+    var nearestDone = finished[0] || null;
+    var nearestPending = pending[0] || null;
+    var forceChoose = false;
+    if (nearestDone && nearestDone.distance_m <= AUTO_M) {
+      var pendingDist = nearestPending ? nearestPending.distance_m : 1e12;
+      if (pendingDist > nearestDone.distance_m + DONE_CLOSER_M) {
+        var donePack = packMatch(nearestDone);
+        return {
+          status: 'done', reason: 'already', uid: nearestDone.uid,
+          distance_m: nearestDone.distance_m, options: [], nearest: donePack, nearby_done: donePack
+        };
+      }
+      forceChoose = true;
+    }
+    if (!nearestPending || nearestPending.distance_m > CONFIRM_M) {
+      var near = nearestPending ? packMatch(nearestPending) : (nearestDone ? packMatch(nearestDone) : null);
+      return {
+        status: 'none', reason: nearestPending ? 'far' : 'empty', options: [],
+        nearest: near, nearby_done: nearestDone ? packMatch(nearestDone) : null
+      };
+    }
+    var options = pending.filter(function (r) { return r.distance_m <= CONFIRM_M; })
+      .slice(0, 3).map(packMatch);
+    var second = pending.length > 1 ? pending[1].distance_m : 1e12;
+    var gap = second - nearestPending.distance_m;
+    var acc = finiteNum(accuracy);
+    if (acc != null && acc < 0) acc = null;
+    var fuzzy = acc != null && acc > FUZZY_ACCURACY_M;
+    var ambiguous = gap < AMBIGUOUS_GAP_M && second <= CONFIRM_M;
+    var closeEnough = nearestPending.distance_m <= AUTO_M;
+    var packed = packMatch(nearestPending);
+    var nearby = nearestDone ? packMatch(nearestDone) : null;
+    if (closeEnough && !ambiguous && !fuzzy && !forceChoose) {
+      return {
+        status: 'bind', reason: 'clear', uid: nearestPending.uid,
+        distance_m: nearestPending.distance_m, options: options, nearest: packed, nearby_done: nearby
+      };
+    }
+    var reason = ambiguous ? 'ambiguous' : (fuzzy ? 'fuzzy' : (forceChoose ? 'already_near' : 'confirm'));
+    return {
+      status: 'choose', reason: reason, uid: nearestPending.uid,
+      distance_m: nearestPending.distance_m, options: options, nearest: packed, nearby_done: nearby
+    };
+  }
+
+  function clearGrab(stop) {
+    if (!stop) return stop;
+    stop.field_lat = null;
+    stop.field_lon = null;
+    stop.field_coord_source = '';
+    stop.field_accuracy_m = null;
+    return stop;
   }
 
   function localJobId() {
@@ -416,6 +551,8 @@
     audit: audit,
     toCsv: toCsv,
     haversineMi: haversineMi,
+    matchSite: matchSite,
+    clearGrab: clearGrab,
     localJobId: localJobId,
     saveSnapshot: saveSnapshot,
     loadSnapshot: loadSnapshot,
@@ -424,4 +561,4 @@
     downloadNamed: downloadNamed,
     parseFile: parseFile
   };
-})(window);
+})(typeof window !== 'undefined' ? window : globalThis);

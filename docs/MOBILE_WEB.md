@@ -81,6 +81,10 @@ the laptop must stay running. For data that must never leave your machine, use
 same-Wi-Fi mode. For an always-on URL without the laptop, deploy the backend to a
 host (Render / Fly.io / VPS) — phase 2.
 
+## Field loop
+
+Load Excel + `.EST`, then stay on **Grab GPS**. The fix is matched to the nearest unfinished count — the begin–end line from the map file, not a previous truck pin. Two close sites, a fuzzy fix, or a stop that is only nearby asks you to tap the site before anything is saved. Direction and serial are required, then Install. The phone goes back to waiting for the next grab. **Wrong site** clears that GPS and does not mark the site done. A site you already installed will not take the next grab while you are still standing on it.
+
 ## Phone vs laptop
 
 | Capability | Laptop | Phone (PWA) |
@@ -88,9 +92,9 @@ host (Render / Fly.io / VPS) — phase 2.
 | Excel + .EST import | Local picker | Browser upload (same ingest) |
 | Route build / optimize | Yes | Yes (server) |
 | Map | Offline PMTiles | Online tiles |
-| GPS capture | USB receiver | Phone browser geolocation |
-| Drop pin fallback | Yes | Yes |
-| Follow GPS / next-stop banner | Yes | Yes |
+| GPS capture | USB receiver, on the selected stop | Phone GPS. Grab links the fix to the nearest unfinished site |
+| Drop pin fallback | Yes | Yes, matched the same way |
+| Follow GPS / next-stop banner | Yes | Nearest unfinished site, not the next row in the list |
 | Install / skip | Yes | Yes |
 | Serial / lanes / dir / notes | Yes | Yes |
 | PicoCount USB | Yes | No (counter columns blank) |
@@ -125,7 +129,7 @@ host (Render / Fly.io / VPS) — phase 2.
 | GET | `/api/jobs/{id}/tdjob` | Download portable job snapshot |
 | POST | `/api/jobs/{id}/route` | Optimize + trace |
 | PATCH | `/api/jobs/{id}/stops/{uid}` | Edit fields / install / skip / pickup |
-| POST | `/api/jobs/{id}/stops/{uid}/grab` | Save phone GPS / pin location |
+| POST | `/api/jobs/{id}/stops/{uid}/grab` | Save phone GPS / pin location. `{"clear": true}` drops a grab linked to the wrong site |
 | GET | `/api/jobs/{id}/audit` | Missing-field checklist |
 | GET | `/api/jobs/{id}/export.csv` / `.xlsx` | IG TFC export |
 

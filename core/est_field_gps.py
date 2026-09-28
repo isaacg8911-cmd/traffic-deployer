@@ -13,7 +13,9 @@ from core import export
 
 _LAT_TAG = b"\x14\x08"
 _LON_TAG = b"\x15\t"
-_INLINE_LAT = re.compile(rb"\x14\x08([0-9.\-]+)")
+# Second byte is the lat text width (0x07 = 7 chars, 0x08 = 8). Week 28 pins
+# such as 5057 and 5020 use 7-character latitudes and were skipped by \x14\x08 only.
+_INLINE_LAT = re.compile(rb"\x14[\x06-\x0c]([0-9.\-]+)")
 # Lon tag second byte is usually tab (\t) but some pins use \x08.
 _INLINE_LON = re.compile(rb"\x15[\x08\t]([0-9.\-]+)")
 _SITE_ID = re.compile(r"^\d{3,5}$")

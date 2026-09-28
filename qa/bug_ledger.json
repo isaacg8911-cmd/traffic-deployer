@@ -83,10 +83,11 @@
       "rank": 5,
       "area": "multi-day routes",
       "severity": "field-critical",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_route_sections.py)",
       "title": "Picking in the Together view loses picks and Apply loops",
-      "detail": ""
+      "detail": "Together restored an empty pick list, and Apply did not name the day so the pick queue started over."
     },
     {
       "id": "RTE-2",

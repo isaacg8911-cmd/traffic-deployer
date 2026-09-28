@@ -390,6 +390,9 @@ class RouteControllerMixin:
         self._route_pick_mode = True
         self._route_pick_uids = []
         self._route_pick_sides = {}
+        if self._day_filter_active():
+            self._route_pick_section = route_sections.canonical_section(
+                self._day_filter_value())
         # Drop a finished line on this map. Otherwise the first site click is
         # ignored ("route already applied") while the status line still changes.
         self._clear_visible_section_route_for_pick()
@@ -415,7 +418,7 @@ class RouteControllerMixin:
 
     def _clear_visible_section_route_for_pick(self) -> None:
         """Forget this map's applied line so the next site click is stop 1."""
-        section = self._day_filter_value() if self._day_filter_active() else ""
+        section = self._pick_apply_section()
         if section:
             self._ensure_pick_by_map().pop(section, None)
             self._ensure_routes_by_map().pop(section, None)
@@ -748,7 +751,7 @@ class RouteControllerMixin:
                 if res.get("trace"):
                     print(res["trace"])
                 return
-            section = self._day_filter_value() if self._day_filter_active() else ""
+            section = self._pick_apply_section()
             self.state.stops = route_sections.merge_section_order(
                 self.state.stops, res["order"])
             self.state.route = res["route"]

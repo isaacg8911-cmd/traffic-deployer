@@ -347,6 +347,11 @@ class MapSyncControllerMixin:
             self._ensure_routes_by_map()[label] = dict(route)
 
     def _restore_route_section(self, label: str) -> None:
+        # Together is a view of both maps, not a third pick list. Loading its
+        # empty stash here wiped the day the operator was clicking.
+        if getattr(self, "_route_pick_mode", False) and route_sections.is_all_days(label):
+            self._apply_section_route_to_state()
+            return
         saved = self._ensure_pick_by_map().get(label) or {}
         if self._route_pick_mode:
             self._route_pick_uids = list(saved.get("uids") or [])
@@ -378,8 +383,19 @@ class MapSyncControllerMixin:
     def _set_route_section(self, label: str, *, persist: bool = True) -> None:
         label = route_sections.canonical_section(label)
         prev = route_sections.canonical_section(getattr(self, "_day_filter_prev", None))
-        if prev and prev != label and not route_sections.is_all_days(prev):
-            self._stash_route_section(prev)
+        if prev and prev != label:
+            if not route_sections.is_all_days(prev):
+                self._stash_route_section(prev)
+                if getattr(self, "_route_pick_mode", False):
+                    self._route_pick_section = prev
+            elif getattr(self, "_route_pick_mode", False):
+                # Picks made while Together was on screen belong to that day.
+                section = route_sections.canonical_section(
+                    getattr(self, "_route_pick_section", "") or "")
+                if section and not route_sections.is_all_days(section):
+                    self._stash_route_section(section)
+        if not route_sections.is_all_days(label):
+            self._route_pick_section = label
         self.state.map_day_filter = label
         if hasattr(self, "combo_day"):
             idx = self.combo_day.findText(label)
@@ -526,14 +542,31 @@ class MapSyncControllerMixin:
     def _day_filter_active(self) -> bool:
         return not route_sections.is_all_days(self._day_filter_value())
 
+    def _pick_apply_section(self) -> str:
+        """Map whose order Apply should save. Together still means that day."""
+        if self._day_filter_active():
+            section = route_sections.canonical_section(self._day_filter_value())
+        else:
+            section = route_sections.canonical_section(
+                getattr(self, "_route_pick_section", "") or "")
+        if route_sections.is_all_days(section):
+            return ""
+        return section
+
     def _pick_pool_stops(self) -> list[dict]:
         if not self.state.stops:
             return []
         if self._day_filter_active():
             return self._stops_matching_day_filter()
         if self._route_section_active():
-            labels = self._route_section_labels()
-            return route_sections.stops_for_section(self.state.stops, labels[0])
+            section = ""
+            if getattr(self, "_route_pick_mode", False):
+                section = self._pick_apply_section()
+            if not section:
+                labels = self._route_section_labels()
+                section = labels[0] if labels else ""
+            if section:
+                return route_sections.stops_for_section(self.state.stops, section)
         return list(self.state.stops)
 
     def _pick_pool_total(self) -> int:
@@ -637,9 +670,14 @@ class MapSyncControllerMixin:
         }
 
     def _section_pick_tag(self) -> str:
-        if not self._route_section_active() or not self._day_filter_active():
+        if not self._route_section_active():
             return ""
-        day = route_sections.canonical_section(self._day_filter_value())
+        if self._day_filter_active():
+            day = route_sections.canonical_section(self._day_filter_value())
+        else:
+            day = self._pick_apply_section()
+        if not day:
+            return ""
         return f"{day} — "
 
     def _pick_prompt_text(self) -> str:

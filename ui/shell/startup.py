@@ -50,6 +50,7 @@ class ShellStartupMixin:
         self._route_pick_mode = False
         self._route_pick_uids: list[str] = []
         self._route_pick_sides: dict[str, str] = {}
+        self._route_pick_section: str = ""
         self._route_pick_by_map: dict[str, dict] = {}
         self._day_filter_prev: str = getattr(self.state, "map_day_filter", "") or "All days"
         self._pick_side_mode = "begin"  # begin | end — list picks only; map dots set the side

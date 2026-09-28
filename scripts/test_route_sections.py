@@ -507,6 +507,9 @@ def test_excel_day_not_only_together() -> None:
         def _hide_route_pick_dialog(self) -> None:
             return
 
+        def _leave_install_site(self) -> None:
+            return
+
         def _installed_stops(self):
             return []
 
@@ -550,12 +553,35 @@ def test_excel_day_not_only_together() -> None:
         ok("Day 2 site click starts that day's order")
     else:
         fail("Day 2 site click starts that day's order", str(pick._route_pick_uids))
+    day2_uid = pick.state.stops[1]["uid"]
     pick._select_day_button("Together")
     both_ids = [s["id"] for s in pick._stops_matching_day_filter()]
     if pick._day_filter_value() == "All days" and both_ids == ["4001", "10001"]:
         ok("Together shows both days")
     else:
         fail("Together shows both days", f"day={pick._day_filter_value()} ids={both_ids}")
+    if pick._route_pick_uids == [day2_uid] and pick._pick_apply_section() == "Day 2":
+        ok("Together keeps Day 2 picks")
+    else:
+        fail(
+            "Together keeps Day 2 picks",
+            f"uids={pick._route_pick_uids} section={pick._pick_apply_section()}",
+        )
+    if pick._pick_pool_total() == 1:
+        ok("Together pick pool stays the day being picked")
+    else:
+        fail("Together pick pool stays the day being picked", str(pick._pick_pool_total()))
+    pick._pick_build_queue = ["Day 1", "Day 2"]
+    pick._continue_pick_or_merge(pick._pick_apply_section())
+    if pick._pick_build_queue == ["Day 1"]:
+        ok("Apply from Together advances the queue")
+    else:
+        fail("Apply from Together advances the queue", str(pick._pick_build_queue))
+    stashed = (pick._ensure_pick_by_map().get("Day 2") or {}).get("uids")
+    if stashed == [day2_uid]:
+        ok("Day 2 picks survive leaving Together")
+    else:
+        fail("Day 2 picks survive leaving Together", str(stashed))
 
 
 def main() -> int:

@@ -583,6 +583,32 @@ def test_excel_day_not_only_together() -> None:
     else:
         fail("Day 2 picks survive leaving Together", str(stashed))
 
+    d1a = pick.state.stops[0]
+    d2a = pick.state.stops[1]
+    d1b = _stop("Week 27 Day 1 Isaac", "4002", 34.01, -118.01)
+    d2b = _stop("Week 27 Day 2 Isaac", "10002", 34.21, -117.31)
+    pick.state.stops = [d2b, d2a, d1b, d1a]
+    pick.state.routes_by_map["Day 2"] = {"polyline": [[1, 2]], "miles": 4.0, "graph": True}
+    pick._stops_from_uploads_merged = lambda: [d1a, d1b, d2a, d2b]
+    pick._select_day_button("Day 1")
+    pick._reoptimize()
+    day2_ids = [
+        s["id"] for s in pick.state.stops
+        if route_sections.canonical_section(s.get("sheet")) == "Day 2"
+    ]
+    day1_ids = [
+        s["id"] for s in pick.state.stops
+        if route_sections.canonical_section(s.get("sheet")) == "Day 1"
+    ]
+    day2_route = (pick.state.routes_by_map.get("Day 2") or {}).get("miles")
+    if day2_ids == ["10002", "10001"] and day1_ids == ["4001", "4002"] and day2_route == 4.0:
+        ok("Pick order on Day 1 keeps Day 2 visit order")
+    else:
+        fail(
+            "Pick order on Day 1 keeps Day 2 visit order",
+            f"day1={day1_ids} day2={day2_ids} miles={day2_route}",
+        )
+
 
 def main() -> int:
     print("ROUTE SECTIONS — two maps, two independent builds\n")

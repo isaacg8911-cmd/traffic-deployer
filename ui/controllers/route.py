@@ -1041,8 +1041,19 @@ class RouteControllerMixin:
     def _reoptimize(self):
         if not self.state.stops:
             return
-        stops = self._stops_from_uploads_merged() or list(self.state.stops)
-        self._begin_route_pick(stops)
+        old = list(self.state.stops)
+        fresh = self._stops_from_uploads_merged() or old
+        rebuild = ""
+        if self._route_section_active():
+            if self._day_filter_active():
+                rebuild = route_sections.canonical_section(self._day_filter_value())
+            else:
+                labels = self._route_section_labels()
+                rebuild = labels[0] if labels else ""
+        if rebuild:
+            fresh = route_sections.preserve_other_section_orders(
+                old, fresh, rebuild_sheet=rebuild)
+        self._begin_route_pick(fresh)
 
     def _schedule_retrace(self, *, select_row: int | None = None) -> None:
         self._retrace_pending_row = select_row

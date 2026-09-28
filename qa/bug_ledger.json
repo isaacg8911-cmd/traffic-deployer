@@ -94,10 +94,11 @@
       "rank": 6,
       "area": "multi-day routes",
       "severity": "major",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_route_sections.py)",
       "title": "\"Pick order...\" resets other days to file order",
-      "detail": ""
+      "detail": "Reloading Excel/.EST for a new pick replaced every day's visit order. Other days now keep theirs."
     },
     {
       "id": "RTE-3",

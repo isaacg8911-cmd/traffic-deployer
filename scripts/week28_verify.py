@@ -150,14 +150,20 @@ def main() -> int:
         if p.name[:1].isdigit()
     )
     print(f"  backup {len(originals)}  named {len(current)}")
-    if len(originals) != len(current):
+    if originals and len(originals) != len(current):
         errs.append(f"photo count backup {len(originals)} != named {len(current)}")
+    backup_clocks = {read_datetime_original(p).time() for p in originals}
     for p in current:
         n = p.stat().st_size
         kb = n / 1024
         if not (LOW <= n <= HIGH):
             errs.append(f"{p.name}: {kb:.0f} KB not about 800")
-        print(f"  {p.name}: {kb:.0f} KB taken {read_datetime_original(p)}")
+        taken = read_datetime_original(p)
+        print(f"  {p.name}: {kb:.0f} KB taken {taken}")
+        if taken.date() != DAY1_START or taken.weekday() != 1:
+            errs.append(f"{p.name}: Date Taken {taken} is not Tuesday {DAY1_START}")
+        elif backup_clocks and taken.time() not in backup_clocks:
+            errs.append(f"{p.name}: clock {taken.time()} changed")
     if originals:
         from week28_step3_photos import _assign
 

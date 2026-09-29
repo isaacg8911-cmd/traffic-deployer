@@ -220,11 +220,45 @@ class JobStore:
 
 
 _EDITABLE_TEXT = ("street", "direction", "notes", "serial")
-_EDITABLE_FLAGS = ("installed", "skipped", "picked_up")
+_BLANK = frozenset({"", "nan", "none", "nat"})
+
+
+class StopPatchRejected(Exception):
+    """The phone asked for a field change the count cannot accept."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _clean_text(value) -> str:
+    return str(value or "").strip()
+
+
+def _merged_text(stop: dict, patch: dict, key: str) -> str:
+    if key in patch and patch[key] is not None:
+        return _clean_text(patch[key])
+    return _clean_text(stop.get(key))
 
 
 def _apply_stop_patch(stop: dict, patch: dict) -> None:
     from core.state import ca_now
+
+    installing = patch.get("installed") is True
+    skipping = patch.get("skipped") is True
+    picking = patch.get("picked_up") is True
+    if installing and skipping:
+        raise StopPatchRejected("A site cannot be installed and skipped.")
+    direction = _merged_text(stop, patch, "direction")
+    serial = _merged_text(stop, patch, "serial")
+    becoming_installed = installing and not stop.get("installed")
+    if becoming_installed:
+        if direction.lower() in _BLANK or serial.lower() in _BLANK:
+            raise StopPatchRejected("Enter direction and serial number, then Install.")
+        if stop.get("field_lat") is None or stop.get("field_lon") is None:
+            raise StopPatchRejected("Grab GPS or drop a pin before Install.")
+    if picking and (skipping or not (installing or stop.get("installed"))):
+        raise StopPatchRejected("Install the site before pickup.")
 
     for key in _EDITABLE_TEXT:
         if key in patch and patch[key] is not None:
@@ -234,13 +268,24 @@ def _apply_stop_patch(stop: dict, patch: dict) -> None:
             stop["lanes"] = max(1, min(20, int(patch["lanes"])))
         except (TypeError, ValueError):
             pass
-    for key in _EDITABLE_FLAGS:
-        if key in patch and patch[key] is not None:
-            stop[key] = bool(patch[key])
-    # Stamp install/pickup time the same way the desktop does.
-    if patch.get("installed") and not stop.get("date"):
-        date, exact = ca_now()
-        stop["date"], stop["exact_time"] = date, exact
+    if installing:
+        stop["installed"] = True
+        stop["skipped"] = False
+        if becoming_installed and not _clean_text(stop.get("exact_time")):
+            date, exact = ca_now()
+            stop["date"], stop["exact_time"] = date, exact
+    elif patch.get("installed") is False:
+        stop["installed"] = False
+    if skipping:
+        stop["skipped"] = True
+        stop["installed"] = False
+        stop["picked_up"] = False
+    elif patch.get("skipped") is False:
+        stop["skipped"] = False
+    if picking:
+        stop["picked_up"] = True
+    elif patch.get("picked_up") is False:
+        stop["picked_up"] = False
 
 
 def public_job(job: dict) -> dict:

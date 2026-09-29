@@ -96,15 +96,20 @@ def main() -> int:
     auth = {"x-job-token": token}
 
     first_uid = r.json()["state"]["stops"][0]["uid"]
-    client.patch(
-        f"/api/jobs/{job_id}/stops/{first_uid}",
-        headers=auth,
-        json={"serial": "99901", "installed": True, "street": "Harbor Blvd"},
-    )
     client.post(
         f"/api/jobs/{job_id}/stops/{first_uid}/grab",
         headers=auth,
         json={"lat": 33.8102, "lon": -117.9202, "source": "phone_gps", "accuracy": 4},
+    )
+    client.patch(
+        f"/api/jobs/{job_id}/stops/{first_uid}",
+        headers=auth,
+        json={
+            "serial": "99901",
+            "direction": "n",
+            "installed": True,
+            "street": "Harbor Blvd",
+        },
     )
 
     r = client.get(f"/api/jobs/{job_id}/tdjob", headers=auth)

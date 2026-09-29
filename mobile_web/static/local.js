@@ -167,15 +167,74 @@
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function stampNow() {
-    var d = new Date();
-    return {
-      date: d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()),
-      exact: pad2(d.getHours()) + ':' + pad2(d.getMinutes())
-    };
+    var g = {};
+    try {
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Los_Angeles',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hourCycle: 'h23'
+      }).formatToParts(new Date()).forEach(function (p) { g[p.type] = p.value; });
+    } catch (e) { g = {}; }
+    if (!g.year) {
+      var d = new Date();
+      g = {
+        year: String(d.getFullYear()),
+        month: pad2(d.getMonth() + 1),
+        day: pad2(d.getDate()),
+        hour: pad2(d.getHours()),
+        minute: pad2(d.getMinutes()),
+        second: pad2(d.getSeconds())
+      };
+    }
+    var date = g.year + '-' + g.month + '-' + g.day;
+    return { date: date, exact: date + ' ' + g.hour + ':' + g.minute + ':' + g.second };
+  }
+
+  function cleanText(value) {
+    return String(value == null ? '' : value).trim();
+  }
+
+  function mergedText(stop, patch, key) {
+    if (patch && patch[key] != null) return cleanText(patch[key]);
+    return cleanText(stop && stop[key]);
+  }
+
+  function patchBlockReason(stop, patch) {
+    if (!stop || !patch) return '';
+    var installing = patch.installed === true;
+    var skipping = patch.skipped === true;
+    var picking = patch.picked_up === true;
+    if (installing && skipping) return 'A site cannot be installed and skipped.';
+    var direction = mergedText(stop, patch, 'direction');
+    var serial = mergedText(stop, patch, 'serial');
+    var blank = { '': 1, nan: 1, none: 1, nat: 1 };
+    if (installing && !stop.installed) {
+      if (blank[direction.toLowerCase()] || blank[serial.toLowerCase()]) {
+        return 'Enter direction and serial number, then Install.';
+      }
+      if (stop.field_lat == null || stop.field_lon == null) {
+        return 'Grab GPS or drop a pin before Install.';
+      }
+    }
+    if (picking && (skipping || !(installing || stop.installed))) {
+      return 'Install the site before pickup.';
+    }
+    return '';
   }
 
   function applyStopPatch(stop, patch) {
     if (!stop || !patch) return stop;
+    var reason = patchBlockReason(stop, patch);
+    if (reason) {
+      var err = new Error(reason);
+      err.status = 422;
+      throw err;
+    }
+    var installing = patch.installed === true;
+    var skipping = patch.skipped === true;
+    var picking = patch.picked_up === true;
+    var becoming = installing && !stop.installed;
     ['street', 'direction', 'notes', 'serial'].forEach(function (k) {
       if (patch[k] != null) stop[k] = String(patch[k]).slice(0, 300);
     });
@@ -183,14 +242,26 @@
       var n = parseInt(patch.lanes, 10);
       if (!isNaN(n)) stop.lanes = Math.max(1, Math.min(20, n));
     }
-    ['installed', 'skipped', 'picked_up'].forEach(function (k) {
-      if (patch[k] != null) stop[k] = !!patch[k];
-    });
-    if (patch.installed && !stop.date) {
-      var t = stampNow();
-      stop.date = t.date;
-      stop.exact_time = t.exact;
+    if (installing) {
+      stop.installed = true;
+      stop.skipped = false;
+      if (becoming && !cleanText(stop.exact_time)) {
+        var t = stampNow();
+        stop.date = t.date;
+        stop.exact_time = t.exact;
+      }
+    } else if (patch.installed === false) {
+      stop.installed = false;
     }
+    if (skipping) {
+      stop.skipped = true;
+      stop.installed = false;
+      stop.picked_up = false;
+    } else if (patch.skipped === false) {
+      stop.skipped = false;
+    }
+    if (picking) stop.picked_up = true;
+    else if (patch.picked_up === false) stop.picked_up = false;
     return stop;
   }
 
@@ -239,11 +310,16 @@
 
   function mergePublicStop(raw, pub) {
     if (!raw || !pub) return;
-    applyStopPatch(raw, {
-      street: pub.street, direction: pub.direction, notes: pub.notes,
-      serial: pub.serial, lanes: pub.lanes,
-      installed: pub.installed, skipped: pub.skipped, picked_up: pub.picked_up
-    });
+    // Server snapshot, not a new Install tap — copy it even if an older job
+    // was saved before the GPS / serial gate.
+    if (pub.street != null) raw.street = pub.street;
+    if (pub.direction != null) raw.direction = pub.direction;
+    if (pub.notes != null) raw.notes = pub.notes;
+    if (pub.serial != null) raw.serial = pub.serial;
+    if (pub.lanes != null) raw.lanes = pub.lanes;
+    raw.installed = !!pub.installed;
+    raw.skipped = !!pub.skipped;
+    raw.picked_up = !!pub.picked_up;
     if (Object.prototype.hasOwnProperty.call(pub, 'field_lat')) {
       raw.field_lat = pub.field_lat;
       raw.field_lon = pub.field_lon;
@@ -255,12 +331,26 @@
   function audit(stops) {
     var done = (stops || []).filter(function (s) { return s.installed || s.skipped; });
     var missing = [];
+    var seen = {};
     done.forEach(function (s) {
       if (!s.installed) return;
       if (!String(s.serial || '').trim()) missing.push('Site ' + s.id + ': missing Serial #');
+      var direction = String(s.direction || '').trim().toLowerCase();
+      if (!direction || direction === 'nan' || direction === 'none' || direction === 'nat') {
+        missing.push('Site ' + s.id + ': missing direction');
+      }
+      if (s.field_lat == null || s.field_lon == null) {
+        missing.push('Site ' + s.id + ': no GPS grab');
+      }
       var street = String(s.street || '').trim();
-      if (!street || street.toLowerCase() === 'nan' || street.indexOf('Site ') === 0) {
+      if (!street || street.toLowerCase() === 'nan' || street.toLowerCase().indexOf('site ') === 0) {
         missing.push('Site ' + s.id + ': missing Street name');
+      }
+      var serial = String(s.serial || '').trim();
+      var key = serial.toLowerCase();
+      if (serial && key !== 'nan' && key !== 'none' && key !== 'nat') {
+        if (seen[key]) missing.push('Site ' + s.id + ': serial ' + serial + ' is also on Site ' + seen[key]);
+        else seen[key] = s.id;
       }
     });
     return { ok: missing.length === 0, missing: missing, count: done.length };
@@ -542,6 +632,7 @@
     pack: pack, unpack: unpack,
     buildMapState: buildMapState,
     applyStopPatch: applyStopPatch,
+    patchBlockReason: patchBlockReason,
     applyGrab: applyGrab,
     findStop: findStop,
     moveStop: moveStop,

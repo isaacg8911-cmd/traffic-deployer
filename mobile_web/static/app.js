@@ -359,11 +359,18 @@
     });
   }
 
+  function isUnreachable(e) {
+    if (!e || e.status == null || e.status === 0) return true;
+    return e.status === 502 || e.status === 503 || e.status === 504;
+  }
+
   function withServer(fn, localFn) {
     if (state.localOnly || isLocalId(state.jobId) || !state.token) {
       return Promise.resolve(localFn());
     }
     return fn().catch(function (e) {
+      // A refusal (missing serial, finished site) is not an offline save.
+      if (!isUnreachable(e)) throw e;
       markLocal(e.message || 'Saved on this phone — server unreachable.');
       return localFn();
     });
@@ -408,6 +415,10 @@
     }
     var raw = L.findStop(state.job, uid);
     if (!raw) return Promise.resolve(false);
+    if (raw.installed || raw.skipped) {
+      toast('That site is already finished. Grab the next one.');
+      return Promise.resolve(false);
+    }
     return withServer(function () {
       return api('/api/jobs/' + state.jobId + '/stops/' + encodeURIComponent(uid) + '/grab', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -595,7 +606,10 @@
       if (res.state && res.state.route) state.job.route = res.state.route;
       applyJob(state.job, res.state); fitToStops();
       toast(res.traced ? 'Line re-traced for your order' : 'Order saved (line unchanged)');
-    }).catch(function (e) { toast(e.message); markLocal(e.message); }).finally(function () {
+    }).catch(function (e) {
+      toast(e.message);
+      if (isUnreachable(e)) markLocal(e.message);
+    }).finally(function () {
       state.busy = false;
       $('btnRetrace').disabled = false; $('btnRetrace').textContent = 'Re-trace line';
     });
@@ -745,7 +759,11 @@
         '<span class="sub">' + esc(s.street) + (s.picked_up ? ' · picked up' : ' · tap to pick up') + '</span></span>';
       li.onclick = function () {
         if (s.picked_up) { flyToStop(s); return; }
-        patchStop(s.uid, { picked_up: true }).then(function () { toast('Picked up Site ' + s.id); });
+        if (li._busy) return;
+        li._busy = true;
+        patchStop(s.uid, { picked_up: true }).then(function () {
+          toast('Picked up Site ' + s.id);
+        }).catch(function (e) { toast(e.message); }).finally(function () { li._busy = false; });
       };
       ul.appendChild(li);
     });
@@ -942,11 +960,15 @@
 
   function commitInstall(installed) {
     if (state.phase !== 'form' || !state.formUid || state.busy) return;
-    if (installed && (!$('fSerial').value.trim() || !$('fDir').value)) {
-      toast('Enter direction and serial number, then Install.');
-      return;
-    }
     var uid = state.formUid;
+    if (installed) {
+      var reason = L.patchBlockReason(rawStop(uid) || {}, {
+        installed: true,
+        direction: $('fDir').value,
+        serial: $('fSerial').value.trim()
+      });
+      if (reason) { toast(reason); return; }
+    }
     var s = rawStop(uid);
     var label = s ? s.id : '';
     state.busy = true;
@@ -995,7 +1017,10 @@
       }
       applyJob(state.job, res.state); fitToStops();
       toast(res.graph ? 'Route built on streets' : 'Route built (straight-line — no road map on server)');
-    }).catch(function (e) { toast(e.message); markLocal(e.message); }).finally(function () {
+    }).catch(function (e) {
+      toast(e.message);
+      if (isUnreachable(e)) markLocal(e.message);
+    }).finally(function () {
       $('btnBuildRoute').disabled = false; $('btnBuildRoute').textContent = 'Build route';
     });
   }
@@ -1393,7 +1418,12 @@
     $('btnLocate').onclick = locateMe;
     $('navOfferDismiss').onclick = hideNavOffer;
     $('navOfferGo').addEventListener('click', function (ev) {
-      if ($('navOfferGo').getAttribute('href') === '#') ev.preventDefault();
+      ev.preventDefault();
+      var href = $('navOfferGo').getAttribute('href');
+      if (!href || href === '#') return;
+      var opened = null;
+      try { opened = window.open(href, '_blank', 'noopener'); } catch (e) { opened = null; }
+      if (!opened) window.location.assign(href);
     });
     $('btnCloseJob').onclick = function () { closeRememberedJob('Job closed on this phone. Download a job file first if you still need it.'); };
     $('btnClearSavedJob').onclick = function () { closeRememberedJob('Remembered job cleared on this phone.'); };

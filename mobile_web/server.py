@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core import export, ingest, map_state, routing
 from mobile_web import settings
-from mobile_web.store import JobStore, link_status, public_job
+from mobile_web.store import JobStore, StopPatchRejected, link_status, public_job
 from mobile_web.tdjob import TdjobError, pack_job, unpack_job
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -442,9 +442,17 @@ def build_route(job_id: str, request: Request) -> dict:
     if not stops:
         raise HTTPException(status_code=422, detail="No stops to route.")
     home = tuple(job["home"]) if job.get("home") else None
-    res = routing.optimize(stops, home, DATA_DIR)
-    order = res["order"]
-    route = routing.build_route(order, home, DATA_DIR)
+    try:
+        res = routing.optimize(stops, home, DATA_DIR)
+        order = res["order"]
+        route = routing.build_route(order, home, DATA_DIR)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not build the route. Stay on this screen and try again.",
+        ) from exc
+    if not order:
+        raise HTTPException(status_code=422, detail="No stops to route.")
     job["stops"] = order
     job["route"] = {
         "polyline": route.get("polyline", []),
@@ -494,7 +502,9 @@ async def move_stop(job_id: str, uid: str, request: Request) -> dict:
         raise HTTPException(status_code=404, detail="Stop not found.")
     if result == "moved":
         # Mark the traced line stale so the UI can prompt a re-trace.
-        job["route"]["stale"] = True
+        route = job.get("route") if isinstance(job.get("route"), dict) else {}
+        route["stale"] = True
+        job["route"] = route
         store.save(job)
     return {"state": _job_state(job), "moved": result == "moved"}
 
@@ -505,7 +515,10 @@ async def patch_stop(job_id: str, uid: str, request: Request) -> dict:
     patch = await request.json()
     if not isinstance(patch, dict):
         raise HTTPException(status_code=400, detail="Body must be a JSON object.")
-    stop = store.update_stop(job, uid, patch)
+    try:
+        stop = store.update_stop(job, uid, patch)
+    except StopPatchRejected as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
     if stop is None:
         raise HTTPException(status_code=404, detail="Stop not found.")
     return {"stop": map_state.public_stop(stop), "state": _job_state(job)}
@@ -541,6 +554,11 @@ async def grab_location(job_id: str, uid: str, request: Request) -> dict:
         found["field_accuracy_m"] = None
         store.save(job)
         return {"stop": map_state.public_stop(found), "state": _job_state(job)}
+    if found.get("installed") or found.get("skipped"):
+        raise HTTPException(
+            status_code=422,
+            detail="That site is already finished. Grab the next one.",
+        )
     try:
         lat = float(body["lat"])
         lon = float(body["lon"])
@@ -565,10 +583,37 @@ async def grab_location(job_id: str, uid: str, request: Request) -> dict:
 # --------------------------------------------------------------------------- #
 #  Audit / export
 # --------------------------------------------------------------------------- #
+def _phone_audit(stops: list[dict]) -> dict:
+    """Field checklist for the phone. Does not change the laptop audit."""
+    base = export.audit(stops)
+    missing = list(base.get("missing") or [])
+    seen: dict[str, str] = {}
+    for stop in stops:
+        if not stop.get("installed"):
+            continue
+        site = stop.get("id", "?")
+        direction = str(stop.get("direction") or "").strip()
+        if direction.lower() in ("", "nan", "none", "nat"):
+            missing.append(f"Site {site}: missing direction")
+        if stop.get("field_lat") is None or stop.get("field_lon") is None:
+            missing.append(f"Site {site}: no GPS grab")
+        street = str(stop.get("street") or "").strip()
+        if street.lower().startswith("site "):
+            missing.append(f"Site {site}: missing Street name")
+        serial = str(stop.get("serial") or "").strip()
+        if serial and serial.lower() not in ("nan", "none", "nat"):
+            key = serial.lower()
+            if key in seen:
+                missing.append(f"Site {site}: serial {serial} is also on Site {seen[key]}")
+            else:
+                seen[key] = str(site)
+    return {"ok": not missing, "missing": missing, "count": base.get("count", 0)}
+
+
 @app.get("/api/jobs/{job_id}/audit")
 def job_audit(job_id: str, request: Request) -> dict:
     job = _authorize(request, job_id)
-    return export.audit(job["stops"])
+    return _phone_audit(job["stops"])
 
 
 @app.get("/api/jobs/{job_id}/share.svg")

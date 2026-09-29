@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 
@@ -149,7 +151,30 @@ def main() -> int:
     )
     check("grab_out_of_bounds_rejected", r.status_code == 422, str(r.status_code))
 
-    # 8. fill fields + install
+    # 8. a count is not installed until GPS, direction, and serial are present
+    r = client.patch(
+        f"/api/jobs/{job_id}/stops/{first_uid}",
+        headers=auth,
+        json={"installed": True},
+    )
+    detail = ""
+    if r.status_code == 422:
+        body = r.json()
+        detail = body.get("detail") if isinstance(body, dict) else ""
+        detail = detail if isinstance(detail, str) else str(detail)
+    check("install_without_serial_rejected", r.status_code == 422 and "serial" in detail.lower(), detail or str(r.status_code))
+    held = client.get(f"/api/jobs/{job_id}", headers=auth).json()["state"]["stops"][0]
+    check("rejected_install_not_saved", held.get("installed") is not True)
+    if len(state["stops"]) > 1:
+        uid_plain = state["stops"][1]["uid"]
+        r = client.patch(
+            f"/api/jobs/{job_id}/stops/{uid_plain}",
+            headers=auth,
+            json={"picked_up": True},
+        )
+        check("pickup_before_install_rejected", r.status_code == 422, str(r.status_code))
+
+    # 9. fill fields + install
     r = client.patch(
         f"/api/jobs/{job_id}/stops/{first_uid}",
         headers=auth,
@@ -160,8 +185,18 @@ def main() -> int:
     inst_ok = r.status_code == 200 and r.json()["stop"]["installed"]
     check("install_stop", inst_ok, str(r.status_code))
     check("install_timestamped", r.status_code == 200 and bool(_stop_date(r.json()["stop"], state)))
+    packed = client.get(f"/api/jobs/{job_id}/tdjob", headers=auth).json()
+    stamped = next((s for s in packed.get("stops") or [] if s.get("uid") == first_uid), {})
+    exact = str(stamped.get("exact_time") or "")
+    check("install_clock_is_california_stamp", " " in exact and exact[:4].isdigit(), exact)
+    r = client.post(
+        f"/api/jobs/{job_id}/stops/{first_uid}/grab",
+        headers=auth,
+        json={"lat": glat, "lon": glon, "source": "phone_gps", "accuracy": 5.0},
+    )
+    check("grab_finished_site_rejected", r.status_code == 422, str(r.status_code))
 
-    # 9. pickup
+    # 10. pickup
     r = client.patch(f"/api/jobs/{job_id}/stops/{first_uid}", headers=auth, json={"picked_up": True})
     check("pickup_stop", r.status_code == 200 and r.json()["stop"]["picked_up"], str(r.status_code))
 
@@ -191,9 +226,43 @@ def main() -> int:
     check("manifest_served", r.status_code == 200)
     r = client.get("/local.js")
     check("local_js_served", r.status_code == 200 and "TDLocal" in r.text)
+    check("phone_refuses_bad_install", _js_refuses_bad_install())
 
     failed = [c["name"] for c in checks if not c["ok"]]
     return _finish(checks, 0 if not failed else 1)
+
+
+def _js_refuses_bad_install() -> bool:
+    """The offline phone copy must refuse the same bad installs as the server."""
+    node = shutil.which("node")
+    if not node:
+        print("[SKIP] js install gate — node not on PATH")
+        return True
+    script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[1], 'utf8');
+const ctx = {};
+vm.createContext(ctx);
+vm.runInContext(src, ctx);
+const L = ctx.TDLocal;
+const bare = { installed: false, field_lat: null, field_lon: null, direction: '', serial: '' };
+const noSerial = L.patchBlockReason(bare, { installed: true, direction: 'n', serial: '' });
+const noGps = L.patchBlockReason(
+  { installed: false, field_lat: null, field_lon: null, direction: 'n', serial: '1' },
+  { installed: true }
+);
+const pickup = L.patchBlockReason({ installed: false }, { picked_up: true });
+const ok = L.patchBlockReason(
+  { installed: false, field_lat: 33.8, field_lon: -117.9, direction: 'n', serial: '1' },
+  { installed: true }
+);
+if (!noSerial || !noGps || !pickup || ok) process.exit(2);
+process.exit(0);
+"""
+    local_js = os.path.join(ROOT, "mobile_web", "static", "local.js")
+    proc = subprocess.run([node, "-e", script, local_js], capture_output=True, text=True, check=False)
+    return proc.returncode == 0
 
 
 def _stop_date(stop_view: dict, state: dict) -> bool:

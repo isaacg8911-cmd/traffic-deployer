@@ -189,6 +189,18 @@ def main() -> int:
     stamped = next((s for s in packed.get("stops") or [] if s.get("uid") == first_uid), {})
     exact = str(stamped.get("exact_time") or "")
     check("install_clock_is_california_stamp", " " in exact and exact[:4].isdigit(), exact)
+    r = client.patch(
+        f"/api/jobs/{job_id}/stops/{first_uid}",
+        headers=auth,
+        json={"installed": False, "exact_time": "", "date": ""},
+    )
+    undone = r.status_code == 200 and not r.json()["stop"]["installed"]
+    check("undo_install_clears_done", undone, str(r.status_code))
+    packed = client.get(f"/api/jobs/{job_id}/tdjob", headers=auth).json()
+    cleared = next((s for s in packed.get("stops") or [] if s.get("uid") == first_uid), {})
+    check("undo_clears_install_stamp", not str(cleared.get("exact_time") or "").strip(), str(cleared.get("exact_time")))
+    r = client.patch(f"/api/jobs/{job_id}/stops/{first_uid}", headers=auth, json={"installed": True})
+    check("reinstall_after_undo", r.status_code == 200 and r.json()["stop"]["installed"], str(r.status_code))
     r = client.post(
         f"/api/jobs/{job_id}/stops/{first_uid}/grab",
         headers=auth,
@@ -218,7 +230,10 @@ def main() -> int:
     check("pwa_shell_served", r.status_code == 200 and "Traffic Deployer" in r.text)
     check("pwa_setup_tab", r.status_code == 200 and 'data-tab="setup"' in r.text)
     check("pwa_job_file_pickup", r.status_code == 200 and "impTdjob" in r.text)
-    check("pwa_home_address", r.status_code == 200 and 'id="homeAddr"' in r.text)
+    check("pwa_no_yard_address", r.status_code == 200 and 'id="homeAddr"' not in r.text)
+    check("pwa_direction_hint", 'id="dirHint"' in r.text and 'id="btnCompass"' in r.text)
+    check("pwa_nearest_and_undo", 'id="nearLine"' in r.text and 'id="btnUndo"' in r.text)
+    check("pwa_pickup_grab", 'id="btnPickupGrab"' in r.text)
     check("pwa_file_buttons", r.status_code == 200 and "file-btn" in r.text)
     check("pwa_has_no_build_route", "Build route" not in r.text and "Follow GPS" not in r.text)
     r = client.get("/api/geocode")
@@ -228,6 +243,7 @@ def main() -> int:
     r = client.get("/local.js")
     check("local_js_served", r.status_code == 200 and "TDLocal" in r.text)
     check("phone_refuses_bad_install", _js_refuses_bad_install())
+    check("phone_field_loop_helpers", _js_field_loop())
 
     failed = [c["name"] for c in checks if not c["ok"]]
     return _finish(checks, 0 if not failed else 1)
@@ -263,6 +279,61 @@ process.exit(0);
 """
     local_js = os.path.join(ROOT, "mobile_web", "static", "local.js")
     proc = subprocess.run([node, "-e", script, local_js], capture_output=True, text=True, check=False)
+    return proc.returncode == 0
+
+
+def _js_field_loop() -> bool:
+    """Direction from the site line, duplicate serial, pickup match, undo restore."""
+    node = shutil.which("node")
+    if not node:
+        print("[SKIP] js field loop — node not on PATH")
+        return True
+    script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[1], 'utf8');
+const ctx = {};
+vm.createContext(ctx);
+vm.runInContext(src, ctx);
+const L = ctx.TDLocal;
+const ns = L.inferDirection({ begin_lat: 33.8, begin_lon: -117.9, end_lat: 33.801, end_lon: -117.9 });
+if (ns.direction !== 'n' || ns.source !== 'segment') process.exit(3);
+const ew = L.inferDirection({ begin_lat: 33.8, begin_lon: -117.9, end_lat: 33.8, end_lon: -117.898 });
+if (ew.direction !== 'e') process.exit(4);
+const short = L.inferDirection({ begin_lat: 33.8, begin_lon: -117.9, end_lat: 33.80005, end_lon: -117.9 });
+if (short.source !== 'needs_gps' || short.direction) process.exit(5);
+const dup = L.duplicateSerial([
+  { uid: 'a', id: '1', serial: '22976' },
+  { uid: 'b', id: '2', serial: '' }
+], 'b', '22976');
+if (!dup || String(dup.id) !== '1') process.exit(6);
+if (L.duplicateSerial([{ uid: 'a', id: '1', serial: '22976' }], 'a', '22976')) process.exit(7);
+const stops = [
+  { uid: 'near', id: '9', street: 'Main', installed: true, picked_up: false, skipped: false,
+    begin_lat: 33.8, begin_lon: -117.9, end_lat: 33.801, end_lon: -117.9 },
+  { uid: 'far', id: '10', street: 'Oak', installed: true, picked_up: false, skipped: false,
+    begin_lat: 34.2, begin_lon: -118.2, end_lat: 34.201, end_lon: -118.2 }
+];
+const pick = L.matchPickup(stops, 33.8002, -117.9, 8);
+if (pick.status !== 'bind' || pick.uid !== 'near') process.exit(8);
+const open = L.closestUnfinished([
+  { uid: 'done', id: '1', installed: true, skipped: false, begin_lat: 33.8, begin_lon: -117.9, end_lat: 33.801, end_lon: -117.9 },
+  { uid: 'open', id: '2', installed: false, skipped: false, begin_lat: 33.81, begin_lon: -117.9, end_lat: 33.811, end_lon: -117.9 }
+], 33.8001, -117.9);
+if (!open || open.uid !== 'open') process.exit(9);
+const snap = L.copyStop({ id: '1', uid: 'u', street: 'Main', direction: 'n', serial: '1', installed: false, field_lat: 33.8, field_lon: -117.9, exact_time: '', date: '' });
+const live = L.copyStop(snap);
+L.applyStopPatch(live, { installed: true, direction: 'n', serial: '1' });
+if (!live.installed || !live.exact_time) process.exit(10);
+L.applyStopPatch(live, { installed: false, exact_time: '', date: '', direction: 'n', serial: '1' });
+L.restoreStop(live, snap);
+if (live.installed || live.exact_time) process.exit(11);
+process.exit(0);
+"""
+    local_js = os.path.join(ROOT, "mobile_web", "static", "local.js")
+    proc = subprocess.run([node, "-e", script, local_js], capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        print(proc.stderr or proc.stdout)
     return proc.returncode == 0
 
 

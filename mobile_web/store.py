@@ -276,6 +276,11 @@ def _apply_stop_patch(stop: dict, patch: dict) -> None:
             stop["date"], stop["exact_time"] = date, exact
     elif patch.get("installed") is False:
         stop["installed"] = False
+        # Undo puts the stamp back to what it was before this Install.
+        if "exact_time" in patch:
+            stop["exact_time"] = _clean_text(patch.get("exact_time"))[:40]
+        if "date" in patch:
+            stop["date"] = _clean_text(patch.get("date"))[:20]
     if skipping:
         stop["skipped"] = True
         stop["installed"] = False

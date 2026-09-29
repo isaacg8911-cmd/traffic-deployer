@@ -167,8 +167,11 @@ button, .primary, .secondary {
 .ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
 .big { padding: 16px; font-size: 17px; }
 .field-primary { flex: 2; background: var(--green); font-size: 17px; padding: 16px; }
-#grabWait .field-primary { width: 100%; flex: none; }
-#btnGrab:disabled { opacity: 0.6; }
+#grabWait .field-primary, #pickupScreen .field-primary { width: 100%; flex: none; }
+#btnGrab:disabled, #btnPickupGrab:disabled { opacity: 0.6; }
+.near-line { font-weight: 700; min-height: 18px; }
+#dirHint { margin-top: 2px; }
+#btnCompass, #btnUndo, #btnUndoPickup { width: 100%; }
 #btnWrong { width: 100%; }
 .field-skip { flex: 1; background: var(--red); font-size: 17px; padding: 16px; }
 a.primary, a.secondary { text-decoration: none; text-align: center; display: block; flex: 1; }

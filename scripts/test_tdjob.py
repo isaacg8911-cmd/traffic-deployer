@@ -147,7 +147,8 @@ def main() -> int:
     html = r.text if r.status_code == 200 else ""
     check("pwa_has_setup_tab", "data-tab=\"setup\"" in html)
     check("pwa_has_tdjob_input", "impTdjob" in html)
-    check("pwa_has_home_address", 'id="homeAddr"' in html)
+    check("pwa_has_no_yard_address", 'id="homeAddr"' not in html)
+    check("pwa_has_undo", 'id="btnUndo"' in html)
     check("pwa_loads_local_js", "local.js" in html)
     r = client.get("/local.js")
     check("local_js_served", r.status_code == 200 and "traffic-deployer-job" in r.text, str(r.status_code))

@@ -252,6 +252,8 @@
       }
     } else if (patch.installed === false) {
       stop.installed = false;
+      if (patch.exact_time != null) stop.exact_time = String(patch.exact_time).slice(0, 40);
+      if (patch.date != null) stop.date = String(patch.date).slice(0, 20);
     }
     if (skipping) {
       stop.skipped = true;
@@ -446,11 +448,11 @@
   function packMatch(row) {
     return {
       uid: row.uid, id: row.id, street: row.street, distance_m: row.distance_m,
-      installed: row.installed, skipped: row.skipped
+      installed: row.installed, skipped: row.skipped, picked_up: row.picked_up
     };
   }
 
-  function matchSite(stops, lat, lon, accuracy) {
+  function rankSites(stops, lat, lon) {
     var ranked = [];
     (stops || []).forEach(function (stop) {
       var seg = siteSegment(stop);
@@ -459,13 +461,17 @@
       ranked.push({
         uid: stop.uid, id: stop.id, street: String(stop.street || ''),
         distance_m: Math.round(distance * 10) / 10,
-        installed: !!stop.installed, skipped: !!stop.skipped,
+        installed: !!stop.installed, skipped: !!stop.skipped, picked_up: !!stop.picked_up,
         done: !!(stop.installed || stop.skipped)
       });
     });
     ranked.sort(function (a, b) { return a.distance_m - b.distance_m; });
-    var pending = ranked.filter(function (r) { return !r.done; });
-    var finished = ranked.filter(function (r) { return r.done; });
+    return ranked;
+  }
+
+  function matchPool(ranked, accuracy, isPending, isFinished) {
+    var pending = ranked.filter(isPending);
+    var finished = ranked.filter(isFinished);
     var empty = { status: 'none', reason: 'empty', options: [], nearest: null, nearby_done: null };
     if (!ranked.length) return empty;
     var nearestDone = finished[0] || null;
@@ -513,12 +519,137 @@
     };
   }
 
+  function matchSite(stops, lat, lon, accuracy) {
+    return matchPool(rankSites(stops, lat, lon), accuracy,
+      function (r) { return !r.done; },
+      function (r) { return r.done; });
+  }
+
+  function matchPickup(stops, lat, lon, accuracy) {
+    return matchPool(rankSites(stops, lat, lon), accuracy,
+      function (r) { return r.installed && !r.picked_up; },
+      function (r) { return !!r.picked_up; });
+  }
+
+  function closestUnfinished(stops, lat, lon) {
+    var ranked = rankSites(stops, lat, lon);
+    for (var i = 0; i < ranked.length; i++) {
+      if (!ranked[i].done) return packMatch(ranked[i]);
+    }
+    return null;
+  }
+
   function clearGrab(stop) {
     if (!stop) return stop;
     stop.field_lat = null;
     stop.field_lon = null;
     stop.field_coord_source = '';
     stop.field_accuracy_m = null;
+    return stop;
+  }
+
+  var MIN_SEGMENT_M = 15;
+
+  function segmentLengthM(lat1, lon1, lat2, lon2) {
+    var dlat = (lat2 - lat1) * 111320.0;
+    var dlon = (lon2 - lon1) * 111320.0 * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
+    return Math.sqrt(dlat * dlat + dlon * dlon);
+  }
+
+  function bearingDeg(lat1, lon1, lat2, lon2) {
+    var y = (lat2 - lat1) * Math.PI / 180;
+    var x = (lon2 - lon1) * Math.PI / 180 * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
+    return (Math.atan2(x, y) * 180 / Math.PI + 360) % 360;
+  }
+
+  function axisNE(bearing) {
+    var axis = bearing % 180;
+    if (axis > 90) axis = 180 - axis;
+    return axis <= 45 ? 'n' : 'e';
+  }
+
+  function inferDirection(stop) {
+    var seg = siteSegment(stop || {});
+    if (!seg) {
+      return { direction: '', source: 'needs_gps', confidence: 'none', bearing_deg: null, segment_m: null };
+    }
+    var dist = segmentLengthM(seg[0], seg[1], seg[2], seg[3]);
+    var rounded = Math.round(dist * 10) / 10;
+    if (dist < MIN_SEGMENT_M) {
+      return { direction: '', source: 'needs_gps', confidence: 'none', bearing_deg: null, segment_m: rounded };
+    }
+    var bearing = bearingDeg(seg[0], seg[1], seg[2], seg[3]);
+    return {
+      direction: axisNE(bearing),
+      source: 'segment',
+      confidence: dist >= 50 ? 'high' : 'medium',
+      bearing_deg: Math.round(bearing * 10) / 10,
+      segment_m: rounded
+    };
+  }
+
+  function inferFromHeading(heading) {
+    var h = Number(heading);
+    if (!isFinite(h)) return { direction: '', source: 'needs_gps', bearing_deg: null };
+    h = ((h % 360) + 360) % 360;
+    var distN = Math.min(Math.abs(h - 0), Math.abs(h - 360), Math.abs(h - 180));
+    var distE = Math.min(Math.abs(h - 90), Math.abs(h - 270));
+    return {
+      direction: distE < distN ? 'e' : 'n',
+      source: 'gps',
+      bearing_deg: Math.round(h * 10) / 10
+    };
+  }
+
+  function directionHint(infer, chosen, source) {
+    infer = infer || {};
+    var dir = String(chosen || infer.direction || '').toLowerCase();
+    var label = dir ? dir.toUpperCase() : '';
+    if (!dir && (source === 'needs_gps' || infer.source === 'needs_gps')) {
+      var short = infer.segment_m != null ? (' (' + infer.segment_m + ' m)') : '';
+      return 'Site line is too short' + short + '. Set direction from the compass.';
+    }
+    if (source === 'gps' && label) return 'Direction ' + label + ' from the compass.';
+    if (source === 'manual' && label) return 'Direction ' + label + ' set on this site.';
+    if (source === 'existing' && label) return 'Direction ' + label + ' is already on this site.';
+    if (label && (source === 'segment' || dir === infer.direction)) {
+      var extra = infer.segment_m != null ? (' · ' + infer.segment_m + ' m site line') : '';
+      var deg = infer.bearing_deg != null ? (' (' + infer.bearing_deg + '°)') : '';
+      return 'Direction ' + label + ' from the site line' + extra + deg + '.';
+    }
+    if (label) return 'Direction ' + label + ' set on this site.';
+    return 'Set direction, then Install.';
+  }
+
+  function duplicateSerial(stops, skipUid, serial) {
+    var sn = String(serial || '').trim().toUpperCase();
+    if (sn.length < 3) return null;
+    var list = stops || [];
+    for (var i = 0; i < list.length; i++) {
+      var other = list[i];
+      if (!other || other.uid === skipUid) continue;
+      var got = String(other.serial || other.counter_serial || '').trim().toUpperCase();
+      if (got && got === sn) return other;
+    }
+    return null;
+  }
+
+  function restoreStop(stop, snap) {
+    if (!stop || !snap) return stop;
+    stop.street = snap.street || stop.street;
+    stop.direction = snap.direction || '';
+    stop.serial = snap.serial || '';
+    stop.notes = snap.notes || '';
+    stop.lanes = snap.lanes || stop.lanes || 2;
+    stop.installed = !!snap.installed;
+    stop.skipped = !!snap.skipped;
+    stop.picked_up = !!snap.picked_up;
+    stop.date = snap.date || '';
+    stop.exact_time = snap.exact_time || '';
+    stop.field_lat = snap.field_lat;
+    stop.field_lon = snap.field_lon;
+    stop.field_coord_source = snap.field_coord_source || '';
+    stop.field_accuracy_m = snap.field_accuracy_m;
     return stop;
   }
 
@@ -643,6 +774,13 @@
     toCsv: toCsv,
     haversineMi: haversineMi,
     matchSite: matchSite,
+    matchPickup: matchPickup,
+    closestUnfinished: closestUnfinished,
+    inferDirection: inferDirection,
+    inferFromHeading: inferFromHeading,
+    directionHint: directionHint,
+    duplicateSerial: duplicateSerial,
+    restoreStop: restoreStop,
     clearGrab: clearGrab,
     localJobId: localJobId,
     saveSnapshot: saveSnapshot,

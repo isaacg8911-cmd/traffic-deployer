@@ -83,7 +83,7 @@ host (Render / Fly.io / VPS) — phase 2.
 
 ## Field loop
 
-Load Excel + `.EST`, then stay on **Grab GPS**. The fix is matched to the nearest unfinished count — the begin–end line from the map file, not a previous truck pin. Two close sites, a fuzzy fix, or a stop that is only nearby asks you to tap the site before anything is saved. Direction and serial are required, then Install. The phone goes back to waiting for the next grab. **Wrong site** clears that GPS and does not mark the site done. A site you already installed will not take the next grab while you are still standing on it.
+Load Excel + `.EST`, then stay on **Grab GPS**. The wait line shows the nearest unfinished count and how far it is. The fix is matched to that count’s begin–end line from the map file, not a previous truck pin. Two close sites, a fuzzy fix, or a stop that is only nearby asks you to tap the site before anything is saved. Direction is filled from that site line (n or e); a short line asks for the compass. Serial is required. The same serial on another site asks before it saves. Then Install. The phone goes back to waiting, with **Undo** for that install or skip. **Wrong site** clears that GPS and does not mark the site done. A site you already installed will not take the next grab while you are still standing on it. Pickup is the same grab, matched to the installed site you are standing at.
 
 ## Phone vs laptop
 
@@ -91,17 +91,17 @@ Load Excel + `.EST`, then stay on **Grab GPS**. The fix is matched to the neares
 |---|---|---|
 | Excel + .EST import | Local picker | Browser upload (same ingest) |
 | Route build / optimize | Yes | Yes (server) |
-| Map | Offline PMTiles | Online tiles |
+| Map | Offline PMTiles | Online tiles. Tiles already viewed stay on the phone if the signal drops |
 | GPS capture | USB receiver, on the selected stop | Phone GPS. Grab links the fix to the nearest unfinished site |
 | Drop pin fallback | Yes | Yes, matched the same way |
 | Follow GPS / next-stop banner | Yes | Nearest unfinished site, not the next row in the list |
 | Install / skip | Yes | Yes |
 | Serial / lanes / dir / notes | Yes | Yes |
 | PicoCount USB | Yes | No (counter columns blank) |
-| Pickup | Yes | Yes |
+| Pickup | Yes | Grab GPS, same match as install |
 | Audit / IG TFC export | Yes | CSV on-phone; Excel when server is up |
 | Local save if online fails | Encrypted `tds_data/` | IndexedDB + `.tdjob.json` download/re-upload |
-| Undo | Yes | Not yet |
+| Undo | Yes | Last install, skip, or pickup |
 
 ## Architecture
 

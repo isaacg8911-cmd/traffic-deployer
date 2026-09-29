@@ -37,23 +37,8 @@
 
       <div id="createBlock">
         <div class="block">
-          <h2>1. Start</h2>
-          <p class="muted">Optional yard address. The phone does not build a driving route.</p>
-          <label class="field">Home start address
-            <input id="homeAddr" type="text" placeholder="street, city, CA zip" autocomplete="street-address" enterkeyhint="search" />
-          </label>
-          <div class="row">
-            <button id="btnSearchHome" class="primary grow" type="button">Search</button>
-            <button id="btnHomeGps" class="secondary grow" type="button">Use GPS</button>
-          </div>
-          <button id="btnLastHome" class="ghost hidden" type="button">Use last start</button>
-          <div id="homeStatus" class="msg">Optional — search or GPS before import.</div>
-          <ul id="homeCands" class="list hidden"></ul>
-        </div>
-
-        <div class="block">
-          <h2>2. Files</h2>
-          <p class="muted">Same two uploads as the laptop Setup tab.</p>
+          <h2>Files</h2>
+          <p class="muted">Same two uploads as the laptop Setup tab. The phone does not build a driving route.</p>
           <label class="file-btn" for="impExcel">
             <input id="impExcel" class="sr-only" type="file" accept=".csv,.xlsx,.xls" multiple />
             <span class="file-btn-title">Excel / CSV sites</span>
@@ -160,8 +145,10 @@
         <p id="installWaitSub" class="muted">Grab GPS. The app links it to the site you are standing at.</p>
         <button id="btnGrab" class="field-primary" type="button">Grab GPS</button>
         <button id="btnDropPin" class="secondary" type="button">Drop pin</button>
+        <div id="nearLine" class="near-line"></div>
         <div id="grabInfo" class="msg"></div>
         <ul id="matchChoices" class="list hidden"></ul>
+        <button id="btnUndo" class="ghost hidden" type="button">Undo</button>
       </div>
       <div id="siteForm" class="hidden">
         <div id="installTitle" class="stop-title">Site</div>
@@ -178,6 +165,8 @@
             <input id="fLanes" type="number" min="1" max="20" value="2" />
           </label>
         </div>
+        <div id="dirHint" class="muted"></div>
+        <button id="btnCompass" class="secondary" type="button">Use compass</button>
         <label class="field">Serial #
           <input id="fSerial" type="text" inputmode="numeric" />
         </label>
@@ -196,6 +185,13 @@
   <!-- Pickup tab -->
   <section id="pickupScreen" class="screen tab hidden">
     <div class="panel">
+      <div id="pickupWaitTitle" class="stop-title">Pickup</div>
+      <p class="muted">Grab GPS. The app links it to the installed site you are standing at.</p>
+      <button id="btnPickupGrab" class="field-primary" type="button">Grab GPS</button>
+      <button id="btnPickupPin" class="secondary" type="button">Drop pin</button>
+      <div id="pickupInfo" class="msg"></div>
+      <ul id="pickupChoices" class="list hidden"></ul>
+      <button id="btnUndoPickup" class="ghost hidden" type="button">Undo pickup</button>
       <div id="pickupProg" class="muted"></div>
       <ul id="pickupList" class="list"></ul>
     </div>
@@ -238,7 +234,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/vendor/maplibre-gl.js"></script>
-  <script src="/local.js?v=3"></script>
-  <script src="/app.js?v=15"></script>
+  <script src="/local.js?v=4"></script>
+  <script src="/app.js?v=16"></script>
 </body>
 </html>

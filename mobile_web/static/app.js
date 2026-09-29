@@ -20,7 +20,10 @@
     driving: false, geoWatch: null, myLat: null, myLon: null, myAcc: null,
     homeLat: null, homeLon: null, homeLabel: '',
     phase: 'wait', formUid: null, filledUid: null, grabLock: null, formSnapshot: null,
-    pendingFix: null, choices: [], matchNote: '', grabbing: false, matching: false
+    pendingFix: null, choices: [], matchNote: '', grabbing: false, matching: false,
+    lastUndo: null, nearWatch: null, pinFor: 'install',
+    dirInfer: null, dirSource: '', fillingDir: false,
+    pickupPhase: 'wait', pickupChoices: [], pickupNote: '', pickupFix: null
   };
   var map = null, mapReady = false, meMarker = null, pinMarker = null;
 
@@ -663,6 +666,7 @@
     if (grabWait) grabWait.classList.toggle('hidden', !waiting);
     if (siteForm) siteForm.classList.toggle('hidden', waiting);
     var done = (c.installed || 0) + '/' + (c.total || 0);
+    renderUndo();
     if (waiting) {
       $('installWaitTitle').textContent = stops.length ? ('At the site · ' + done + ' installed') : 'No sites yet';
       $('installWaitSub').textContent = state.phase === 'choose'
@@ -671,8 +675,11 @@
       $('grabInfo').textContent = state.matchNote || (stops.length ? 'Waiting for the next GPS grab.' : '');
       $('grabInfo').className = state.phase === 'choose' ? 'msg' : (state.matchNote ? 'msg err' : 'msg');
       renderChoices();
+      renderNearLine();
+      syncNearWatch();
       return;
     }
+    syncNearWatch();
     if (!stops.length || state.current >= stops.length) {
       $('installTitle').textContent = 'No site.';
       return;
@@ -697,7 +704,79 @@
     $('fLanes').value = s.lanes || 2;
     $('fSerial').value = s.serial || '';
     $('fNotes').value = s.notes || '';
-    fillDir(s.direction);
+    applyDirection(s);
+    syncNearWatch();
+  }
+
+  function blankDir(value) {
+    var v = String(value || '').trim().toLowerCase();
+    return !v || v === 'nan' || v === 'none' || v === 'nat';
+  }
+
+  function applyDirection(stop) {
+    var inferred = L.inferDirection(stop);
+    var existing = String(stop.direction || '').trim().toLowerCase();
+    var chosen = blankDir(existing) ? (inferred.direction || '') : existing;
+    var source = blankDir(existing)
+      ? inferred.source
+      : ((chosen === inferred.direction && inferred.source === 'segment') ? 'segment' : 'existing');
+    state.dirInfer = inferred;
+    state.dirSource = source;
+    state.fillingDir = true;
+    fillDir(chosen);
+    state.fillingDir = false;
+    setDirHint();
+  }
+
+  function setDirHint() {
+    var el = $('dirHint');
+    if (!el || !L.directionHint) return;
+    el.textContent = L.directionHint(state.dirInfer, $('fDir').value, state.dirSource);
+  }
+
+  function renderNearLine() {
+    var el = $('nearLine');
+    if (!el) return;
+    if (state.phase === 'form' || state.phase === 'choose' || state.myLat == null) {
+      el.textContent = '';
+      return;
+    }
+    var hit = L.closestUnfinished((state.job && state.job.stops) || [], state.myLat, state.myLon);
+    if (!hit) { el.textContent = ''; return; }
+    var street = hit.street && hit.street.indexOf('Site ') !== 0 ? (' · ' + hit.street) : '';
+    el.textContent = 'Nearest unfinished: Site ' + hit.id + street + ' · ' + formatM(hit.distance_m);
+  }
+
+  function syncNearWatch() {
+    var want = state.tab === 'install' && state.phase !== 'form' && !state.driving;
+    if (!navigator.geolocation) return;
+    if (want && state.nearWatch == null) {
+      state.nearWatch = navigator.geolocation.watchPosition(function (pos) {
+        state.myLat = pos.coords.latitude;
+        state.myLon = pos.coords.longitude;
+        state.myAcc = pos.coords.accuracy;
+        if (state.phase !== 'form' && state.phase !== 'choose') renderNearLine();
+      }, function () {}, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+    } else if (!want && state.nearWatch != null) {
+      navigator.geolocation.clearWatch(state.nearWatch);
+      state.nearWatch = null;
+    }
+  }
+
+  function renderUndo() {
+    var u = state.lastUndo;
+    var installBtn = $('btnUndo');
+    if (installBtn) {
+      var show = !!(u && (u.kind === 'install' || u.kind === 'skip') && state.phase !== 'form');
+      installBtn.classList.toggle('hidden', !show);
+      if (show) installBtn.textContent = 'Undo ' + (u.kind === 'skip' ? 'skip' : 'install') + ' · Site ' + u.id;
+    }
+    var pickupBtn = $('btnUndoPickup');
+    if (pickupBtn) {
+      var pshow = !!(u && u.kind === 'pickup');
+      pickupBtn.classList.toggle('hidden', !pshow);
+      if (pshow) pickupBtn.textContent = 'Undo pickup · Site ' + u.id;
+    }
   }
 
   function renderChoices() {
@@ -736,10 +815,33 @@
   }
 
   function renderPickup() {
+    renderUndo();
+    var info = $('pickupInfo');
+    if (info) {
+      info.textContent = state.pickupNote || '';
+      info.className = state.pickupPhase === 'choose' ? 'msg' : (state.pickupNote ? 'msg err' : 'msg');
+    }
+    var choices = $('pickupChoices');
+    if (choices) {
+      choices.innerHTML = '';
+      var show = state.pickupPhase === 'choose' && state.pickupChoices && state.pickupChoices.length;
+      choices.classList.toggle('hidden', !show);
+      if (show) {
+        state.pickupChoices.forEach(function (opt) {
+          var li = document.createElement('li');
+          li.innerHTML = '<span class="grow"><b>Site ' + esc(opt.id) + '</b>' +
+            '<span class="sub">' + esc(opt.street || '') + ' · ' + formatM(opt.distance_m) + '</span></span>';
+          li.onclick = function () { confirmPickup(opt.uid); };
+          choices.appendChild(li);
+        });
+      }
+    }
     var ul = $('pickupList'); ul.innerHTML = '';
     var installed = ((state.data && state.data.stops) || []).filter(function (s) { return s.installed; });
     var done = installed.filter(function (s) { return s.picked_up; }).length;
     $('pickupProg').textContent = 'Pickup: ' + done + '/' + installed.length + ' done';
+    var title = $('pickupWaitTitle');
+    if (title) title.textContent = installed.length ? ('Pickup · ' + done + '/' + installed.length) : 'Pickup';
     installed.forEach(function (s) {
       var li = document.createElement('li');
       li.className = s.picked_up ? 'picked_up' : 'installed';
@@ -747,11 +849,7 @@
         '<span class="sub">' + esc(s.street) + (s.picked_up ? ' · picked up' : ' · tap to pick up') + '</span></span>';
       li.onclick = function () {
         if (s.picked_up) { flyToStop(s); return; }
-        if (li._busy) return;
-        li._busy = true;
-        patchStop(s.uid, { picked_up: true }).then(function () {
-          toast('Picked up Site ' + s.id);
-        }).catch(function (e) { toast(e.message); }).finally(function () { li._busy = false; });
+        confirmPickup(s.uid);
       };
       ul.appendChild(li);
     });
@@ -873,10 +971,13 @@
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   }
 
-  function enablePinMode() {
+  function enablePinMode(which) {
     state.pinMode = true;
+    state.pinFor = which === 'pickup' ? 'pickup' : 'install';
     hideNavOffer();
-    $('mapHint').textContent = 'Tap the map to drop a pin for this site';
+    $('mapHint').textContent = state.pinFor === 'pickup'
+      ? 'Tap the map to drop a pin for pickup'
+      : 'Tap the map to drop a pin for this site';
     $('mapHint').classList.remove('hidden');
   }
   function disablePinMode() {
@@ -890,14 +991,17 @@
       .setLngLat([lon, lat]).addTo(map);
     pinMarker.on('dragend', function () {
       var ll = pinMarker.getLngLat();
-      if (state.phase === 'form' && state.formUid) {
+      if (state.pinFor === 'pickup') {
+        resolvePickup(ll.lat, ll.lng, 'manual', null);
+      } else if (state.phase === 'form' && state.formUid) {
         saveGrab(state.formUid, ll.lat, ll.lng, 'manual', null);
       } else {
         resolveFix(ll.lat, ll.lng, 'manual', null);
       }
     });
     $('mapHint').textContent = 'Pin set — drag to adjust';
-    resolveFix(lat, lon, 'manual', null);
+    if (state.pinFor === 'pickup') resolvePickup(lat, lon, 'manual', null);
+    else resolveFix(lat, lon, 'manual', null);
   }
 
   function resolveFix(lat, lon, source, accuracy) {
@@ -946,27 +1050,228 @@
     }).finally(function () { state.matching = false; });
   }
 
+  function pickupMessage(match, accuracy) {
+    var near = match.nearest;
+    var who = near ? ('Site ' + near.id + (near.street ? ' · ' + near.street : '')) : 'a site';
+    var dist = near ? formatM(near.distance_m) : '';
+    if (match.status === 'done') {
+      return who + ' is already picked up' + (dist ? ' (' + dist + ')' : '') + '. Go to the next site and grab again.';
+    }
+    if (match.status === 'none') {
+      if (!near) return 'No installed sites to pick up.';
+      if (match.reason === 'empty') return 'Nothing left to pick up.';
+      return 'No installed site close enough. Nearest is ' + who + (dist ? ', ' + dist + ' away' : '') + '.';
+    }
+    if (match.reason === 'ambiguous') return 'Two sites are close. Tap the one you are picking up.';
+    if (match.reason === 'fuzzy') {
+      var acc = (accuracy != null && isFinite(accuracy)) ? Math.round(accuracy * 3.28084) + ' ft' : '';
+      return 'GPS is fuzzy' + (acc ? ' (±' + acc + ')' : '') + '. Tap the site you are picking up.';
+    }
+    if (match.reason === 'already_near') return 'A picked-up site is nearby. Tap the one you are at.';
+    return 'Nearest is ' + who + (dist ? ', ' + dist : '') + '. Tap it to pick up.';
+  }
+
+  function grabPickup() {
+    if (state.grabbing || state.matching || state.busy) return;
+    if (!navigator.geolocation) {
+      toast('No geolocation on this device — use Drop pin.');
+      enablePinMode('pickup');
+      return;
+    }
+    state.grabbing = true;
+    if ($('btnPickupGrab')) $('btnPickupGrab').disabled = true;
+    if ($('pickupInfo')) { $('pickupInfo').textContent = 'Getting GPS…'; $('pickupInfo').className = 'msg'; }
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      state.grabbing = false;
+      if ($('btnPickupGrab')) $('btnPickupGrab').disabled = false;
+      state.myLat = pos.coords.latitude;
+      state.myLon = pos.coords.longitude;
+      resolvePickup(pos.coords.latitude, pos.coords.longitude, 'phone_gps', pos.coords.accuracy);
+    }, function () {
+      state.grabbing = false;
+      if ($('btnPickupGrab')) $('btnPickupGrab').disabled = false;
+      state.pickupNote = 'GPS denied or failed. Tap Drop pin and pick the spot on the map.';
+      renderPickup();
+      enablePinMode('pickup');
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  }
+
+  function resolvePickup(lat, lon, source, accuracy) {
+    if (!(lat > CA.minLat && lat < CA.maxLat && lon > CA.minLon && lon < CA.maxLon)) {
+      toast('Location looks outside California.');
+      return;
+    }
+    var match = L.matchPickup((state.job && state.job.stops) || [], lat, lon, accuracy);
+    state.pickupFix = { lat: lat, lon: lon, source: source, accuracy: accuracy };
+    state.pickupChoices = match.status === 'choose' ? (match.options || []) : [];
+    state.pickupNote = match.status === 'bind' ? '' : pickupMessage(match, accuracy);
+    if (match.status === 'bind') {
+      confirmPickup(match.uid);
+      return;
+    }
+    state.pickupPhase = match.status === 'choose' ? 'choose' : 'wait';
+    if (state.tab !== 'pickup') setTab('pickup');
+    else renderPickup();
+  }
+
+  function confirmPickup(uid) {
+    if (state.busy || !uid) return;
+    var raw = L.findStop(state.job, uid);
+    if (!raw) return;
+    if (!raw.installed) { toast('Install the site before pickup.'); return; }
+    if (raw.picked_up) {
+      toast('Site ' + raw.id + ' is already picked up.');
+      state.pickupPhase = 'wait';
+      state.pickupNote = 'Site ' + raw.id + ' is already picked up. Go to the next site and grab again.';
+      renderPickup();
+      return;
+    }
+    var before = L.copyStop(raw);
+    var label = raw.id;
+    state.busy = true;
+    patchStop(uid, { picked_up: true }).then(function () {
+      state.lastUndo = { kind: 'pickup', id: label, uid: uid, snap: before };
+      state.pickupPhase = 'wait';
+      state.pickupNote = '';
+      state.pickupChoices = [];
+      disablePinMode();
+      toast('Picked up Site ' + label);
+      renderPickup();
+      renderMap();
+    }).catch(function (e) { toast(e.message || 'Could not pick up.'); }).finally(function () { state.busy = false; });
+  }
+
   function commitInstall(installed) {
     if (state.phase !== 'form' || !state.formUid || state.busy) return;
     var uid = state.formUid;
     if (installed) {
+      var serial = $('fSerial').value.trim();
       var reason = L.patchBlockReason(rawStop(uid) || {}, {
         installed: true,
         direction: $('fDir').value,
-        serial: $('fSerial').value.trim()
+        serial: serial
       });
       if (reason) { toast(reason); return; }
+      var dup = L.duplicateSerial((state.job && state.job.stops) || [], uid, serial);
+      if (dup) {
+        var street = dup.street && String(dup.street).indexOf('Site ') !== 0 ? (' (' + dup.street + ')') : '';
+        var ok = window.confirm('Serial ' + serial + ' is already on Site ' + dup.id + street + '.\n\nInstall on this site anyway?');
+        if (!ok) return;
+      }
     }
     var s = rawStop(uid);
     var label = s ? s.id : '';
+    var before = s ? L.copyStop(s) : null;
     state.busy = true;
     flushForm().then(function () {
+      var flushed = L.findStop(state.job, uid);
+      if (before && flushed) {
+        before.street = flushed.street;
+        before.direction = flushed.direction;
+        before.serial = flushed.serial;
+        before.notes = flushed.notes;
+        before.lanes = flushed.lanes;
+      }
       return patchStop(uid, installed ? { installed: true } : { skipped: true });
     }).then(function () {
+      if (before) state.lastUndo = { kind: installed ? 'install' : 'skip', id: label, uid: uid, snap: before };
       toast((installed ? 'Installed' : 'Skipped') + ' Site ' + label);
       state.matchNote = '';
       enterWait();
     }).catch(function (e) { toast(e.message); }).finally(function () { state.busy = false; });
+  }
+
+  function undoLast() {
+    var u = state.lastUndo;
+    if (!u || state.busy) return;
+    var snap = u.snap || {};
+    var patch = {
+      street: snap.street || '',
+      direction: snap.direction || '',
+      serial: snap.serial || '',
+      notes: snap.notes || '',
+      lanes: snap.lanes || 2,
+      installed: !!snap.installed,
+      skipped: !!snap.skipped,
+      picked_up: !!snap.picked_up,
+      date: snap.date || '',
+      exact_time: snap.exact_time || ''
+    };
+    state.busy = true;
+    patchStop(u.uid, patch).then(function () {
+      var raw = L.findStop(state.job, u.uid);
+      if (raw) L.restoreStop(raw, snap);
+      applyJob(state.job);
+      state.lastUndo = null;
+      if (u.kind === 'pickup') {
+        toast('Undid pickup on Site ' + u.id);
+        state.pickupPhase = 'wait';
+        state.pickupNote = '';
+        if (state.tab !== 'pickup') setTab('pickup');
+        else renderPickup();
+        return;
+      }
+      toast('Undid ' + (u.kind === 'skip' ? 'skip' : 'install') + ' on Site ' + u.id);
+      var stops = (state.data && state.data.stops) || [];
+      var idx = -1;
+      for (var i = 0; i < stops.length; i++) if (stops[i].uid === u.uid) { idx = i; break; }
+      if (idx >= 0) openSiteForm(idx, false);
+      else enterWait();
+    }).catch(function (e) { toast(e.message || 'Could not undo.'); }).finally(function () { state.busy = false; });
+  }
+
+  function useCompass() {
+    if (state.phase !== 'form') return;
+    var done = false;
+    var perm = null;
+    if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try { perm = DeviceOrientationEvent.requestPermission(); } catch (e) { perm = null; }
+    }
+    function apply(deg) {
+      if (done || !isFinite(deg)) return;
+      done = true;
+      var hint = L.inferFromHeading(deg);
+      if (!hint.direction) {
+        toast('No compass heading. Face along the road and try again, or pick N or E.');
+        return;
+      }
+      state.dirSource = 'gps';
+      state.fillingDir = true;
+      fillDir(hint.direction);
+      state.fillingDir = false;
+      setDirHint();
+      toast('Direction ' + hint.direction.toUpperCase() + ' from the compass.');
+    }
+    function listenOrientation() {
+      function onOri(ev) {
+        var deg = null;
+        if (ev && typeof ev.webkitCompassHeading === 'number' && isFinite(ev.webkitCompassHeading)) deg = ev.webkitCompassHeading;
+        else if (ev && typeof ev.alpha === 'number' && isFinite(ev.alpha)) deg = (360 - ev.alpha) % 360;
+        if (deg == null) return;
+        window.removeEventListener('deviceorientation', onOri);
+        apply(deg);
+      }
+      window.addEventListener('deviceorientation', onOri);
+      setTimeout(function () {
+        window.removeEventListener('deviceorientation', onOri);
+        if (!done) toast('No compass heading. Face along the road and try again, or pick N or E.');
+      }, 4000);
+    }
+    function afterGpsHeading(heading) {
+      if (heading != null && isFinite(heading) && heading >= 0) { apply(heading); return; }
+      if (perm && perm.then) {
+        perm.then(function (status) {
+          if (status === 'granted') listenOrientation();
+          else toast('Compass permission denied. Pick N or E.');
+        }).catch(function () { toast('No compass heading. Pick N or E.'); });
+        return;
+      }
+      listenOrientation();
+    }
+    if (!navigator.geolocation) { afterGpsHeading(null); return; }
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      afterGpsHeading(pos.coords && pos.coords.heading);
+    }, function () { afterGpsHeading(null); }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
   }
 
   function cancelSite() {
@@ -1030,6 +1335,7 @@
     } else {
       stopWatch();
     }
+    syncNearWatch();
   }
 
   function startWatch() {
@@ -1095,8 +1401,10 @@
     document.body.classList.toggle('has-map', showMap);
     if (showMap && map) setTimeout(function () { map.resize(); }, 60);
     if (tab === 'install') renderInstall();
+    if (tab === 'pickup') renderPickup();
     if (tab === 'audit') renderAudit();
     if (tab === 'setup') renderSetup();
+    syncNearWatch();
   }
 
   // ----------------------------------------------------------------- job load
@@ -1162,6 +1470,10 @@
   }
   function showStart() {
     stopWatch();
+    if (state.nearWatch != null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(state.nearWatch);
+      state.nearWatch = null;
+    }
     state.driving = false;
     $('startScreen').classList.remove('hidden');
     $('tabbar').classList.add('hidden');
@@ -1210,9 +1522,13 @@
   }
   function applyHome(lat, lon, label) {
     state.homeLat = lat; state.homeLon = lon; state.homeLabel = label || '';
-    $('homeStatus').textContent = (label || 'Start set') + ' · ' + lat.toFixed(5) + ', ' + lon.toFixed(5);
-    $('homeStatus').className = 'msg ok';
-    if (label && !$('homeAddr').value.trim()) $('homeAddr').value = label;
+    var status = $('homeStatus');
+    if (status) {
+      status.textContent = (label || 'Start set') + ' · ' + lat.toFixed(5) + ', ' + lon.toFixed(5);
+      status.className = 'msg ok';
+    }
+    var addr = $('homeAddr');
+    if (label && addr && !addr.value.trim()) addr.value = label;
     persistHome();
   }
   function refreshLastHomeBtn() {
@@ -1303,7 +1619,8 @@
     if (state.homeLat != null && state.homeLon != null) {
       fd.append('home_lat', String(state.homeLat));
       fd.append('home_lon', String(state.homeLon));
-      fd.append('home_label', state.homeLabel || $('homeAddr').value.trim() || 'Field start');
+      var addr = $('homeAddr');
+      fd.append('home_label', state.homeLabel || (addr ? addr.value.trim() : '') || 'Field start');
     }
     $('startMsg').textContent = 'Importing…'; $('startMsg').className = 'msg';
     fetch('/api/jobs/import', { method: 'POST', body: fd }).then(function (r) {
@@ -1368,13 +1685,13 @@
   function wire() {
     $('btnImport').onclick = importJob;
     $('btnResumeFile').onclick = resumeFile;
-    $('btnSearchHome').onclick = searchHome;
-    $('btnHomeGps').onclick = homeFromGps;
-    $('btnLastHome').onclick = function () {
+    if ($('btnSearchHome')) $('btnSearchHome').onclick = searchHome;
+    if ($('btnHomeGps')) $('btnHomeGps').onclick = homeFromGps;
+    if ($('btnLastHome')) $('btnLastHome').onclick = function () {
       var saved = loadSavedHome();
       if (saved && saved.lat != null) applyHome(saved.lat, saved.lon, saved.label || '');
     };
-    $('homeAddr').addEventListener('keydown', function (ev) {
+    if ($('homeAddr')) $('homeAddr').addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter') { ev.preventDefault(); searchHome(); }
     });
     $('impExcel').addEventListener('change', function () {
@@ -1402,11 +1719,24 @@
     $('btnGrab').onclick = grabGps;
     $('btnDropPin').onclick = function () {
       if (state.phase === 'form') return;
-      if (state.pinMode) disablePinMode(); else enablePinMode();
+      if (state.pinMode && state.pinFor !== 'pickup') disablePinMode(); else enablePinMode('install');
     };
     $('btnInstall').onclick = function () { commitInstall(true); };
     $('btnSkip').onclick = function () { commitInstall(false); };
     $('btnWrong').onclick = cancelSite;
+    if ($('btnUndo')) $('btnUndo').onclick = undoLast;
+    if ($('btnUndoPickup')) $('btnUndoPickup').onclick = undoLast;
+    if ($('btnCompass')) $('btnCompass').onclick = useCompass;
+    if ($('fDir')) $('fDir').addEventListener('change', function () {
+      if (state.fillingDir) return;
+      state.dirSource = 'manual';
+      setDirHint();
+    });
+    if ($('btnPickupGrab')) $('btnPickupGrab').onclick = grabPickup;
+    if ($('btnPickupPin')) $('btnPickupPin').onclick = function () {
+      if (state.pinMode && state.pinFor === 'pickup') disablePinMode();
+      else enablePinMode('pickup');
+    };
     $('btnLocate').onclick = locateMe;
     $('navOfferDismiss').onclick = hideNavOffer;
     $('navOfferGo').addEventListener('click', function (ev) {

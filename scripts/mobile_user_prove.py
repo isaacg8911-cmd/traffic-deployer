@@ -34,6 +34,24 @@ def main() -> int:
 
     client = TestClient(app)
 
+    js = client.get("/app.js?v=13").text
+    html = client.get("/").text
+    check(
+        "directions choice on the map",
+        "showNavOffer" in js and 'id="navOffer"' in html and "site-begin" in js and "site-end" in js,
+    )
+    click_at = js.find("map.on('click', 'stop-dot'")
+    end_at = js.find("function mapsDirectionsUrl")
+    site_click = js[click_at:end_at] if 0 <= click_at < end_at else ""
+    check(
+        "site tap does not open Google Maps",
+        "openSiteForm" in site_click and "mapsDirectionsUrl" not in site_click and "window.open" not in site_click,
+    )
+    check(
+        "directions link is the button",
+        "navOfferGo" in js and "maps.google.com" not in js and "google.com/maps/dir" in js,
+    )
+
     # 1. health + config
     r = client.get("/api/healthz")
     check("health", r.status_code == 200 and r.json().get("ok"), str(r.status_code))

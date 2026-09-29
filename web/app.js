@@ -6,6 +6,8 @@
  *                pushNav(json)    (unused — map-only driving)
  *                flyTo(lat,lon,z) recenter
  * JS -> Python : onMapClick(lat,lon), onStopClick(uid), onReady()
+ *                begin/end tap shows a directions button; tdnav.local opens
+ *                Google Maps only after that button is tapped.
  */
 (function () {
   'use strict';
@@ -829,6 +831,7 @@
     var manualGrab = state.map_mode === 'manual_grab';
     var msg = state.pick_prompt || '';
     document.body.classList.toggle('td-manual-grab', manualGrab);
+    if (picking || manualGrab) hideNavOffer();
     if ((picking || manualGrab) && msg) {
       var waiting = state.pick_waiting || '';
       el.textContent = waiting ? (msg + ' — ' + waiting) : msg;
@@ -1125,8 +1128,76 @@
 
   function renderNav() { /* turn-by-turn banner removed — map + status bar only */ }
 
+  function hideNavOffer() {
+    var el = document.getElementById('nav-offer');
+    if (el) el.style.display = 'none';
+  }
+
+  function fireNavOpen(lat, lon) {
+    window.location.href = 'http://tdnav.local/go?lat=' +
+      encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon);
+  }
+
+  // Begin/end tap shows a choice. Google Maps opens only from the button.
+  function showNavOffer(payload) {
+    var el = document.getElementById('nav-offer');
+    var text = document.getElementById('nav-offer-text');
+    var go = document.getElementById('nav-offer-go');
+    if (!el || !text || !go) return;
+    var mode = lastState && lastState.map_mode;
+    if (!lastState || mode === 'pick' || mode === 'manual_grab') {
+      hideNavOffer();
+      return;
+    }
+    var raw = String(payload || '');
+    var bar = raw.indexOf('|');
+    if (bar < 0) { hideNavOffer(); return; }
+    var uid = raw.slice(0, bar);
+    var side = raw.slice(bar + 1);
+    if (side !== 'begin' && side !== 'end') { hideNavOffer(); return; }
+    var stop = null, idx = -1;
+    var stops = lastState.stops || [];
+    for (var i = 0; i < stops.length; i++) {
+      if (String(stops[i].uid) === uid) { stop = stops[i]; idx = i; break; }
+    }
+    if (!stop) { hideNavOffer(); return; }
+    var lat = stop[side + '_lat'];
+    var lon = stop[side + '_lon'];
+    if (lat == null || lon == null) { hideNavOffer(); return; }
+    var siteId = siteIdLabel(stop, idx);
+    var street = String(stop.street || '').trim();
+    if (!street || street.toLowerCase() === 'nan') street = '';
+    var which = side === 'begin' ? 'Begin' : 'End';
+    text.textContent = street
+      ? ('Site ' + siteId + ' — ' + street + ' · ' + which + ' point')
+      : ('Site ' + siteId + ' · ' + which + ' point');
+    go.dataset.lat = String(lat);
+    go.dataset.lon = String(lon);
+    el.style.display = 'block';
+  }
+
+  var navGo = document.getElementById('nav-offer-go');
+  var navDismiss = document.getElementById('nav-offer-dismiss');
+  if (navGo) {
+    navGo.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (navGo.dataset.lat == null || navGo.dataset.lon == null) return;
+      if (navGo.dataset.lat === '' || navGo.dataset.lon === '') return;
+      fireNavOpen(navGo.dataset.lat, navGo.dataset.lon);
+    });
+  }
+  if (navDismiss) {
+    navDismiss.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      hideNavOffer();
+    });
+  }
+
   map.on('click', function (e) {
     if (lastState && lastState.map_mode === 'manual_grab') {
+      hideNavOffer();
       var siteId = '';
       if (lastState.current_uid && lastState.stops) {
         for (var mi = 0; mi < lastState.stops.length; mi++) {
@@ -1151,8 +1222,10 @@
     }
     if (payload) {
       fireStopClick(payload);
+      showNavOffer(payload);
       return;
     }
+    hideNavOffer();
     fireMapClick(e.lngLat.lat, e.lngLat.lng);
   });
 
@@ -1191,6 +1264,8 @@
 
   // Test seams: exercise the exact JS->Python click paths headlessly.
   window.__fireStopClick = function (payload) { fireStopClick(payload); };
+  window.__showNavOffer = function (payload) { showNavOffer(payload); };
+  window.__fireNavOpen = function (lat, lon) { fireNavOpen(lat, lon); };
   window.__fireMapClick = function (lat, lon) { fireMapClick(lat, lon); };
   // Page-level `bridge = null` does not touch this closure. Tests use this.
   window.__dropBridge = function () { bridge = null; };

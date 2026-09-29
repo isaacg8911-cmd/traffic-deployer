@@ -36,6 +36,26 @@ def ensure_qwebchannel_js() -> None:
             f.write(data)
 
 
+def tdnav_coords(url: QUrl) -> tuple[float, float] | None:
+    """Begin/end directions request from ``http://tdnav.local/go?lat=&lon=``.
+
+    The map stays on this page. Python opens Google Maps only after the
+    operator taps the on-map button that sets this URL.
+    """
+    query = QUrlQuery(url.query())
+    lat_s = query.queryItemValue("lat")
+    lon_s = query.queryItemValue("lon")
+    if not lat_s or not lon_s:
+        return None
+    try:
+        lat, lon = float(lat_s), float(lon_s)
+    except ValueError:
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    return lat, lon
+
+
 class AppWebPage(QWebEnginePage):
     """Intercept map clicks when QWebChannel never connects.
 
@@ -45,6 +65,7 @@ class AppWebPage(QWebEnginePage):
     """
     stopClicked = Signal(str)
     mapClicked = Signal(float, float)
+    navRequested = Signal(float, float)
 
     def acceptNavigationRequest(self, url, nav_type, isMainFrame):
         if not isMainFrame:
@@ -71,5 +92,10 @@ class AppWebPage(QWebEnginePage):
                         self.mapClicked.emit(float(parts[0]), float(parts[1]))
                     except ValueError:
                         pass
+            return False
+        if url.scheme() == "tdnav" or host == "tdnav.local":
+            coords = tdnav_coords(url)
+            if coords:
+                self.navRequested.emit(coords[0], coords[1])
             return False
         return super().acceptNavigationRequest(url, nav_type, isMainFrame)

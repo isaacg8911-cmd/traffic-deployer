@@ -203,6 +203,29 @@
       paint: { 'circle-radius': 6, 'circle-color': '#9c27b0', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' }
     });
 
+    map.addSource('ends', { type: 'geojson', data: fc() });
+    map.addLayer({
+      id: 'site-begin', type: 'circle', source: 'ends',
+      filter: ['==', ['get', 'kind'], 'begin'],
+      paint: {
+        'circle-radius': 10, 'circle-color': '#1565c0',
+        'circle-stroke-width': 2, 'circle-stroke-color': '#fff'
+      }
+    });
+    map.addLayer({
+      id: 'site-end', type: 'circle', source: 'ends',
+      filter: ['==', ['get', 'kind'], 'end'],
+      paint: {
+        'circle-radius': 10, 'circle-color': '#c62828',
+        'circle-stroke-width': 2, 'circle-stroke-color': '#fff'
+      }
+    });
+    ['site-begin', 'site-end'].forEach(function (id) {
+      map.on('mouseenter', id, function () { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', id, function () { map.getCanvas().style.cursor = ''; });
+      map.on('click', id, onEndpointClick);
+    });
+
     map.on('click', 'stop-dot', function (e) {
       if (state.pinMode || state.grabbing || state.matching) return;
       var f = e.features && e.features[0];
@@ -211,6 +234,48 @@
       var idx = (state.data.stops || []).findIndex(function (s) { return s.uid === uid; });
       if (idx >= 0) openSiteForm(idx, false);
     });
+  }
+
+  function mapsDirectionsUrl(lat, lon) {
+    return 'https://www.google.com/maps/dir/?api=1&destination=' +
+      Number(lat).toFixed(6) + ',' + Number(lon).toFixed(6) + '&travelmode=driving';
+  }
+
+  function hideNavOffer() {
+    var box = $('navOffer');
+    var go = $('navOfferGo');
+    if (box) box.classList.add('hidden');
+    if (go) go.setAttribute('href', '#');
+  }
+
+  function showNavOffer(stop, side) {
+    var lat = stop[side + '_lat'];
+    var lon = stop[side + '_lon'];
+    var box = $('navOffer');
+    var go = $('navOfferGo');
+    var text = $('navOfferText');
+    if (!box || !go || !text || lat == null || lon == null) return;
+    var which = side === 'begin' ? 'Begin' : 'End';
+    var street = String(stop.street || '').trim();
+    text.textContent = street
+      ? ('Site ' + stop.id + ' — ' + street + ' · ' + which + ' point')
+      : ('Site ' + stop.id + ' · ' + which + ' point');
+    go.setAttribute('href', mapsDirectionsUrl(lat, lon));
+    box.classList.remove('hidden');
+  }
+
+  function onEndpointClick(e) {
+    if (state.pinMode || state.grabbing || state.matching) return;
+    var f = e.features && e.features[0];
+    if (!f) return;
+    var kind = f.properties.kind;
+    if (kind !== 'begin' && kind !== 'end') return;
+    var uid = f.properties.uid;
+    var stop = null;
+    (state.data.stops || []).forEach(function (s) {
+      if (s.uid === uid) stop = s;
+    });
+    if (stop) showNavOffer(stop, kind);
   }
 
   function renderMap() {
@@ -239,6 +304,25 @@
     if (d.home) {
       map.getSource('home').setData(fc([{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [d.home[1], d.home[0]] } }]));
     }
+
+    var endFeats = [];
+    if (state.formUid) {
+      var focus = null;
+      (d.stops || []).forEach(function (s) { if (s.uid === state.formUid) focus = s; });
+      if (focus) {
+        [['begin', focus.begin_lat, focus.begin_lon], ['end', focus.end_lat, focus.end_lon]].forEach(function (row) {
+          if (row[1] == null || row[2] == null) return;
+          endFeats.push({
+            type: 'Feature',
+            properties: { uid: focus.uid, kind: row[0] },
+            geometry: { type: 'Point', coordinates: [Number(row[2]), Number(row[1])] }
+          });
+        });
+      }
+    } else {
+      hideNavOffer();
+    }
+    if (map.getSource('ends')) map.getSource('ends').setData(fc(endFeats));
   }
 
   function fitToStops() {
@@ -545,6 +629,7 @@
     state.choices = [];
     state.pendingFix = null;
     disablePinMode();
+    hideNavOffer();
     renderInstall();
     renderMap();
   }
@@ -560,6 +645,7 @@
     state.formSnapshot = takeSnapshot(s.uid);
     state.choices = [];
     disablePinMode();
+    hideNavOffer();
     if (state.tab !== 'install') setTab('install');
     else renderInstall();
     flyToStop(s);
@@ -783,6 +869,7 @@
 
   function enablePinMode() {
     state.pinMode = true;
+    hideNavOffer();
     $('mapHint').textContent = 'Tap the map to drop a pin for this site';
     $('mapHint').classList.remove('hidden');
   }
@@ -1304,6 +1391,10 @@
     $('btnSkip').onclick = function () { commitInstall(false); };
     $('btnWrong').onclick = cancelSite;
     $('btnLocate').onclick = locateMe;
+    $('navOfferDismiss').onclick = hideNavOffer;
+    $('navOfferGo').addEventListener('click', function (ev) {
+      if ($('navOfferGo').getAttribute('href') === '#') ev.preventDefault();
+    });
     $('btnCloseJob').onclick = function () { closeRememberedJob('Job closed on this phone. Download a job file first if you still need it.'); };
     $('btnClearSavedJob').onclick = function () { closeRememberedJob('Remembered job cleared on this phone.'); };
     $('btnCopyShare').onclick = copyShare;

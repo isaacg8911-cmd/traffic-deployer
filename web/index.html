@@ -76,6 +76,24 @@
       box-shadow: 0 3px 14px rgba(0,0,0,.28); pointer-events: none;
       border: 2px solid #1565c0;
     }
+    #nav-offer {
+      display: none; position: absolute; left: 50%; bottom: 88px; z-index: 9;
+      transform: translateX(-50%); max-width: min(92%, 440px);
+      padding: 12px 14px 12px; border-radius: 12px;
+      background: #fff; color: #0f2744;
+      font: 700 14px/1.35 system-ui, sans-serif; text-align: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,.32); pointer-events: auto;
+      border: 2px solid #1565c0;
+    }
+    #nav-offer-actions {
+      display: flex; gap: 8px; justify-content: center; margin-top: 10px;
+    }
+    #nav-offer-go, #nav-offer-dismiss {
+      font: 700 13px system-ui, sans-serif; border: none; border-radius: 8px;
+      padding: 8px 12px; cursor: pointer;
+    }
+    #nav-offer-go { background: #1e88e5; color: #fff; }
+    #nav-offer-dismiss { background: #e2e8f0; color: #0f2744; }
     body.td-manual-grab #map { cursor: crosshair; }
   </style>
 </head>
@@ -84,6 +102,13 @@
   <div id="pick-banner" aria-live="polite"></div>
   <div id="drive-banner" aria-live="polite"></div>
   <div id="site-toast" aria-live="polite"></div>
+  <div id="nav-offer" role="dialog" aria-label="Google Maps directions">
+    <div id="nav-offer-text"></div>
+    <div id="nav-offer-actions">
+      <button type="button" id="nav-offer-go">Google Maps directions</button>
+      <button type="button" id="nav-offer-dismiss">Not now</button>
+    </div>
+  </div>
   <div id="mapHud" aria-label="Map controls">
     <div id="compass" title="Heading when stopped (for install direction)">
       <div id="compass-dial">
@@ -103,6 +128,6 @@
   <script src="./vendor/pmtiles.js"></script>
   <script src="./vendor/qwebchannel.js"></script>
   <script src="./style.js?v=21"></script>
-  <script src="./app.js?v=30"></script>
+  <script src="./app.js?v=31"></script>
 </body>
 </html>

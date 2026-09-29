@@ -130,6 +130,7 @@ class ShellStartupMixin:
         page = AppWebPage(profile, self.view)
         page.stopClicked.connect(self._on_stop_clicked)
         page.mapClicked.connect(self._on_map_clicked)
+        page.navRequested.connect(self._on_nav_requested)
         self.view.setPage(page)
         self.bridge = MapBridge()
         self.bridge.bind_page(page)

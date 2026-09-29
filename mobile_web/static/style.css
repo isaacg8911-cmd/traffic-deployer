@@ -112,6 +112,17 @@ body { display: flex; flex-direction: column; }
   background: rgba(13,71,161,.95); color: #fff; padding: 8px 16px; border-radius: 10px;
   font-weight: 700; font-size: 13px; z-index: 5; max-width: 92%; text-align: center;
 }
+.nav-offer {
+  position: absolute; left: 8px; right: 62px; bottom: 12px; z-index: 7;
+  background: #fff; color: #0f2744; border-radius: 12px; padding: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.35); border: 2px solid #1565c0;
+  font-weight: 700; font-size: 14px;
+}
+.nav-offer .row { margin-top: 8px; }
+.nav-offer a.primary {
+  display: flex; align-items: center; justify-content: center;
+  text-decoration: none; text-align: center;
+}
 .map-fab {
   position: absolute; right: 12px; bottom: 12px; z-index: 5;
   width: 46px; height: 46px; border-radius: 50%; border: none; cursor: pointer;

@@ -101,8 +101,10 @@
     <div id="mapHint" class="map-hint hidden"></div>
     <div id="navOffer" class="nav-offer hidden">
       <div id="navOfferText"></div>
+      <input id="navCoords" type="text" readonly />
       <div class="row">
-        <a id="navOfferGo" class="primary grow" href="#" target="_blank" rel="noopener">Google Maps directions</a>
+        <button id="btnCopyNav" class="primary grow" type="button">Copy for Maps</button>
+        <a id="navOfferGo" class="secondary grow" href="#" target="_blank" rel="noopener">Open</a>
         <button id="navOfferDismiss" class="secondary" type="button">Not now</button>
       </div>
     </div>
@@ -156,6 +158,11 @@
         <div id="installTitle" class="stop-title">Site</div>
         <div id="installSub" class="muted"></div>
         <div id="grabSaved" class="msg"></div>
+        <div class="row">
+          <button id="btnCopyBegin" class="secondary grow" type="button">Copy begin</button>
+          <button id="btnCopyEnd" class="secondary grow" type="button">Copy end</button>
+        </div>
+        <p class="muted">Paste the point in Maps.</p>
         <label class="field">Street
           <input id="fStreet" type="text" />
         </label>
@@ -237,6 +244,6 @@
 
   <script src="/vendor/maplibre-gl.js"></script>
   <script src="/local.js?v=5"></script>
-  <script src="/app.js?v=17"></script>
+  <script src="/app.js?v=18"></script>
 </body>
 </html>

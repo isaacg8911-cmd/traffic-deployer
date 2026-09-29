@@ -20,6 +20,7 @@
     driving: false, geoWatch: null, myLat: null, myLon: null, myAcc: null,
     homeLat: null, homeLon: null, homeLabel: '',
     phase: 'wait', formUid: null, filledUid: null, grabLock: null, formSnapshot: null,
+    navLat: null, navLon: null, navLabel: '',
     pendingFix: null, choices: [], matchNote: '', grabbing: false, matching: false,
     lastUndo: null, nearWatch: null, pinFor: 'install',
     dirInfer: null, dirSource: '', fillingDir: false,
@@ -244,6 +245,53 @@
       Number(lat).toFixed(6) + ',' + Number(lon).toFixed(6) + '&travelmode=driving';
   }
 
+  function coordText(lat, lon) {
+    return Number(lat).toFixed(6) + ', ' + Number(lon).toFixed(6);
+  }
+
+  function copyViaInput(text) {
+    var el = $('navCoords');
+    var made = false;
+    if (!el) {
+      el = document.createElement('textarea');
+      made = true;
+      el.setAttribute('readonly', 'readonly');
+      el.style.position = 'fixed';
+      el.style.left = '-9999px';
+      document.body.appendChild(el);
+    }
+    var prev = el.value;
+    el.value = text;
+    el.removeAttribute('readonly');
+    var ok = false;
+    try {
+      el.focus();
+      el.select();
+      ok = document.execCommand('copy');
+    } catch (e) { ok = false; }
+    el.setAttribute('readonly', 'readonly');
+    if (made) el.remove();
+    else el.value = prev;
+    return ok;
+  }
+
+  function copyForMaps(lat, lon, label) {
+    if (lat == null || lon == null || !isFinite(Number(lat)) || !isFinite(Number(lon))) {
+      toast('That point has no coordinates.');
+      return '';
+    }
+    var text = coordText(lat, lon);
+    var legacy = copyViaInput(text);
+    var who = label ? (label + ' copied. ') : 'Copied. ';
+    var finish = function (ok) {
+      toast(ok ? (who + 'Paste it in Maps.') : 'Long-press the coordinates and copy them.');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { finish(true); }, function () { finish(legacy); });
+    } else finish(legacy);
+    return text;
+  }
+
   function hideNavOffer() {
     var box = $('navOffer');
     var go = $('navOfferGo');
@@ -257,14 +305,25 @@
     var box = $('navOffer');
     var go = $('navOfferGo');
     var text = $('navOfferText');
-    if (!box || !go || !text || lat == null || lon == null) return;
+    if (lat == null || lon == null) {
+      toast('That point has no coordinates.');
+      return;
+    }
+    if (!box || !go || !text) return;
     var which = side === 'begin' ? 'Begin' : 'End';
     var street = String(stop.street || '').trim();
+    var label = 'Site ' + stop.id + ' ' + which.toLowerCase();
+    state.navLat = Number(lat);
+    state.navLon = Number(lon);
+    state.navLabel = label;
     text.textContent = street
-      ? ('Site ' + stop.id + ' — ' + street + ' · ' + which + ' point')
-      : ('Site ' + stop.id + ' · ' + which + ' point');
+      ? ('Site ' + stop.id + ' — ' + street + ' · ' + which)
+      : ('Site ' + stop.id + ' · ' + which);
+    var coords = $('navCoords');
+    if (coords) coords.value = coordText(lat, lon);
     go.setAttribute('href', mapsDirectionsUrl(lat, lon));
     box.classList.remove('hidden');
+    copyForMaps(lat, lon, label);
   }
 
   function onEndpointClick(e) {
@@ -279,6 +338,20 @@
       if (s.uid === uid) stop = s;
     });
     if (stop) showNavOffer(stop, kind);
+  }
+
+  function copyFormPoint(side) {
+    if (state.phase !== 'form' || !state.formUid) {
+      toast('Open a site, then copy begin or end.');
+      return;
+    }
+    var stop = null;
+    (state.data.stops || []).forEach(function (s) {
+      if (s.uid === state.formUid) stop = s;
+    });
+    if (!stop) stop = rawStop(state.formUid);
+    if (!stop) return;
+    showNavOffer(stop, side);
   }
 
   function renderMap() {
@@ -1834,6 +1907,13 @@
     };
     $('btnLocate').onclick = locateMe;
     $('navOfferDismiss').onclick = hideNavOffer;
+    if ($('btnCopyNav')) $('btnCopyNav').onclick = function () {
+      if (state.navLat == null) return;
+      copyForMaps(state.navLat, state.navLon, state.navLabel || 'Point');
+    };
+    if ($('navCoords')) $('navCoords').addEventListener('click', function () { this.select(); });
+    if ($('btnCopyBegin')) $('btnCopyBegin').onclick = function () { copyFormPoint('begin'); };
+    if ($('btnCopyEnd')) $('btnCopyEnd').onclick = function () { copyFormPoint('end'); };
     $('navOfferGo').addEventListener('click', function (ev) {
       ev.preventDefault();
       var href = $('navOfferGo').getAttribute('href');

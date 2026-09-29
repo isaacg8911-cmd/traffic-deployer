@@ -123,6 +123,10 @@ body { display: flex; flex-direction: column; }
   font-weight: 700; font-size: 14px;
 }
 .nav-offer .row { margin-top: 8px; }
+#navCoords {
+  margin-top: 8px; font-weight: 800; letter-spacing: .2px;
+  background: #e8eef5; color: #0f2744;
+}
 .nav-offer a.primary {
   display: flex; align-items: center; justify-content: center;
   text-decoration: none; text-align: center;

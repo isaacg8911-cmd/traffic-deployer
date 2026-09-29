@@ -53,6 +53,10 @@ def main() -> int:
         "directions link is the button",
         "navOfferGo" in js and "maps.google.com" not in js and "google.com/maps/dir" in js,
     )
+    check(
+        "copy point for maps",
+        "copyForMaps" in js and "Paste it in Maps." in js and 'id="btnCopyBegin"' in html and 'id="navCoords"' in html,
+    )
 
     # 1. health + config
     r = client.get("/api/healthz")

@@ -149,60 +149,66 @@
       "rank": 11,
       "area": "Excel/.EST import",
       "severity": "major",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "Duplicate site IDs: import keeps the first copy, export keeps the last",
-      "detail": ""
+      "detail": "Import and export both keep the first copy of a site id. A later copy is written on export only when it has more field work."
     },
     {
       "id": "IMP-3",
       "rank": 12,
       "area": "Excel/.EST import",
       "severity": "major",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "A title row above the headers finds zero sites",
-      "detail": "Excel header-row detection assumes headers are on row 1."
+      "detail": "The importer scans the first rows for a site/lat/lon header, so a title above the columns is skipped."
     },
     {
       "id": "MAP-1",
       "rank": 13,
       "area": "road map",
       "severity": "major",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "Large or retried road downloads lose roads that cross tile edges",
-      "detail": "Routes across those edges fail."
+      "detail": "Tiles overlap, and each download keeps roads that cross the tile edge. The smaller-tile retry uses the same boxes."
     },
     {
       "id": "ONL-1",
       "rank": 14,
       "area": "going online",
       "severity": "major",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "Going online freezes the screen during street lookup and can overwrite typed streets",
-      "detail": "_retry_pending_field_geocode runs on the UI thread."
+      "detail": "Street lookup runs on a background thread. A street the operator typed is not replaced."
     },
     {
       "id": "PERF-1",
       "rank": 15,
       "area": "map server",
       "severity": "minor",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "local_server reads whole files into memory for every request",
-      "detail": ""
+      "detail": "Map responses are streamed in 64 KB chunks, including range reads of the basemap."
     },
     {
       "id": "PERF-2",
       "rank": 16,
       "area": "counter reports",
       "severity": "minor",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "volume_report / picocount_hits are O(n^2) (currently unused)",
-      "detail": ""
+      "detail": "Hose hits pair in one forward pass. A parsed study stream is skipped instead of re-read at every byte. Volume hours are grouped by day once."
     }
   ]
 }

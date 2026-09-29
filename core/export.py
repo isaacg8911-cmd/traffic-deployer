@@ -227,12 +227,35 @@ def _gps_pair(stop: dict) -> tuple[float | None, float | None]:
     return round(float(lat), 6), round(float(lon), 6)
 
 
+def _field_work_rank(stop: dict) -> int:
+    """How much install data this copy of a site carries. Higher is kept."""
+    rank = 0
+    if stop.get("installed") or stop.get("skipped"):
+        rank += 4
+    if stop.get("field_lat") is not None and stop.get("field_lon") is not None:
+        rank += 2
+    serial = str(stop.get("serial") or stop.get("counter_serial") or "").strip()
+    if serial and serial.lower() not in ("nan", "none", "nat"):
+        rank += 1
+    return rank
+
+
 def _stops_by_id(stops: list[dict]) -> dict[str, dict]:
+    """One stop per site id. The first copy wins ties — same rule as Excel import.
+
+    A later duplicate replaces it only when that later stop has more field work
+    (an install, a GPS pin, or a serial). Equal copies do not overwrite.
+    """
     out: dict[str, dict] = {}
+    rank: dict[str, int] = {}
     for s in stops:
         sid = _site_id_from_cell(s.get("id"))
-        if sid:
+        if not sid:
+            continue
+        score = _field_work_rank(s)
+        if sid not in out or score > rank[sid]:
             out[sid] = s
+            rank[sid] = score
     return out
 
 

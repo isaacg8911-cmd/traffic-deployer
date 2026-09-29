@@ -23,5 +23,5 @@ UNDO_FIELDS = (
     "field_lat", "field_lon", "serial", "lanes", "direction", "notes",
     "date", "exact_time", "street", "street_warning", "install_photo_path",
     "counter_serial", "counter_unit_id", "direction_source",
-    "field_coord_source", "field_geocode_pending",
+    "field_coord_source", "field_geocode_pending", "street_user_edited",
 )

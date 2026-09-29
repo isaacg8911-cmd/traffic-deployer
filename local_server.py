@@ -26,6 +26,8 @@ _MIME = {
     ".svg": "image/svg+xml",
 }
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
+# PMTiles range reads must not pull a whole multi-hundred-MB file into RAM.
+_CHUNK = 64 * 1024
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -59,6 +61,25 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
 
+    def _write_slice(self, full: str, start: int, length: int) -> None:
+        """Stream ``length`` bytes from ``start`` in small chunks.
+
+        A map client often closes after the bytes it needed. That is not a
+        server failure.
+        """
+        try:
+            with open(full, "rb") as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(_CHUNK, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+
     def do_HEAD(self):
         full = self._resolve(self.path)
         if not full:
@@ -90,14 +111,11 @@ class _Handler(BaseHTTPRequestHandler):
                 length = end - start + 1
                 self._send_headers(206, length, ctype,
                                    {"Content-Range": f"bytes {start}-{end}/{size}"})
-                with open(full, "rb") as f:
-                    f.seek(start)
-                    self.wfile.write(f.read(length))
+                self._write_slice(full, start, length)
                 return
 
         self._send_headers(200, size, ctype)
-        with open(full, "rb") as f:
-            self.wfile.write(f.read())
+        self._write_slice(full, 0, size)
 
 
 _server = None

@@ -44,6 +44,9 @@ OVERPASS_MIRRORS = (
 )
 # Warn when the download box is huge (slow / more likely to time out on work networks).
 MAX_BBOX_SPAN_MI_WARN = 85.0
+# Extra meters past each interior tile edge. A road that crosses the cut is then
+# inside both tiles, so composing them does not drop that segment.
+TILE_EDGE_OVERLAP_M = 400.0
 _GRAPH_CACHE: dict = {}
 _NODE_ARRAYS: dict = {}
 
@@ -140,8 +143,14 @@ def _fetch_bbox_graph(
         try:
             ox.settings.overpass_url = base
             print(f"[road download] trying {base}", flush=True)
+            # truncate_by_edge keeps a road whose other end sits just outside this
+            # tile. Without it, large downloads and the smaller-tile retry both
+            # drop every street that crosses a tile boundary.
             return ox.graph_from_bbox(
-                bbox=(west, south, east, north), network_type=network_type, simplify=True
+                bbox=(west, south, east, north),
+                network_type=network_type,
+                simplify=True,
+                truncate_by_edge=True,
             )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{base}: {exc}")
@@ -154,6 +163,50 @@ def _fetch_bbox_graph(
     )
 
 
+def tile_boxes(
+    west: float,
+    south: float,
+    east: float,
+    north: float,
+    *,
+    max_tile_mi: float = 55.0,
+    overlap_m: float = TILE_EDGE_OVERLAP_M,
+) -> list[tuple[float, float, float, float]]:
+    """Tile boxes as (west, south, east, north). Neighbors overlap on every cut.
+
+    A road that crosses a tile edge is inside both downloads, so the merged
+    graph still has it. The same boxes are used for the first large download
+    and the smaller-tile retry.
+    """
+    lat_mid = (north + south) / 2.0
+    lon_mid = (west + east) / 2.0
+    lat_half_mi = _haversine_m(south, lon_mid, north, lon_mid) / 1609.34 / 2.0
+    lon_half_mi = _haversine_m(lat_mid, west, lat_mid, east) / 1609.34 / 2.0
+    n_lat = max(1, math.ceil(lat_half_mi * 2 / max_tile_mi))
+    n_lon = max(1, math.ceil(lon_half_mi * 2 / max_tile_mi))
+    dlat = (north - south) / n_lat
+    dlon = (east - west) / n_lon
+    olat = overlap_m / 111320.0
+    olon = overlap_m / (111320.0 * max(math.cos(math.radians(lat_mid)), 0.1))
+    boxes: list[tuple[float, float, float, float]] = []
+    for i in range(n_lat):
+        for j in range(n_lon):
+            s = south + i * dlat
+            n = south + (i + 1) * dlat
+            w = west + j * dlon
+            e = west + (j + 1) * dlon
+            if i > 0:
+                s = max(south, s - olat)
+            if i + 1 < n_lat:
+                n = min(north, n + olat)
+            if j > 0:
+                w = max(west, w - olon)
+            if j + 1 < n_lon:
+                e = min(east, e + olon)
+            boxes.append((w, s, e, n))
+    return boxes
+
+
 def _download_tiled(
     west: float,
     south: float,
@@ -164,23 +217,18 @@ def _download_tiled(
     max_tile_mi: float = 55.0,
 ):
     """Split a huge bbox into smaller Overpass requests, then merge."""
-    lat_mid = (north + south) / 2.0
-    lon_mid = (west + east) / 2.0
-    lat_half_mi = _haversine_m(south, lon_mid, north, lon_mid) / 1609.34 / 2.0
-    lon_half_mi = _haversine_m(lat_mid, west, lat_mid, east) / 1609.34 / 2.0
-    n_lat = max(1, math.ceil(lat_half_mi * 2 / max_tile_mi))
-    n_lon = max(1, math.ceil(lon_half_mi * 2 / max_tile_mi))
-    dlat = (north - south) / n_lat
-    dlon = (east - west) / n_lon
+    boxes = tile_boxes(west, south, east, north, max_tile_mi=max_tile_mi)
+    n_lon = 1
+    if len(boxes) > 1:
+        # Row length is how many boxes share the first row's south edge.
+        first_south = boxes[0][1]
+        n_lon = sum(1 for box in boxes if box[1] == first_south) or 1
+    n_lat = max(1, math.ceil(len(boxes) / n_lon))
     graphs = []
-    for i in range(n_lat):
-        for j in range(n_lon):
-            s = south + i * dlat
-            n = south + (i + 1) * dlat
-            w = west + j * dlon
-            e = west + (j + 1) * dlon
-            print(f"[road download] tile {i + 1}/{n_lat} x {j + 1}/{n_lon}", flush=True)
-            graphs.append(_fetch_bbox_graph(w, s, e, n, network_type=network_type))
+    for idx, (w, s, e, n) in enumerate(boxes):
+        i, j = divmod(idx, n_lon)
+        print(f"[road download] tile {i + 1}/{n_lat} x {j + 1}/{n_lon}", flush=True)
+        graphs.append(_fetch_bbox_graph(w, s, e, n, network_type=network_type))
     if len(graphs) == 1:
         return graphs[0]
     merged = graphs[0]

@@ -111,6 +111,9 @@ def build_install_page(win) -> QWidget:
     win.txt_street = QLineEdit()
     win.txt_street.setPlaceholderText("Street name")
     win.txt_street.textChanged.connect(win._schedule_autosave)
+    note_typed = getattr(win, "_note_street_typed", None)
+    if note_typed is not None:
+        win.txt_street.textChanged.connect(note_typed)
     sec_form.addWidget(win.txt_street)
     row = QHBoxLayout()
     win.combo_dir = QComboBox()

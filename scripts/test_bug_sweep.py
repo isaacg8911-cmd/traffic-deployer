@@ -387,6 +387,295 @@ def test_est_id_not_coordinate() -> None:
     check(demo_ids == {"101", "102", "103", "104", "105"}, "demo text map still matches its site tokens")
 
 
+def test_duplicate_site_id() -> None:
+    """IMP-2: import and export keep the first copy of a duplicate site id."""
+    print("[IMP-2 duplicate site id keeps the first copy]")
+    import pandas as pd
+
+    from core import export, ingest
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "sites.csv")
+        with open(path, "w", encoding="latin-1", newline="\n") as f:
+            f.write(
+                "Site,Begin Lat,Begin Lon,Street\n"
+                "1001,33.77,-117.94,First St\n"
+                "1001,33.78,-117.95,Second St\n"
+            )
+        sites = ingest.parse_excel_sites([path])
+        check(sites["1001"]["street"] == "First St", "import keeps the first row")
+
+        xls = os.path.join(tmp, "sites.xlsx")
+        pd.DataFrame([
+            ["1001", 33.77, -117.94, "First St"],
+            ["1001", 33.78, -117.95, "Second St"],
+        ], columns=["Site", "Begin Lat", "Begin Lon", "Street"]).to_excel(xls, index=False)
+        sites = ingest.parse_excel_sites([xls])
+        check(sites["1001"]["street"] == "First St", "excel import keeps the first row")
+
+    same = export._stops_by_id([
+        {"id": "1001", "serial": "111", "installed": True},
+        {"id": "1001", "serial": "222", "installed": True},
+    ])
+    check(same["1001"]["serial"] == "111", "export keeps the first copy when both are installed")
+    better = export._stops_by_id([
+        {"id": "1001", "serial": "", "installed": False},
+        {"id": "1001", "serial": "222", "installed": True, "field_lat": 33.7, "field_lon": -117.9},
+    ])
+    check(better["1001"]["serial"] == "222", "a later copy wins only when it has more field work")
+
+
+def test_title_row_above_headers() -> None:
+    """IMP-3: a title row above the column names still finds the sites."""
+    print("[IMP-3 title row above headers]")
+    import pandas as pd
+
+    from core import ingest
+
+    with tempfile.TemporaryDirectory() as tmp:
+        csv_path = os.path.join(tmp, "titled.csv")
+        with open(csv_path, "w", encoding="latin-1", newline="\n") as f:
+            f.write(
+                "Week 17 site list\n"
+                "Site,Begin Lat,Begin Lon,Street\n"
+                "1001,33.77,-117.94,Harbor Blvd\n"
+            )
+        sites = ingest.parse_excel_sites([csv_path])
+        check("1001" in sites and sites["1001"]["street"] == "Harbor Blvd",
+              "csv title row still imports the site")
+
+        xls = os.path.join(tmp, "titled.xlsx")
+        pd.DataFrame([
+            ["Week 17 site list", None, None, None],
+            ["Site", "Begin Lat", "Begin Lon", "Street"],
+            [1001, 33.77, -117.94, "Harbor Blvd"],
+        ]).to_excel(xls, index=False, header=False)
+        sites = ingest.parse_excel_sites([xls])
+        check("1001" in sites and sites["1001"]["street"] == "Harbor Blvd",
+              "excel title row still imports the site")
+
+        plain = os.path.join(tmp, "plain.xlsx")
+        pd.DataFrame(
+            [{"Site": 1002, "Begin Lat": 33.78, "Begin Lon": -117.93, "Street": "Oak Ave"}]
+        ).to_excel(plain, index=False)
+        sites = ingest.parse_excel_sites([plain])
+        check(sites.get("1002", {}).get("street") == "Oak Ave", "a normal header row still imports")
+
+
+def test_tile_edge_roads() -> None:
+    """MAP-1: tiled downloads overlap, and each tile keeps crossing roads."""
+    print("[MAP-1 roads that cross a tile edge]")
+    import road_router
+
+    west, south, east, north = -118.0, 33.0, -117.2, 34.6
+    boxes = road_router.tile_boxes(
+        west, south, east, north, max_tile_mi=30.0, overlap_m=400.0)
+    check(len(boxes) >= 4, f"large area splits into tiles ({len(boxes)})")
+    bands: dict[float, list] = {}
+    for box in boxes:
+        mid = round((box[1] + box[3]) / 2.0, 2)
+        bands.setdefault(mid, []).append(box)
+    keys = sorted(bands)
+    check(len(keys) >= 2, "more than one row of tiles")
+    lower = bands[keys[0]][0]
+    upper = bands[keys[1]][0]
+    check(lower[3] > upper[1], "neighbor rows overlap across the cut")
+    seam = (max(lower[1], upper[1]) + min(lower[3], upper[3])) / 2.0
+    check(lower[1] < seam < lower[3] and upper[1] < seam < upper[3],
+          "a point on the shared edge is inside both tiles")
+
+    if not road_router.HAS_OSMNX:
+        print("  skip truncate_by_edge (osmnx missing)")
+        return
+    seen: dict = {}
+    orig = road_router.ox.graph_from_bbox
+
+    def _fake(*_a, **kwargs):
+        seen["kwargs"] = kwargs
+        return object()
+
+    road_router.ox.graph_from_bbox = _fake
+    try:
+        road_router._fetch_bbox_graph(west, south, east, north)
+    finally:
+        road_router.ox.graph_from_bbox = orig
+    check(seen.get("kwargs", {}).get("truncate_by_edge") is True,
+          "each tile keeps roads that cross its edge")
+
+
+def test_online_street_lookup() -> None:
+    """ONL-1: going online must not geocode on the UI thread or replace a typed street."""
+    print("[ONL-1 online street lookup]")
+    from core import geo
+    from ui.controllers.install import InstallControllerMixin, take_online_street
+
+    check(take_online_street({"street_user_edited": True}, "Oak") is False, "typed street is kept")
+    check(take_online_street({"street": "Site 5"}, "Oak") is True, "an untouched street can be filled")
+    check(take_online_street({"street": "Site 5"}, "") is False, "an empty lookup fills nothing")
+
+    class Win(InstallControllerMixin):
+        def __init__(self) -> None:
+            self.state = type("S", (), {})()
+            self.state.stops = [
+                {
+                    "id": "5", "field_lat": 33.7, "field_lon": -117.9,
+                    "field_geocode_pending": True, "street": "Site 5",
+                },
+                {
+                    "id": "6", "field_lat": 33.71, "field_lon": -117.8,
+                    "field_geocode_pending": True, "street": "Oak Ave",
+                    "street_user_edited": True,
+                },
+            ]
+            self.started: list[int] = []
+
+        def _internet_allowed(self) -> bool:
+            return True
+
+        def _start_field_street_thread(self, idx, lat, lon, *, prefer_online) -> None:
+            self.started.append(idx)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("street lookup ran on the caller")
+
+    orig = geo.street_from_coords
+    geo.street_from_coords = _boom
+    try:
+        win = Win()
+        win._retry_pending_field_geocode()
+        win._retry_pending_field_geocode()
+    finally:
+        geo.street_from_coords = orig
+    check(win.started == [0], "only the untyped site is queued, and only once")
+    check(win.state.stops[1]["street"] == "Oak Ave", "typed street unchanged")
+    check(win.state.stops[1]["field_geocode_pending"] is False, "typed street is not looked up again")
+
+
+def test_local_server_streams() -> None:
+    """PERF-1: file responses are chunked and still return the right bytes."""
+    print("[PERF-1 local server streams files]")
+    import inspect
+    import urllib.request
+
+    import local_server
+
+    src = inspect.getsource(local_server._Handler._write_slice)
+    check("while remaining" in src and "_CHUNK" in src, "responses are written in chunks")
+    local_server.stop()
+    folder = tempfile.mkdtemp()
+    try:
+        web = os.path.join(folder, "web")
+        os.makedirs(web)
+        payload = b"abcdefghij" * 5000
+        with open(os.path.join(web, "blob.bin"), "wb") as f:
+            f.write(payload)
+        port = local_server.start(web, folder)
+        url = f"http://127.0.0.1:{port}/blob.bin"
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            check(resp.read() == payload, "full response matches the file")
+        req = urllib.request.Request(url, headers={"Range": "bytes=10-19"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            check(getattr(resp, "status", 200) == 206, "range request is 206")
+            check(resp.read() == payload[10:20], "range bytes match")
+    finally:
+        local_server.stop()
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def _pair_reference(hits, pair_max_s, study_start):
+    """The old O(n²) pairing, kept here so the linear pass must match it."""
+    from datetime import timedelta
+
+    ab = sorted(hits, key=lambda x: x["seconds"])
+    used: set[int] = set()
+    events = []
+
+    def _match(first_ch: str, second_ch: str, key: str) -> None:
+        for i, a in enumerate(ab):
+            if a["channel"] != first_ch or i in used:
+                continue
+            best_j = None
+            best_dt = None
+            for j, b in enumerate(ab):
+                if j in used or b["channel"] != second_ch:
+                    continue
+                dt = b["seconds"] - a["seconds"]
+                if dt <= 0 or dt > pair_max_s:
+                    continue
+                if best_dt is None or dt < best_dt:
+                    best_dt = dt
+                    best_j = j
+            if best_j is not None:
+                used.add(i)
+                used.add(best_j)
+                events.append({
+                    "datetime": study_start + timedelta(seconds=a["seconds"]),
+                    "direction_key": key,
+                })
+
+    _match("A", "B", "ab")
+    _match("B", "A", "ba")
+    events.sort(key=lambda e: e["datetime"])
+    return events
+
+
+def test_hit_pairing_linear() -> None:
+    """PERF-2: pairing matches the old results, and stream scan does not re-read a study."""
+    print("[PERF-2 hit pairing and stream scan]")
+    from datetime import datetime
+
+    from core import picocount_hits
+
+    start = datetime(2026, 6, 1, 8, 0, 0)
+    hits = []
+    t = 0.0
+    for i in range(40):
+        hits.append({"channel": "A" if i % 3 else "B", "seconds": t})
+        t += 0.03 if i % 5 else 0.2
+    debounced = picocount_hits.debounce_hits(hits)
+    got = picocount_hits.pair_vehicles(hits, study_start=start)
+    want = _pair_reference(debounced, picocount_hits.DEFAULT_PAIR_MAX_S, start)
+    check(
+        [(e["direction_key"], e["datetime"]) for e in got]
+        == [(e["direction_key"], e["datetime"]) for e in want],
+        f"linear pairing matches ({len(got)} events)",
+    )
+
+    def _encode(n: int) -> bytes:
+        out = bytearray()
+        for i in range(n):
+            ticks = i * 32768
+            out.append((12 << 4) | (1 if i % 2 == 0 else 2))
+            out += int(ticks).to_bytes(4, "little")
+        return bytes(out)
+
+    data = b"\x00" * 30 + _encode(4000) + b"\xff" * 20
+    calls = {"n": 0}
+    orig = picocount_hits.decompress_hits
+
+    def _wrapped(buf, start_at=0):
+        calls["n"] += 1
+        return orig(buf, start_at)
+
+    picocount_hits.decompress_hits = _wrapped
+    try:
+        off, found = picocount_hits.find_best_stream(data)
+    finally:
+        picocount_hits.decompress_hits = orig
+    check(len(found) == 4000 and off == 30, f"hour-long stream found at {off} ({len(found)} hits)")
+    check(calls["n"] < 80, f"scan jumped the study ({calls['n']} parses, not one per byte)")
+
+    from core.volume_report import _hours_by_day
+
+    morning = datetime(2026, 6, 1, 8, 0, 0)
+    next_day = datetime(2026, 6, 2, 9, 0, 0)
+    grouped = _hours_by_day({next_day: {"total": 1}, morning: {"total": 2}})
+    check(
+        grouped[morning.date()] == [morning] and grouped[next_day.date()] == [next_day],
+        "volume hours are grouped by day once",
+    )
+
+
 def main() -> int:
     from PySide6.QtWidgets import QApplication
     _app = QApplication.instance() or QApplication([])  # noqa: F841
@@ -398,6 +687,12 @@ def main() -> int:
     test_static_fixes()
     test_pick_pauses_on_install()
     test_est_id_not_coordinate()
+    test_duplicate_site_id()
+    test_title_row_above_headers()
+    test_tile_edge_roads()
+    test_online_street_lookup()
+    test_local_server_streams()
+    test_hit_pairing_linear()
     print("PASS" if not fails else f"FAIL ({fails})")
     return 1 if fails else 0
 

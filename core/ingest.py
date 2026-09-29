@@ -93,6 +93,73 @@ def _in_ca(lat, lon) -> bool:
     return CA_LAT_MIN < lat < CA_LAT_MAX and CA_LON_MIN < lon < CA_LON_MAX
 
 
+# A title or blank rows sometimes sit above the real column names.
+_HEADER_SCAN_ROWS = 25
+
+
+def _header_cells(row) -> list[str]:
+    cells: list[str] = []
+    for cell in row:
+        if cell is None or (isinstance(cell, float) and math.isnan(cell)):
+            continue
+        text = str(cell).strip()
+        if not text or text.lower() in ("nan", "none"):
+            continue
+        cells.append(text.lower())
+    return cells
+
+
+def _looks_like_site_header(cells: list[str]) -> bool:
+    """A header row names the site and both begin coordinates."""
+    if len(cells) < 3:
+        return False
+    has_id = any("site" in cell or "tds" in cell or cell == "id" for cell in cells)
+    has_lat = any("lat" in cell for cell in cells)
+    has_lon = any("lon" in cell or "lng" in cell for cell in cells)
+    return has_id and has_lat and has_lon
+
+
+def header_row_index(frame) -> int:
+    """Row whose cells are the column names. 0 when row 1 already is."""
+    if frame is None or getattr(frame, "empty", True):
+        return 0
+    limit = min(_HEADER_SCAN_ROWS, len(frame))
+    for i in range(limit):
+        if _looks_like_site_header(_header_cells(frame.iloc[i].tolist())):
+            return i
+    return 0
+
+
+def _apply_header_row(frame):
+    """Promote the detected header row; rows above it (titles) are dropped."""
+    if frame is None or frame.empty:
+        return frame
+    idx = header_row_index(frame)
+    header = [str(c).strip() if c is not None else "" for c in frame.iloc[idx].tolist()]
+    body = frame.iloc[idx + 1 :].copy()
+    body.columns = header
+    return body.reset_index(drop=True)
+
+
+def _csv_skip_rows(path: str) -> int:
+    """How many leading rows to skip so the real header is row 1 for the reader.
+
+    A short title row makes the fast CSV parser reject the wider header line.
+    Counting the title here, then skipping it, avoids that.
+    """
+    import csv
+
+    with open(path, encoding="latin-1", newline="") as handle:
+        reader = csv.reader(handle)
+        for i, row in enumerate(reader):
+            if i >= _HEADER_SCAN_ROWS:
+                break
+            cells = [cell.strip().lower() for cell in row if cell and cell.strip()]
+            if _looks_like_site_header(cells):
+                return i
+    return 0
+
+
 def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
     """Read Excel/CSV file(s) -> {site_id: {begin/end lat/lon, lat/lon (midpoint), street}}.
 
@@ -104,10 +171,16 @@ def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
     file_errors: list[str] = []
     for path in excel_paths:
         try:
+            # A title row above the column names is skipped. Excel is read with
+            # no header so the same scan can promote the real header row.
             if str(path).lower().endswith(".csv"):
-                frames = {"Sheet1": pd.read_csv(path, encoding="latin-1")}
+                frames = {"Sheet1": pd.read_csv(
+                    path, encoding="latin-1", skiprows=_csv_skip_rows(path))}
             else:
-                frames = pd.read_excel(path, sheet_name=None)
+                raw_frames = pd.read_excel(path, sheet_name=None, header=None)
+                frames = {
+                    name: _apply_header_row(df) for name, df in raw_frames.items()
+                }
         except ImportError as exc:
             # Missing pandas reader engine (xlrd/openpyxl). Fatal config error:
             # every spreadsheet would fail the same way, so surface it loudly
@@ -155,13 +228,16 @@ def parse_excel_sites(excel_paths: list[str]) -> dict[str, dict]:
                     except Exception:
                         pass
                 street = _clean_street(row[street_col] if street_col else None, sid)
-                sites.setdefault(sid, {
-                    "begin_lat": blat, "begin_lon": blon,
-                    "end_lat": elat, "end_lon": elon,
-                    "lat": (blat + elat) / 2.0, "lon": (blon + elon) / 2.0,
-                    "street": street,
-                    "excel_sheet": str(sheet_name or ""),
-                })
+                # First valid row for a site id wins. Export uses that same copy
+                # unless a later stop has more field work.
+                if sid not in sites:
+                    sites[sid] = {
+                        "begin_lat": blat, "begin_lon": blon,
+                        "end_lat": elat, "end_lon": elon,
+                        "lat": (blat + elat) / 2.0, "lon": (blon + elon) / 2.0,
+                        "street": street,
+                        "excel_sheet": str(sheet_name or ""),
+                    }
     if not sites and file_errors:
         raise IngestFileReadError("\n".join(file_errors))
     return sites
@@ -297,7 +373,8 @@ _PROGRESS_KEYS = (
     "date", "exact_time", "street_warning", "cross_lat", "cross_lon", "cross_side",
     "install_photo_path",
     "counter_unit_id", "counter_serial", "counter_cleared_at", "counter_download_path",
-    "pick_cross_locked", "field_coord_source", "field_geocode_pending", "tvp",
+    "pick_cross_locked", "field_coord_source", "field_geocode_pending",
+    "street_user_edited", "tvp",
 )
 
 

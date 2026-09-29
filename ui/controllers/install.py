@@ -15,6 +15,13 @@ from ui.paths import DATA_DIR, DIRECTIONS
 from ui.threads import FieldStreetThread
 
 
+def take_online_street(stop: dict, online_street: str) -> bool:
+    """Online lookup may fill a street. A name the operator typed stays."""
+    if not str(online_street or "").strip():
+        return False
+    return not bool(stop.get("street_user_edited"))
+
+
 def _clean_serial(raw) -> str:
     """Display serials without CSV float noise (22976.0 -> 22976; nan -> '')."""
     s = str(raw or "").strip()
@@ -85,7 +92,7 @@ class InstallControllerMixin:
                 f"{s.get('sheet', '')} · {self._street_label(s)} · {done}/{total} installed{setup_bit}"
             )
         raw = str(s.get("street", "")).strip()
-        self.txt_street.setText(raw if raw and raw.lower() not in ("nan", "none", "nat") else "")
+        self._set_street_text(raw if raw and raw.lower() not in ("nan", "none", "nat") else "")
         raw_dir = str(s.get("direction") or "").strip().lower()
         if raw_dir not in DIRECTIONS:
             raw_dir = "n"
@@ -450,37 +457,64 @@ class InstallControllerMixin:
         self.statusBar().showMessage(
             f"Site {s.get('id', '?')} GPS saved from map pin — drag pin to adjust.", 6000)
 
+    def _set_street_text(self, text: str) -> None:
+        """Write the street box without marking it as operator-typed."""
+        box = getattr(self, "txt_street", None)
+        if box is None:
+            return
+        self._street_box_lock = True
+        try:
+            box.setText(text)
+        finally:
+            self._street_box_lock = False
+
+    def _note_street_typed(self, text: str = "") -> None:
+        if getattr(self, "_street_box_lock", False):
+            return
+        if not self.state.stops or self.current_index >= len(self.state.stops):
+            return
+        s = self.state.stops[self.current_index]
+        # A cleared box can be filled from the map again. Any typed name stays.
+        s["street_user_edited"] = bool(str(text or "").strip())
+
+    def _geocode_retry_done(self, stop_idx: int, lat: float, lon: float) -> None:
+        keys = getattr(self, "_geocode_retry_keys", None)
+        if keys:
+            keys.discard((stop_idx, float(lat), float(lon)))
+
     def _retry_pending_field_geocode(self) -> None:
-        """When Wi‑Fi returns, reverse-geocode streets for any manual/offline pin drops."""
+        """When Wi‑Fi returns, look up streets off the UI thread.
+
+        A name the operator already typed is left alone. Lookup itself runs in
+        FieldStreetThread — this method must not call the network.
+        """
         if not self._internet_allowed():
             return
-        updated = 0
-        for idx, s in enumerate(self.state.stops):
+        stops = getattr(self.state, "stops", None) or []
+        inflight = getattr(self, "_geocode_retry_keys", None)
+        if inflight is None:
+            inflight = self._geocode_retry_keys = set()
+        cleared = False
+        for idx, s in enumerate(stops):
             if not s.get("field_geocode_pending"):
                 continue
             lat, lon = s.get("field_lat"), s.get("field_lon")
             if lat is None or lon is None:
                 s["field_geocode_pending"] = False
+                cleared = True
                 continue
-            online_street = geo.street_from_coords(float(lat), float(lon))
-            if not online_street:
+            if s.get("street_user_edited"):
+                s["field_geocode_pending"] = False
+                cleared = True
                 continue
-            s["field_geocode_pending"] = False
-            s["street"] = online_street
-            if idx == self.current_index and hasattr(self, "txt_street"):
-                self.txt_street.setText(online_street)
-            updated += 1
-        if updated:
+            key = (idx, float(lat), float(lon))
+            if key in inflight:
+                continue
+            inflight.add(key)
+            self._start_field_street_thread(
+                idx, float(lat), float(lon), prefer_online=True)
+        if cleared and hasattr(self, "_persist_shift"):
             self._persist_shift(quiet=True)
-            self._push_state()
-            self._refresh_install_checklist()
-            if hasattr(self, "lbl_grab") and self.state.stops and self.current_index < len(self.state.stops):
-                s = self.state.stops[self.current_index]
-                fl, fo = s.get("field_lat"), s.get("field_lon")
-                if fl is not None and fo is not None:
-                    self.lbl_grab.setText(f"Manual GPS: {float(fl):.5f}, {float(fo):.5f}")
-            self.statusBar().showMessage(
-                f"Wi‑Fi on — updated street name for {updated} pinned site(s).", 8000)
 
     def _schedule_pin_persist(self) -> None:
         self._pin_persist_timer.start(450)
@@ -519,15 +553,22 @@ class InstallControllerMixin:
         src_tag: str,
         warning: str,
     ) -> None:
+        self._geocode_retry_done(stop_idx, lat, lon)
         if not self.state.stops or stop_idx >= len(self.state.stops):
             return
         s = self.state.stops[stop_idx]
         if s.get("field_lat") != lat or s.get("field_lon") != lon:
             return
-        prefer_online = self._internet_allowed()
-        if street:
+        if s.get("street_user_edited"):
+            s["field_geocode_pending"] = False
+            self._persist_shift(quiet=True)
             if stop_idx == self.current_index:
-                self.txt_street.setText(street)
+                self._refresh_install_checklist()
+            return
+        prefer_online = self._internet_allowed()
+        if street and take_online_street(s, street):
+            if stop_idx == self.current_index:
+                self._set_street_text(street)
             s["street"] = street
             s["field_geocode_pending"] = False
             hint = "online" if src_tag == "online" else "offline road map"
@@ -536,7 +577,7 @@ class InstallControllerMixin:
             excel_st = str(s.get("street", "")).strip()
             if excel_st and not excel_st.lower().startswith("site "):
                 if stop_idx == self.current_index:
-                    self.txt_street.setText(excel_st)
+                    self._set_street_text(excel_st)
                 s["field_geocode_pending"] = not prefer_online
                 self.statusBar().showMessage("Install GPS saved — street from Excel.", 5000)
             else:

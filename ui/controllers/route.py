@@ -174,6 +174,7 @@ class RouteControllerMixin:
         self._persist_shift(quiet=True)
         self.current_index = min(self.current_index, max(0, len(self.state.stops) - 1))
         self._update_right(force_map=True)
+        self._route_pick_suspended = None
         self._go_page(1)
         self._refresh_day_filter()
         self._refresh_route_list()
@@ -405,6 +406,56 @@ class RouteControllerMixin:
         if self._route_pick_dialog is not None:
             self._route_pick_dialog.hide()
 
+    def _suspend_route_pick(self) -> None:
+        """Leave Route — stop pick clicks without throwing away the order."""
+        if not getattr(self, "_route_pick_mode", False):
+            return
+        dlg = getattr(self, "_route_pick_dialog", None)
+        by_map: dict[str, dict] = {}
+        for key, val in (getattr(self, "_route_pick_by_map", None) or {}).items():
+            if not isinstance(val, dict):
+                continue
+            by_map[str(key)] = {
+                "uids": list(val.get("uids") or []),
+                "sides": dict(val.get("sides") or {}),
+            }
+        self._route_pick_suspended = {
+            "uids": list(self._route_pick_uids),
+            "sides": dict(self._route_pick_sides),
+            "section": str(getattr(self, "_route_pick_section", "") or ""),
+            "by_map": by_map,
+            "dialog_open": bool(dlg is not None and dlg.isVisible()),
+        }
+        self._route_pick_mode = False
+        self._exit_pick_map_focus()
+        self._hide_route_pick_dialog()
+        n = len(self._route_pick_uids)
+        chosen = f"{n} stop{'s' if n != 1 else ''} already chosen. " if n else ""
+        self.statusBar().showMessage(
+            f"Route pick paused. {chosen}Open Route to continue the same order.",
+            8000,
+        )
+
+    def _resume_route_pick(self) -> None:
+        """Back on Route — same unapplied order, pick clicks work again."""
+        saved = getattr(self, "_route_pick_suspended", None)
+        if not saved:
+            return
+        self._route_pick_suspended = None
+        self._route_pick_mode = True
+        self._route_pick_uids = list(saved.get("uids") or [])
+        self._route_pick_sides = dict(saved.get("sides") or {})
+        self._route_pick_section = str(saved.get("section") or "")
+        self._route_pick_by_map = dict(saved.get("by_map") or {})
+        if saved.get("dialog_open"):
+            self._show_route_pick_dialog()
+        self._refresh_route_pick_ui()
+        n = len(self._route_pick_uids)
+        self.statusBar().showMessage(
+            f"Route pick is back — {n} stop{'s' if n != 1 else ''} already chosen.",
+            6000,
+        )
+
     def _route_pick_set_order(self, uids: list[str]) -> None:
         if not self._route_pick_mode:
             return
@@ -424,6 +475,7 @@ class RouteControllerMixin:
         self._push_state()
 
     def _begin_route_pick(self, stops: list[dict]) -> None:
+        self._route_pick_suspended = None
         self._end_manual_grab(silent=True)
         from core.map_display import enrich_segment_paths
 
@@ -800,6 +852,7 @@ class RouteControllerMixin:
             if section:
                 self._ensure_routes_by_map()[section] = dict(res["route"])
                 self._ensure_pick_by_map().pop(section, None)
+            self._route_pick_suspended = None
             self._route_pick_mode = False
             self._route_pick_uids = []
             self._route_pick_sides = {}
@@ -903,6 +956,7 @@ class RouteControllerMixin:
         if rt is not None and rt.isRunning():
             self.statusBar().showMessage("Wait — route re-trace still running…", 4000)
             return
+        self._route_pick_suspended = None
         self._route_pick_mode = False
         self._route_pick_uids = []
         self._route_pick_sides = {}
@@ -1246,6 +1300,7 @@ class RouteControllerMixin:
         self._apply_shift_clear(wipe_upload_paths=False)
 
     def _apply_shift_clear(self, *, wipe_upload_paths: bool) -> None:
+        self._route_pick_suspended = None
         self._stop_drive()
         self._route_pick_mode = False
         self._route_pick_uids = []
@@ -1464,4 +1519,10 @@ class RouteControllerMixin:
         self.btn_start.style().unpolish(self.btn_start)
         self.btn_start.style().polish(self.btn_start)
         self._push_state()
+        if (
+            self.pages.currentIndex() == 1
+            and getattr(self, "_route_pick_suspended", None)
+        ):
+            self._resume_route_pick()
+            return
         self.statusBar().showMessage("GPS follow stopped.", 5000)

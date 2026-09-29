@@ -149,7 +149,7 @@ label fonts.
 ## One-laptop field checklist (raises readiness)
 
 1. Run **`SMOKE.bat`** (or `.\scripts\smoke_test.ps1` for smoke + demo + preflight) after any update.
-2. Setup: Excel + `.EST` → **Download road map** → **Build**. Build opens click-to-order (blue = begin, red = end). Two maps: pick each day, then optional Merge. HTML install lists are **HTML route** on the Route tab (`tds_data/exports/`).
+2. Setup: Excel + `.EST` → **Download road map** → **Build**. Build opens click-to-order (blue = begin, red = end). Opening Install, Pickup, or Audit pauses that pick so those tabs get normal map clicks and Drop pin. Route brings the same unapplied order back. Two maps: pick each day, then optional Merge. HTML install lists are **HTML route** on the Route tab (`tds_data/exports/`).
 3. Route tab: **Map** filter = one day (that day’s pins) or **All days** (both). **HTML route** can save merged or separate lists.
 4. Install: **Grab GPS** fills street from internet or **offline road map**; use compass when stopped.
 5. End: Audit export (includes MapDay, cross point, wide-street warning).

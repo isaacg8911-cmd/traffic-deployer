@@ -127,10 +127,11 @@
       "rank": 9,
       "area": "multi-day routes",
       "severity": "major",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "Pick mode stays active after switching to the Install tab",
-      "detail": ""
+      "detail": "Leaving Route pauses pick mode. Install map clicks select the site and Drop pin is available. The unapplied order returns when Route is opened again."
     },
     {
       "id": "IMP-1",

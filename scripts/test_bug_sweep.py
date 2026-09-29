@@ -154,6 +154,192 @@ def test_static_fixes() -> None:
     check("already" in src and "exact_time" in src, "re-save keeps original install time")
 
 
+def test_pick_pauses_on_install() -> None:
+    """RTE-5: Install must not keep route-pick clicks. Route restores the order."""
+    print("[RTE-5 pick pauses when leaving Route]")
+    from ui.controllers.map_sync import MapSyncControllerMixin
+    from ui.controllers.route import RouteControllerMixin
+    from ui.page_indices import NAV_PAGE_COUNT
+    from ui.shell.topbar import ShellTopbarMixin
+
+    class Pages:
+        def __init__(self) -> None:
+            self.i = 1
+
+        def currentIndex(self) -> int:
+            return self.i
+
+        def setCurrentIndex(self, i: int) -> None:
+            self.i = i
+
+    class Btn:
+        def setChecked(self, _on: bool) -> None:
+            return
+
+        def setText(self, text: str) -> None:
+            self.text = text
+
+        def setObjectName(self, _name: str) -> None:
+            return
+
+        def style(self):
+            return self
+
+        def unpolish(self, _w) -> None:
+            return
+
+        def polish(self, _w) -> None:
+            return
+
+    class Win(ShellTopbarMixin, RouteControllerMixin, MapSyncControllerMixin):
+        def __init__(self) -> None:
+            self.pages = Pages()
+            self._route_pick_mode = True
+            self._route_pick_uids = ["u1"]
+            self._route_pick_sides = {"u1": "begin"}
+            self._route_pick_section = "Day 1"
+            self._route_pick_by_map = {"Day 2": {"uids": ["u9"], "sides": {"u9": "end"}}}
+            self._route_pick_suspended = None
+            self._route_pick_dialog = None
+            self._manual_grab_mode = False
+            self._map_js_ready = False
+            self._map_preview_stops = []
+            self._pick_layout_active = False
+            self._pick_splitter_saved = None
+            self._gps_follow = False
+            self._pick_side_mode = "begin"
+            self.messages: list[str] = []
+            self.selected: list[int] = []
+            self.chk_show_segments = type("C", (), {"isChecked": lambda _s: False})()
+            stops = [
+                {
+                    "uid": "u1", "id": "1", "street": "First",
+                    "begin_lat": 33.80, "begin_lon": -117.90,
+                    "end_lat": 33.81, "end_lon": -117.90,
+                },
+                {
+                    "uid": "u2", "id": "2", "street": "Second",
+                    "begin_lat": 33.82, "begin_lon": -117.91,
+                    "end_lat": 33.83, "end_lon": -117.91,
+                },
+            ]
+            self.state = type("S", (), {
+                "offline_mode": False,
+                "stops": stops,
+                "home": (33.7, -117.8),
+                "route": {"polyline": [], "miles": 0.0, "graph": False},
+                "map_day_filter": "All days",
+                "active_files": [],
+                "routes_by_map": {},
+            })()
+            self.state.index_of = lambda uid, rows=stops: next(
+                (i for i, s in enumerate(rows) if s["uid"] == uid), -1)
+            for j in range(NAV_PAGE_COUNT):
+                setattr(self, f"_navbtn_{j}", Btn())
+            self.btn_start = Btn()
+            self.bridge = type("B", (), {"set_follow": lambda *_a, **_k: None})()
+
+        def statusBar(self):
+            return self
+
+        def showMessage(self, msg: str, _ms: int = 0) -> None:
+            self.messages.append(msg)
+
+        def _refresh_route_list(self) -> None:
+            return
+
+        def _refresh_install(self) -> None:
+            return
+
+        def _refresh_pickup(self) -> None:
+            return
+
+        def _refresh_audit(self) -> None:
+            return
+
+        def _refresh_workflow_strip(self) -> None:
+            return
+
+        def _refresh_field_alerts(self) -> None:
+            return
+
+        def _update_right(self, force_map: bool = False) -> None:
+            _ = force_map
+
+        def _push_state(self, fit: bool = False) -> None:
+            _ = fit
+
+        def _flush_install_form(self) -> None:
+            return
+
+        def _end_manual_grab(self, *, silent: bool = False, then=None) -> None:
+            _ = silent
+            if then:
+                then()
+
+        def _enter_pick_map_focus(self) -> None:
+            return
+
+        def _set_drive_mode(self, _on: bool) -> None:
+            return
+
+        def _apply_power_profile(self) -> None:
+            return
+
+        def _select_install_stop(self, idx: int) -> None:
+            self.selected.append(idx)
+
+    win = Win()
+    win._on_map_clicked(33.82, -117.91)
+    check(win._route_pick_uids == ["u1", "u2"], "on Route, a map click still adds the next stop")
+
+    win._route_pick_uids = ["u1"]
+    win._route_pick_sides = {"u1": "begin"}
+    win._go_page(2)
+    check(win.pages.currentIndex() == 2, "Install tab opens")
+    check(win._route_pick_mode is False, "pick mode is off on Install")
+    check(win._section_pick_active() is False, "map leaves pick mode")
+    check(not win._route_pick_mode, "Drop pin guard sees pick mode off")
+    check(any("paused" in m for m in win.messages), "operator is told the pick is paused")
+    win._on_map_clicked(33.82, -117.91)
+    check(win._route_pick_uids == ["u1"], "Install map click does not add a stop")
+    win._on_stop_clicked("u2|end")
+    check(win.selected == [1], "Install stop click selects that site")
+    check(win._route_pick_uids == ["u1"], "Install stop click does not extend the order")
+    saved_day2 = list(win._route_pick_suspended["by_map"]["Day 2"]["uids"])
+    win._route_pick_by_map = {"Day 2": {"uids": ["changed"], "sides": {}}}
+
+    win._gps_follow = True
+    win._go_page(1)
+    check(win._route_pick_mode is False, "GPS follow does not resume pick")
+    check(win._route_pick_suspended is not None, "paused order kept during follow")
+    win._stop_drive()
+    check(win._route_pick_mode is True, "stopping follow on Route resumes pick")
+    check(win._route_pick_uids == ["u1"], "resumed order is the paused order")
+    check(win._route_pick_sides.get("u1") == "begin", "resumed side locks")
+    check(win._route_pick_by_map["Day 2"]["uids"] == saved_day2, "other day's paused picks survive")
+    check(win._route_pick_suspended is None, "pause cleared once pick is back")
+
+    win._go_page(2)
+    check(win._route_pick_mode is False, "leaving Route pauses again")
+    win._begin_route_pick([{
+        "uid": "new", "id": "9", "street": "New",
+        "begin_lat": 33.9, "begin_lon": -117.9,
+        "end_lat": 33.91, "end_lon": -117.9,
+    }])
+    check(win._route_pick_mode is True, "a new Build starts pick mode")
+    check(win._route_pick_uids == [], "a new Build does not restore the paused order")
+    check(win._route_pick_suspended is None, "a new Build clears the pause")
+    check(win.pages.currentIndex() == 1, "a new Build opens Route")
+
+    idle = Win()
+    idle._route_pick_mode = False
+    idle._route_pick_uids = []
+    idle._go_page(2)
+    check(idle._route_pick_suspended is None, "leaving Route with no pick does not invent a pause")
+    check(idle._route_pick_mode is False, "Install stays out of pick mode")
+
+
 def main() -> int:
     from PySide6.QtWidgets import QApplication
     _app = QApplication.instance() or QApplication([])  # noqa: F841
@@ -163,6 +349,7 @@ def main() -> int:
     test_export_serial()
     test_pickup_pending_advance()
     test_static_fixes()
+    test_pick_pauses_on_install()
     print("PASS" if not fails else f"FAIL ({fails})")
     return 1 if fails else 0
 

@@ -181,6 +181,10 @@ class ShellTopbarMixin:
         if self.pages.currentIndex() == 2 and i != 2:
             self._flush_install_form()
             self._end_manual_grab(silent=True)
+        # Pick is a Route-tab session. Install (and the other tabs) must get
+        # normal map clicks and Drop pin. The order is restored on Route.
+        if self.pages.currentIndex() == 1 and i != 1:
+            self._suspend_route_pick()
         self.pages.setCurrentIndex(i)
         for j in range(NAV_PAGE_COUNT):
             getattr(self, f"_navbtn_{j}").setChecked(j == i)
@@ -189,6 +193,8 @@ class ShellTopbarMixin:
             self.spin_lon.setValue(self.state.home[1])
             self._refresh_workflow_strip()
         elif i == 1:
+            if not self._gps_follow:
+                self._resume_route_pick()
             self._refresh_route_list()
         elif i == 2:
             self._refresh_install()

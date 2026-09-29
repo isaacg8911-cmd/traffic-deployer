@@ -195,6 +195,46 @@ def _pick_est(hits: list[tuple[int, str]], day: str) -> tuple[int, str]:
     return hits[0]
 
 
+def _est_has_site(raw: str, site_id: str) -> bool:
+    """True when this map file names the site, not a fragment of a coordinate.
+
+    A real Streets & Trips pin is ``\\xff\\xfe`` plus the site id (inline) or
+    that plus ``x`` (coordinate table). A word-boundary search also hits
+    ``117`` inside ``-117.94310`` and ``5057`` inside ``-117.5057``. Text
+    demo maps still count when the id is its own token (``SITE 101``).
+    """
+    sid = str(site_id).strip()
+    if not sid:
+        return False
+    needle = "\xff\xfe" + sid
+    start = 0
+    while True:
+        pos = raw.find(needle, start)
+        if pos < 0:
+            break
+        after = pos + len(needle)
+        nxt = raw[after] if after < len(raw) else ""
+        if not nxt.isdigit():
+            return True
+        start = pos + 2
+    # Text maps (demo) list ids as their own tokens. A digit run inside
+    # -117.5057 or 33.77150 is one number, not a site id.
+    for match in re.finditer(r"\b" + re.escape(sid) + r"\b", raw):
+        left = match.start()
+        right = match.end()
+        while left > 0 and raw[left - 1] in "0123456789.":
+            left -= 1
+        if left > 0 and raw[left - 1] in "+-" and (
+            left == 1 or not (raw[left - 2].isalnum() or raw[left - 2] == "_")
+        ):
+            left -= 1
+        while right < len(raw) and raw[right] in "0123456789.":
+            right += 1
+        if raw[left:right] == sid:
+            return True
+    return False
+
+
 def match_est_files(est_configs: list[dict], excel_sites: dict[str, dict],
                     home: tuple[float, float]) -> list[dict]:
     """Match site IDs found inside .EST map files to the Excel coordinates.
@@ -214,7 +254,7 @@ def match_est_files(est_configs: list[dict], excel_sites: dict[str, dict],
     for sid, data in excel_sites.items():
         hits = [
             (i, label) for i, label, raw in loaded
-            if re.search(r"\b" + re.escape(str(sid)) + r"\b", raw)
+            if _est_has_site(raw, sid)
         ]
         if not hits:
             continue

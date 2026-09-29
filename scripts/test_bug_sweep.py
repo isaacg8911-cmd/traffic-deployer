@@ -340,6 +340,53 @@ def test_pick_pauses_on_install() -> None:
     check(idle._route_pick_mode is False, "Install stays out of pick mode")
 
 
+def test_est_id_not_coordinate() -> None:
+    """IMP-1: coordinate digits are not a site id. Real pins and demo tokens are."""
+    print("[IMP-1 site id is not a coordinate fragment]")
+    import tempfile
+
+    from core import ingest
+
+    def pin(sid: str) -> dict:
+        return {
+            "begin_lat": 33.7, "begin_lon": -117.9,
+            "end_lat": 33.8, "end_lon": -117.8,
+            "lat": 33.75, "lon": -117.85,
+            "street": f"Site {sid}",
+        }
+
+    sites = {
+        sid: pin(sid)
+        for sid in ("117", "33", "5057", "1001", "50570", "771", "101")
+    }
+    body = "coords -117.5057 33.77150\n\xff\xfe1001\x00\xff\xfe50570\x00"
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "map.est")
+        with open(path, "w", encoding="latin-1", newline="\n") as f:
+            f.write(body)
+        stops = ingest.match_est_files(
+            [{"path": path, "label": "Day 1"}], sites, (33.7, -117.9))
+        ids = {s["id"] for s in stops}
+        check(ids == {"1001", "50570"}, "pins match; coordinate fragments do not: " + str(sorted(ids)))
+
+        xbody = "\xff\xfe5057x\x00-117.101\n"
+        xpath = os.path.join(tmp, "table.est")
+        with open(xpath, "w", encoding="latin-1", newline="\n") as f:
+            f.write(xbody)
+        stops = ingest.match_est_files(
+            [{"path": xpath, "label": "Day 1"}], sites, (33.7, -117.9))
+        ids = {s["id"] for s in stops}
+        check(ids == {"5057"}, "coord-table pin 5057x is site 5057, not 117 or 101: " + str(sorted(ids)))
+
+    demo_stops = ingest.match_est_files(
+        [{"path": os.path.join(ROOT, "demo_data", "DemoDay.EST"), "label": "DemoDay"}],
+        ingest.parse_excel_sites([os.path.join(ROOT, "demo_data", "demo_sites.csv")]),
+        (33.77, -117.94),
+    )
+    demo_ids = {s["id"] for s in demo_stops}
+    check(demo_ids == {"101", "102", "103", "104", "105"}, "demo text map still matches its site tokens")
+
+
 def main() -> int:
     from PySide6.QtWidgets import QApplication
     _app = QApplication.instance() or QApplication([])  # noqa: F841
@@ -350,6 +397,7 @@ def main() -> int:
     test_pickup_pending_advance()
     test_static_fixes()
     test_pick_pauses_on_install()
+    test_est_id_not_coordinate()
     print("PASS" if not fails else f"FAIL ({fails})")
     return 1 if fails else 0
 

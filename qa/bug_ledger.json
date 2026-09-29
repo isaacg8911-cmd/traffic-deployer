@@ -138,10 +138,11 @@
       "rank": 10,
       "area": "Excel/.EST import",
       "severity": "major",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25 bug sweep",
+      "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "A site ID can falsely match coordinate digits inside a map file",
-      "detail": ".EST word-boundary site-ID match hits digits inside coordinates."
+      "detail": "Site ids match a pushpin name or a whole token. Digits inside a coordinate such as -117.5057 are not a site."
     },
     {
       "id": "IMP-2",

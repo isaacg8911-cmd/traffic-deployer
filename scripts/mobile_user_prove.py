@@ -220,6 +220,7 @@ def main() -> int:
     check("pwa_job_file_pickup", r.status_code == 200 and "impTdjob" in r.text)
     check("pwa_home_address", r.status_code == 200 and 'id="homeAddr"' in r.text)
     check("pwa_file_buttons", r.status_code == 200 and "file-btn" in r.text)
+    check("pwa_has_no_build_route", "Build route" not in r.text and "Follow GPS" not in r.text)
     r = client.get("/api/geocode")
     check("geocode_empty_rejected", r.status_code == 422, str(r.status_code))
     r = client.get("/manifest.webmanifest")

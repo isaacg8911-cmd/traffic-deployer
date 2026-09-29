@@ -28,18 +28,17 @@
   <section id="startScreen" class="screen">
     <div class="card">
       <h1>Start a shift</h1>
-      <p class="muted">Same as the laptop: start address → Excel + .EST → drive. Phone-sized.</p>
+      <p class="muted">Load the Excel and .EST. Tap a site on the map, then the begin or end point if you need directions.</p>
       <ol class="workflow" id="startWorkflow">
-        <li class="current">Start</li>
-        <li>Files</li>
-        <li>Route</li>
+        <li class="current">Files</li>
+        <li>Sites</li>
         <li>Install</li>
       </ol>
 
       <div id="createBlock">
         <div class="block">
           <h2>1. Start</h2>
-          <p class="muted">Yard / shop address. Wrong start can scramble stop order.</p>
+          <p class="muted">Optional yard address. The phone does not build a driving route.</p>
           <label class="field">Home start address
             <input id="homeAddr" type="text" placeholder="street, city, CA zip" autocomplete="street-address" enterkeyhint="search" />
           </label>
@@ -128,8 +127,6 @@
     <div class="panel">
       <ol class="workflow" id="jobWorkflow">
         <li data-step="files">Files</li>
-        <li data-step="route">Route</li>
-        <li data-step="drive">Drive</li>
         <li data-step="install">Install</li>
         <li data-step="audit">Audit</li>
       </ol>
@@ -147,19 +144,10 @@
     </div>
   </section>
 
-  <!-- Route tab -->
+  <!-- Sites tab: pick a site, then begin or end for directions -->
   <section id="routeScreen" class="screen tab hidden">
     <div class="panel">
-      <div class="row">
-        <button id="btnDrive" class="go grow">Follow GPS</button>
-        <button id="btnBuildRoute" class="primary grow">Build route</button>
-      </div>
-      <span id="routeMiles" class="muted"></span>
-      <div class="row">
-        <button id="btnReorder" class="secondary grow">Reorder stops</button>
-        <button id="btnRetrace" class="secondary grow hidden">Re-trace line</button>
-      </div>
-      <div id="reorderHint" class="muted hidden">Tap ▲ / ▼ to set your own order, then Re-trace line.</div>
+      <p class="muted">Tap a site. Blue is the begin point, red is the end. Directions stay closed until you ask.</p>
       <ul id="stopList" class="list"></ul>
     </div>
   </section>
@@ -241,7 +229,7 @@
   <!-- Bottom nav — same five areas as the laptop -->
   <nav id="tabbar" class="hidden">
     <button data-tab="setup">Setup</button>
-    <button data-tab="route" class="active">Route</button>
+    <button data-tab="route" class="active">Sites</button>
     <button data-tab="install">Install</button>
     <button data-tab="pickup">Pickup</button>
     <button data-tab="audit">Audit</button>
@@ -251,6 +239,6 @@
 
   <script src="/vendor/maplibre-gl.js"></script>
   <script src="/local.js?v=3"></script>
-  <script src="/app.js?v=14"></script>
+  <script src="/app.js?v=15"></script>
 </body>
 </html>

@@ -522,20 +522,17 @@
   function renderSetup() {
     if (!state.job) return;
     var c = state.data.counts || {};
-    var miles = (state.data.route && state.data.route.miles) || 0;
     $('setupMeta').textContent = (state.job.label || 'Field job') + ' · ' + (c.total || 0) + ' sites';
     var files = (state.job.active_files || []).join(', ') || 'Imported job';
-    $('setupFiles').textContent = files + (miles ? (' · ' + miles.toFixed(1) + ' mi') : ' · not routed yet');
+    $('setupFiles').textContent = files + ' · ' + (c.total || 0) + ' sites';
     var filesDone = (state.job.stops || []).length > 0;
-    var routed = miles > 0.05;
     var installing = (c.installed || 0) + (c.skipped || 0) > 0;
     var auditReady = installing && (c.pending || 0) === 0;
     var steps = {
-      files: filesDone, route: routed, drive: state.driving,
-      install: installing, audit: auditReady
+      files: filesDone, install: installing, audit: auditReady
     };
     var current = 'audit';
-    ['files', 'route', 'drive', 'install', 'audit'].some(function (id) {
+    ['files', 'install', 'audit'].some(function (id) {
       if (!steps[id]) { current = id; return true; }
       return false;
     });
@@ -547,15 +544,6 @@
 
   function renderRoute() {
     var ul = $('stopList'); ul.innerHTML = '';
-    var route = (state.data && state.data.route) || {};
-    var miles = route.miles || 0;
-    $('routeMiles').textContent = route.stale ? 'order changed — re-trace' : (miles ? (miles.toFixed(1) + ' mi') : 'not routed');
-    if (state.reorderMode) {
-      $('btnRetrace').classList.toggle('active', !!route.stale);
-      $('reorderHint').textContent = route.stale
-        ? 'Order changed — tap Re-trace line to redraw the drive path.'
-        : 'Tap ▲ / ▼ to set your own order, then Re-trace line.';
-    }
     var stops = (state.data && state.data.stops) || [];
     var last = stops.length - 1;
     stops.forEach(function (s, i) {
@@ -1028,9 +1016,13 @@
   // ----------------------------------------------------------------- drive (Follow GPS)
   function setDrive(on) {
     state.driving = !!on;
-    $('btnDrive').classList.toggle('active', state.driving);
-    $('btnDrive').textContent = state.driving ? 'Following…' : 'Follow GPS';
-    $('driveBanner').classList.toggle('hidden', !state.driving);
+    var driveBtn = $('btnDrive');
+    if (driveBtn) {
+      driveBtn.classList.toggle('active', state.driving);
+      driveBtn.textContent = state.driving ? 'Following…' : 'Follow GPS';
+    }
+    var banner = $('driveBanner');
+    if (banner) banner.classList.toggle('hidden', !state.driving);
     if (state.driving) {
       startWatch();
       renderDriveBanner();
@@ -1401,12 +1393,12 @@
         $('startMsg').textContent = e.message; $('startMsg').className = 'msg err';
       });
     };
-    $('btnBuildRoute').onclick = buildRoute;
-    $('btnDrive').onclick = function () { setDrive(!state.driving); };
-    $('btnStopDrive').onclick = function () { setDrive(false); };
-    $('btnArrived').onclick = arrivedInstall;
-    $('btnReorder').onclick = function () { setReorderMode(!state.reorderMode); };
-    $('btnRetrace').onclick = retraceRoute;
+    if ($('btnBuildRoute')) $('btnBuildRoute').onclick = buildRoute;
+    if ($('btnDrive')) $('btnDrive').onclick = function () { setDrive(!state.driving); };
+    if ($('btnStopDrive')) $('btnStopDrive').onclick = function () { setDrive(false); };
+    if ($('btnArrived')) $('btnArrived').onclick = arrivedInstall;
+    if ($('btnReorder')) $('btnReorder').onclick = function () { setReorderMode(!state.reorderMode); };
+    if ($('btnRetrace')) $('btnRetrace').onclick = retraceRoute;
     $('btnGrab').onclick = grabGps;
     $('btnDropPin').onclick = function () {
       if (state.phase === 'form') return;

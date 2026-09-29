@@ -1418,6 +1418,96 @@
     showApp();
     fitToStops();
     updateSaveUi();
+    prefetchJobTiles();
+  }
+
+  var TILE_CACHE = 'td-mobile-tiles-v1';
+  var tileRun = 0;
+
+  function keepJobTiles(urls) {
+    if (!navigator.serviceWorker) return;
+    var send = function () {
+      var worker = navigator.serviceWorker.controller;
+      if (worker) worker.postMessage({ type: 'keep-tiles', urls: urls });
+    };
+    if (navigator.serviceWorker.controller) send();
+    else if (navigator.serviceWorker.ready) navigator.serviceWorker.ready.then(send).catch(function () {});
+  }
+
+  function tileCached(url) {
+    if (!window.caches) return Promise.resolve(false);
+    return caches.open(TILE_CACHE).then(function (cache) {
+      return cache.match(url).then(function (hit) { return !!hit; });
+    }).catch(function () { return false; });
+  }
+
+  function setMapBanner(text, hideLater) {
+    var el = $('mapBanner');
+    if (!el) return;
+    if (!text) { el.classList.add('hidden'); return; }
+    el.textContent = text;
+    el.classList.remove('hidden');
+    if (hideLater) setTimeout(function () { el.classList.add('hidden'); }, 2500);
+  }
+
+  function prefetchJobTiles() {
+    if (!state.job || navigator.onLine === false || !L.tilesAroundSites) return;
+    var run = ++tileRun;
+    var urls = L.tilesAroundSites(state.job.stops, state.tileUrl);
+    if (!urls.length) return;
+    keepJobTiles(urls);
+    var start = function () {
+      if (run !== tileRun) return;
+      runTilePrefetch(urls, run);
+    };
+    if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+      navigator.serviceWorker.ready.then(start).catch(start);
+    } else start();
+  }
+
+  function runTilePrefetch(urls, run) {
+    var queue = urls.slice();
+    var active = 0;
+    var saved = 0;
+    var missed = 0;
+    var shown = false;
+    function finish() {
+      if (run !== tileRun) return;
+      if (saved > 0 && missed === 0) setMapBanner('Map around the sites is on this phone.', true);
+      else if (saved > 0) setMapBanner('Map saved around the sites. Some tiles still need a signal.', true);
+      else if (shown) setMapBanner('Map needs a signal. Tiles already on this phone still show.', true);
+      else setMapBanner('');
+    }
+    function next() {
+      if (run !== tileRun) return;
+      if (!queue.length && active === 0) { finish(); return; }
+      while (active < 2 && queue.length) pump(queue.shift());
+    }
+    function pump(url) {
+      active++;
+      tileCached(url).then(function (hit) {
+        if (run !== tileRun) return;
+        if (hit) { active--; next(); return; }
+        if (!shown) {
+          shown = true;
+          setMapBanner('Saving the map around the sites…', false);
+        }
+        fetch(url, { mode: 'cors', credentials: 'omit' }).then(function (resp) {
+          if (resp && resp.ok) {
+            saved++;
+            if (window.caches) {
+              caches.open(TILE_CACHE).then(function (cache) {
+                cache.put(url, resp.clone()).catch(function () {});
+              }).catch(function () {});
+            }
+          } else missed++;
+        }).catch(function () { missed++; }).then(function () {
+          active--;
+          next();
+        });
+      });
+    }
+    next();
   }
 
   function openJob(jobId, token) {
@@ -1474,6 +1564,8 @@
       navigator.geolocation.clearWatch(state.nearWatch);
       state.nearWatch = null;
     }
+    tileRun++;
+    setMapBanner('');
     state.driving = false;
     $('startScreen').classList.remove('hidden');
     $('tabbar').classList.add('hidden');
@@ -1733,6 +1825,9 @@
       setDirHint();
     });
     if ($('btnPickupGrab')) $('btnPickupGrab').onclick = grabPickup;
+    window.addEventListener('online', function () {
+      if (state.job) prefetchJobTiles();
+    });
     if ($('btnPickupPin')) $('btnPickupPin').onclick = function () {
       if (state.pinMode && state.pinFor === 'pickup') disablePinMode();
       else enablePinMode('pickup');

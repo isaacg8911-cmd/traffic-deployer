@@ -91,7 +91,7 @@ Load Excel + `.EST`, then stay on **Grab GPS**. The wait line shows the nearest 
 |---|---|---|
 | Excel + .EST import | Local picker | Browser upload (same ingest) |
 | Route build / optimize | Yes | Yes (server) |
-| Map | Offline PMTiles | Online tiles. Tiles already viewed stay on the phone if the signal drops |
+| Map | Offline PMTiles | When a job opens, the phone saves the map around those sites. A spot not in that area still needs a signal |
 | GPS capture | USB receiver, on the selected stop | Phone GPS. Grab links the fix to the nearest unfinished site |
 | Drop pin fallback | Yes | Yes, matched the same way |
 | Follow GPS / next-stop banner | Yes | Nearest unfinished site, not the next row in the list |
@@ -153,6 +153,7 @@ improvements). Stress latency logs to `logs/mobile_stress/`.
 ## Known limits / next steps
 
 - HTTPS is self-signed (one-time phone warning); use a trusted cert/proxy in prod
+- The phone saves map tiles around each site (the street you stand on), not the empty land between distant sites. A place outside that area still needs a signal
 - Job token only, not full multi-user auth (phase 2)
 - Street-route rebuild still needs the server; install/pickup/notes work from the phone copy
 - Heavy route builds (large jobs with a server road graph) should be backgrounded

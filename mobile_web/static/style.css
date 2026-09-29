@@ -41,6 +41,10 @@ body { display: flex; flex-direction: column; }
 .pill.save-local { background: #7c2d12; color: #fed7aa; }
 .pill.save-off { background: var(--panel2); color: var(--muted); }
 
+.map-banner {
+  flex: 0 0 auto; background: #0f2744; color: #e8eef5;
+  padding: 8px 12px; font-size: 13px; font-weight: 600;
+}
 .save-banner {
   flex: 0 0 auto; display: flex; gap: 8px; align-items: center;
   background: #7c2d12; color: #fff7ed; padding: 8px 12px; font-size: 13px; font-weight: 600;

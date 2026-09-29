@@ -539,6 +539,59 @@
     return null;
   }
 
+  // Tiles around each count, not the empty land between distant sites.
+  // Zoom 16 is the site view. Zoom 17 is the drop-pin view. Cap stays polite.
+  var TILE_ZOOMS = [16, 17];
+  var TILE_PAD_M = 180;
+  var TILE_LIST_CAP = 320;
+
+  function tileXY(lat, lon, z) {
+    var n = Math.pow(2, z);
+    var x = Math.floor((lon + 180) / 360 * n);
+    var rad = lat * Math.PI / 180;
+    var y = Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * n);
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x >= n) x = n - 1;
+    if (y >= n) y = n - 1;
+    return [x, y];
+  }
+
+  function tilesAroundSites(stops, template) {
+    template = template || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    var seen = {};
+    var list = [];
+    function add(z, x, y) {
+      if (list.length >= TILE_LIST_CAP) return;
+      var key = z + '/' + x + '/' + y;
+      if (seen[key]) return;
+      seen[key] = 1;
+      list.push(template.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)));
+    }
+    function cover(lat, lon, z) {
+      if (!isFinite(lat) || !isFinite(lon)) return;
+      var dLat = TILE_PAD_M / 111320;
+      var cos = Math.cos(lat * Math.PI / 180);
+      var dLon = TILE_PAD_M / (111320 * (Math.abs(cos) < 0.2 ? 0.2 : cos));
+      var a = tileXY(lat - dLat, lon - dLon, z);
+      var b = tileXY(lat + dLat, lon + dLon, z);
+      var x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
+      var y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+      for (var x = x0; x <= x1; x++) {
+        for (var y = y0; y <= y1; y++) add(z, x, y);
+      }
+    }
+    TILE_ZOOMS.forEach(function (z) {
+      (stops || []).forEach(function (stop) {
+        var seg = siteSegment(stop);
+        if (!seg) return;
+        cover(seg[0], seg[1], z);
+        cover(seg[2], seg[3], z);
+      });
+    });
+    return list;
+  }
+
   function clearGrab(stop) {
     if (!stop) return stop;
     stop.field_lat = null;
@@ -776,6 +829,7 @@
     matchSite: matchSite,
     matchPickup: matchPickup,
     closestUnfinished: closestUnfinished,
+    tilesAroundSites: tilesAroundSites,
     inferDirection: inferDirection,
     inferFromHeading: inferFromHeading,
     directionHint: directionHint,

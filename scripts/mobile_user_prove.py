@@ -234,6 +234,7 @@ def main() -> int:
     check("pwa_direction_hint", 'id="dirHint"' in r.text and 'id="btnCompass"' in r.text)
     check("pwa_nearest_and_undo", 'id="nearLine"' in r.text and 'id="btnUndo"' in r.text)
     check("pwa_pickup_grab", 'id="btnPickupGrab"' in r.text)
+    check("pwa_map_save_banner", 'id="mapBanner"' in r.text)
     check("pwa_file_buttons", r.status_code == 200 and "file-btn" in r.text)
     check("pwa_has_no_build_route", "Build route" not in r.text and "Follow GPS" not in r.text)
     r = client.get("/api/geocode")
@@ -328,6 +329,23 @@ if (!live.installed || !live.exact_time) process.exit(10);
 L.applyStopPatch(live, { installed: false, exact_time: '', date: '', direction: 'n', serial: '1' });
 L.restoreStop(live, snap);
 if (live.installed || live.exact_time) process.exit(11);
+const one = L.tilesAroundSites([
+  { begin_lat: 33.8, begin_lon: -117.9, end_lat: 33.801, end_lon: -117.9 }
+], 'https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+if (!one.length || one.length > 40) process.exit(12);
+if (!one.some(function (u) { return u.indexOf('/16/') !== -1; })) process.exit(13);
+if (!one.some(function (u) { return u.indexOf('/17/') !== -1; })) process.exit(14);
+const far = L.tilesAroundSites([
+  { begin_lat: 33.8, begin_lon: -117.9, end_lat: 33.801, end_lon: -117.9 },
+  { begin_lat: 34.2, begin_lon: -118.4, end_lat: 34.201, end_lon: -118.4 }
+], 'https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+if (far.length > 80 || far.length < one.length) process.exit(15);
+const many = [];
+for (var i = 0; i < 80; i++) {
+  var lat = 33 + i * 0.02;
+  many.push({ begin_lat: lat, begin_lon: -117.9, end_lat: lat + 0.001, end_lon: -117.9 });
+}
+if (L.tilesAroundSites(many).length > 320) process.exit(16);
 process.exit(0);
 """
     local_js = os.path.join(ROOT, "mobile_web", "static", "local.js")

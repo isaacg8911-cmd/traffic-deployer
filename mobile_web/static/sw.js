@@ -4,7 +4,8 @@
  */
 var SHELL = 'td-mobile-shell-v8';
 var TILES = 'td-mobile-tiles-v1';
-var TILE_CAP = 500;
+var TILE_CAP = 900;
+var keepTiles = {};
 var SHELL_ASSETS = [
   '/style.css', '/manifest.webmanifest', '/icon.svg',
   '/vendor/maplibre-gl.js', '/vendor/maplibre-gl.css'
@@ -30,9 +31,26 @@ function trimTiles(cache) {
   cache.keys().then(function (keys) {
     if (keys.length <= TILE_CAP) return;
     var extra = keys.length - TILE_CAP;
-    return Promise.all(keys.slice(0, extra).map(function (k) { return cache.delete(k); }));
+    var other = [];
+    var kept = [];
+    keys.forEach(function (k) {
+      if (keepTiles[k.url]) kept.push(k);
+      else other.push(k);
+    });
+    var victims = other.slice(0, extra);
+    if (victims.length < extra) {
+      victims = victims.concat(kept.slice(0, extra - victims.length));
+    }
+    return Promise.all(victims.map(function (k) { return cache.delete(k); }));
   }).catch(function () {});
 }
+
+self.addEventListener('message', function (e) {
+  var data = e.data || {};
+  if (data.type !== 'keep-tiles' || !data.urls) return;
+  keepTiles = {};
+  data.urls.forEach(function (u) { keepTiles[u] = 1; });
+});
 
 function isAppCode(url) {
   // The HTML shell and the app logic must always come from the network so a

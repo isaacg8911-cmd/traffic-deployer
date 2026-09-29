@@ -313,22 +313,12 @@ def test_bridge_and_map():
         "map.on('click'",
         "alreadyPicked",
         "pick_waiting",
-        "showNavOffer(payload)",
-        "http://tdnav.local/go",
-        "fireNavOpen",
     ):
         ok(f"app.js {needle.split('(')[0]}") if needle in appjs else fail(f"app.js missing {needle}")
-    if "google.com/maps" in appjs:
-        fail("app.js must not open Google Maps itself")
-    else:
-        ok("map click does not auto-open Google Maps")
 
     idx = open(INDEX_HTML, encoding="utf-8").read()
-    for bid in ("follow-btn", "zoom-in", "zoom-out", "next-site-btn", "nav-offer", "nav-offer-go", "nav-offer-dismiss"):
+    for bid in ("follow-btn", "zoom-in", "zoom-out", "next-site-btn"):
         ok(f"index.html #{bid}") if f'id="{bid}"' in idx else fail(f"index.html missing {bid}")
-    page_src = open(os.path.join(ROOT, "ui", "web_page.py"), encoding="utf-8").read()
-    ok("tdnav intercept") if "tdnav.local" in page_src and "navRequested" in page_src else fail("web page missing nav offer")
-    ok("nav button opens maps") if "page.navRequested.connect" in shell_src and "_on_nav_requested" in shell_src else fail("nav button not wired")
 
 
 def test_route_pick_dialog_internal():
@@ -356,23 +346,6 @@ def test_nav_and_shortcuts():
         ok(f"shortcut {key}") if key in main_src else fail(f"missing shortcut {key}")
 
 
-def test_endpoint_directions_choice():
-    print("\n[begin/end directions choice]")
-    from PySide6.QtCore import QUrl
-
-    from ui.web_page import tdnav_coords
-
-    got = tdnav_coords(QUrl("http://tdnav.local/go?lat=33.771&lon=-117.941"))
-    ok("nav url coords") if got == (33.771, -117.941) else fail("nav url coords", str(got))
-    ok("bad nav url ignored") if tdnav_coords(QUrl("http://tdnav.local/go?lat=nope&lon=1")) is None else fail("bad nav url")
-    appjs = open(APP_JS, encoding="utf-8").read()
-    start = appjs.find("map.on('click'")
-    end = appjs.find("function safe(", start)
-    chunk = appjs[start:end] if start >= 0 and end > start else ""
-    ok("dot click shows the choice") if "showNavOffer(payload)" in chunk else fail("dot click does not show directions choice")
-    ok("dot click does not open maps") if "fireNavOpen" not in chunk else fail("dot click calls fireNavOpen")
-
-
 def main() -> int:
     print("UI wiring audit\n")
     test_page_handlers_exist()
@@ -380,7 +353,6 @@ def main() -> int:
     test_bridge_and_map()
     test_route_pick_dialog_internal()
     test_nav_and_shortcuts()
-    test_endpoint_directions_choice()
     print(f"\n{'=' * 50}")
     print(f"OK: {len(OKS)}  FAIL: {len(FAILS)}")
     if FAILS:

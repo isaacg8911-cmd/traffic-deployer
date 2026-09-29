@@ -726,8 +726,7 @@ class MapSyncControllerMixin:
         if street:
             msg += f" — {street}"
         if side in ("begin", "end"):
-            which = "Begin" if side == "begin" else "End"
-            msg += f" ({which} point) — Directions button is on the map"
+            msg += f" ({'Begin' if side == 'begin' else 'End'} point)"
         return msg
 
     @staticmethod
@@ -1046,21 +1045,6 @@ class MapSyncControllerMixin:
                 self._select_install_stop(idx)
             return
         # Setup / Route / other tabs: show Excel site # only — stay on current tab.
-
-    def _on_nav_requested(self, lat: float, lon: float) -> None:
-        """Open Google Maps only after the operator taps the on-map button."""
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-
-        from core.maps_links import google_maps_nav_url
-
-        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
-            return
-        QDesktopServices.openUrl(QUrl(google_maps_nav_url(lat, lon)))
-        self.statusBar().showMessage(
-            f"Google Maps directions to {lat:.5f}, {lon:.5f}",
-            8000,
-        )
 
     def _should_push_gps_bridge(
         self, lat: float, lon: float, heading: float | None,

@@ -39,7 +39,7 @@ MODULE_MARKERS: dict[str, tuple[str, ...]] = {
     "ui.controllers.counter": ("_counter_read_serial", "_counter_clear_configure"),
     "ui.pages.install_page": ("Grab GPS", "Clear GPS / pin", "INSTALL"),
     "ui.shell.field_mode": ("_sync_field_mode", "_internet_allowed"),
-    "ui.web_page": ("tdstop.local", "tdmap.local", "tdnav.local"),
+    "ui.web_page": ("tdstop.local", "tdmap.local"),
     "ui.shell.startup": ("_map_follow", "followToggled"),
     "bridge": ("followToggled", "onFollowToggled"),
     "core.routing": ("pick_cross_locked", "graph_covers_stops"),

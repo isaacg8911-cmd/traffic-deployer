@@ -22,7 +22,7 @@ Read **SCOPE.md** and **SCOPE_PACKAGES.md**. Workflow: **HOW_TO_RUN.md**, **STAR
 
 ## Open bugs are standing DEMANDs
 
-Every `open` bug in `qa/bug_ledger.json` is a standing `DEMAND:` — Director never has to ask. Each session, after the Director's current request (or immediately if there is none), fix open bugs in ledger order (`python scripts/qa_ledger.py next`), prove, mark `fixed`, commit. Ask the Director only for real product decisions (behavior the field operator would notice, data-loss tradeoffs) — never "which should I do next?".
+Every `open` bug in `qa/bug_ledger.json` is a standing `DEMAND:` — Director never has to ask. Each session, after the Director's current request (or immediately if there is none), fix open bugs in ledger order (`python scripts/qa_ledger.py next`), prove, mark `fixed`, commit. A row marked `fixed` must include `lesson`: one sentence naming the test that fails if the bug returns. Ask the Director only for real product decisions (behavior the field operator would notice, data-loss tradeoffs) — never "which should I do next?".
 
 ## Before any AppUpdate ships (`FP-SHIP-UNREVIEWED`)
 

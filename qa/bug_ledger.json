@@ -1,5 +1,5 @@
 {
-  "rules": "Every bug found and not fixed goes here. status: open | fixed | waived. severity: field-critical (loses work, bricks the app, or ships wrong data) | major | minor. Ship gate blocks on open field-critical unless director_waiver is set. rank = Director-approved order.",
+  "rules": "Every bug found and not fixed goes here. status: open | fixed | waived. severity: field-critical (loses work, bricks the app, or ships wrong data) | major | minor. Ship gate blocks on open field-critical unless director_waiver is set. rank = Director-approved order. A row marked fixed must include lesson: one sentence naming the test that fails if the bug returns.",
   "bugs": [
     {
       "id": "UPD-1",
@@ -10,7 +10,8 @@
       "found": "2026-09-25 bug sweep",
       "title": "A failed update can make the app close on every launch",
       "detail": "Relaunch loop when a staged update fails to apply; pending state is never cleared.",
-      "fixed": "2026-09-25 (scripts/test_updater_safety.py)"
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
+      "lesson": "A failed apply must stop relaunching after the retry limit and clear the staged bundle; scripts/test_updater_safety.py test_no_relaunch_loop fails if the app keeps closing on every launch."
     },
     {
       "id": "UPD-2",
@@ -21,7 +22,8 @@
       "found": "2026-09-25 bug sweep",
       "title": "No rollback if copying update files fails partway",
       "detail": "Install folder can be left half old, half new.",
-      "fixed": "2026-09-25 (scripts/test_updater_safety.py)"
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
+      "lesson": "A failed file copy must leave the live exe and _internal untouched and write the failed marker; scripts/test_updater_safety.py test_bat fails if a half-finished copy stays installed."
     },
     {
       "id": "UPD-3",
@@ -32,7 +34,8 @@
       "found": "2026-09-25 bug sweep",
       "title": "A leftover older staged update can downgrade the app",
       "detail": "Staged version is not compared against the running version before applying.",
-      "fixed": "2026-09-25 (scripts/test_updater_safety.py)"
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
+      "lesson": "An older or unknown staged bundle must be dropped and not applied; scripts/test_updater_safety.py test_no_downgrade fails if a leftover update downgrades the app."
     },
     {
       "id": "UPD-4",
@@ -43,7 +46,8 @@
       "found": "2026-09-25 bug sweep",
       "title": "Updating from inside the app skips saving your work",
       "detail": "Updater path calls sys.exit without the normal close/persist sequence.",
-      "fixed": "2026-09-25 (scripts/test_updater_safety.py)"
+      "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
+      "lesson": "An in-app update must save the shift before exit and must not exit when that save fails; scripts/test_updater_safety.py test_save_before_exit fails if the updater quits without saving."
     },
     {
       "id": "UPD-5",
@@ -54,7 +58,8 @@
       "found": "2026-09-25 updater review",
       "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
       "title": "In-app update helper hung forever: launched with no console, tasklist|find never returned, so the update never installed and the app never reopened",
-      "detail": "Found by adversarial review; confirmed old flags never finish from a windowed parent. Now CREATE_NO_WINDOW + tasklist to file."
+      "detail": "Found by adversarial review; confirmed old flags never finish from a windowed parent. Now CREATE_NO_WINDOW + tasklist to file.",
+      "lesson": "The update helper launched from a windowed parent must finish and install; scripts/test_updater_safety.py test_bat fails if that launch never returns."
     },
     {
       "id": "UPD-6",
@@ -65,7 +70,8 @@
       "found": "2026-09-25 updater review",
       "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
       "title": "OPEN_APP.bat / FINISH_UPDATE.bat installed any staged update with no completeness check",
-      "detail": "Launcher now requires update_ready/.complete (written last by the app)."
+      "detail": "Launcher now requires update_ready/.complete (written last by the app).",
+      "lesson": "A staged bundle without a complete _internal must not be installed; scripts/test_updater_safety.py test_bat fails if an incomplete bundle replaces the live app."
     },
     {
       "id": "UPD-7",
@@ -76,7 +82,8 @@
       "found": "2026-09-25 updater review",
       "fixed": "2026-09-25 (scripts/test_updater_safety.py)",
       "title": "A half-copied staged update (disk full) could be installed and leave an app that will not start",
-      "detail": "Found by second review pass. .complete sentinel; partial copy dropped without blocking re-download."
+      "detail": "Found by second review pass. .complete sentinel; partial copy dropped without blocking re-download.",
+      "lesson": "A partial ready copy must not be offered and must be removed without freezing that version as a permanent failure; scripts/test_updater_safety.py test_no_downgrade fails if a half-copied update is installed."
     },
     {
       "id": "RTE-1",
@@ -87,7 +94,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_route_sections.py)",
       "title": "Picking in the Together view loses picks and Apply loops",
-      "detail": "Together restored an empty pick list, and Apply did not name the day so the pick queue started over."
+      "detail": "Together restored an empty pick list, and Apply did not name the day so the pick queue started over.",
+      "lesson": "Together must keep the day being picked, and Apply must advance that day queue; scripts/test_route_sections.py test_excel_day_not_only_together fails if picks vanish or Apply starts over."
     },
     {
       "id": "RTE-2",
@@ -98,7 +106,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_route_sections.py)",
       "title": "\"Pick order...\" resets other days to file order",
-      "detail": "Reloading Excel/.EST for a new pick replaced every day's visit order. Other days now keep theirs."
+      "detail": "Reloading Excel/.EST for a new pick replaced every day's visit order. Other days now keep theirs.",
+      "lesson": "Pick order on one day must leave the other day visit order and route in place; scripts/test_route_sections.py test_excel_day_not_only_together fails if another day resets to file order."
     },
     {
       "id": "RTE-3",
@@ -109,7 +118,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_route_sections.py)",
       "title": "Merging days leaves each day's route out of date",
-      "detail": "Merge reordered every site but left each day's saved line on the old visit order. Each day is now retraced in the new order; a day that fails to trace drops the old line."
+      "detail": "Merge reordered every site but left each day's saved line on the old visit order. Each day is now retraced in the new order; a day that fails to trace drops the old line.",
+      "lesson": "Merging days must retrace each day in the new visit order and drop a day that was not traced; scripts/test_route_sections.py test_days_merged_view fails if a day keeps its pre-merge line."
     },
     {
       "id": "RTE-4",
@@ -120,7 +130,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_route_sections.py)",
       "title": "Drive times are wrong when a day filter is on",
-      "detail": "Day-filtered time legs were indexed by the full stop list. Route and install clocks now use that day's own order."
+      "detail": "Day-filtered time legs were indexed by the full stop list. Route and install clocks now use that day's own order.",
+      "lesson": "Drive time with a day filter must use that day own legs; scripts/test_route_sections.py test_day_filter_drive_time fails if filtered clocks use the full stop list."
     },
     {
       "id": "RTE-5",
@@ -131,7 +142,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "Pick mode stays active after switching to the Install tab",
-      "detail": "Leaving Route pauses pick mode. Install map clicks select the site and Drop pin is available. The unapplied order returns when Route is opened again."
+      "detail": "Leaving Route pauses pick mode. Install map clicks select the site and Drop pin is available. The unapplied order returns when Route is opened again.",
+      "lesson": "Leaving Route must pause pick mode so Install clicks select the site; scripts/test_bug_sweep.py test_pick_pauses_on_install fails if pick mode stays active on the Install tab."
     },
     {
       "id": "IMP-1",
@@ -142,7 +154,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "A site ID can falsely match coordinate digits inside a map file",
-      "detail": "Site ids match a pushpin name or a whole token. Digits inside a coordinate such as -117.5057 are not a site."
+      "detail": "Site ids match a pushpin name or a whole token. Digits inside a coordinate such as -117.5057 are not a site.",
+      "lesson": "A site id must match a pushpin name or a whole token, not digits inside a coordinate; scripts/test_bug_sweep.py test_est_id_not_coordinate fails if a coordinate fragment becomes a site."
     },
     {
       "id": "IMP-2",
@@ -153,7 +166,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "Duplicate site IDs: import keeps the first copy, export keeps the last",
-      "detail": "Import and export both keep the first copy of a site id. A later copy is written on export only when it has more field work."
+      "detail": "Import and export both keep the first copy of a site id. A later copy is written on export only when it has more field work.",
+      "lesson": "Import and export must both keep the first copy of a site id; scripts/test_bug_sweep.py test_duplicate_site_id fails if export keeps a later duplicate instead."
     },
     {
       "id": "IMP-3",
@@ -164,7 +178,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "A title row above the headers finds zero sites",
-      "detail": "The importer scans the first rows for a site/lat/lon header, so a title above the columns is skipped."
+      "detail": "The importer scans the first rows for a site/lat/lon header, so a title above the columns is skipped.",
+      "lesson": "The importer must find a site/lat/lon header below a title row; scripts/test_bug_sweep.py test_title_row_above_headers fails if a title row yields zero sites."
     },
     {
       "id": "MAP-1",
@@ -175,7 +190,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "Large or retried road downloads lose roads that cross tile edges",
-      "detail": "Tiles overlap, and each download keeps roads that cross the tile edge. The smaller-tile retry uses the same boxes."
+      "detail": "Tiles overlap, and each download keeps roads that cross the tile edge. The smaller-tile retry uses the same boxes.",
+      "lesson": "A road download must keep roads that cross a tile edge, including the smaller-tile retry; scripts/test_bug_sweep.py test_tile_edge_roads fails if edge-crossing roads are dropped."
     },
     {
       "id": "ONL-1",
@@ -186,7 +202,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "Going online freezes the screen during street lookup and can overwrite typed streets",
-      "detail": "Street lookup runs on a background thread. A street the operator typed is not replaced."
+      "detail": "Street lookup runs on a background thread. A street the operator typed is not replaced.",
+      "lesson": "Street lookup must run off the UI thread and must not replace a street the operator typed; scripts/test_bug_sweep.py test_online_street_lookup fails if going online freezes or overwrites a typed street."
     },
     {
       "id": "PERF-1",
@@ -197,7 +214,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "local_server reads whole files into memory for every request",
-      "detail": "Map responses are streamed in 64 KB chunks, including range reads of the basemap."
+      "detail": "Map responses are streamed in 64 KB chunks, including range reads of the basemap.",
+      "lesson": "Map responses must stream in chunks, including range reads; scripts/test_bug_sweep.py test_local_server_streams fails if a request reads the whole file into memory."
     },
     {
       "id": "PERF-2",
@@ -208,7 +226,8 @@
       "found": "2026-09-25 bug sweep",
       "fixed": "2026-09-28 (scripts/test_bug_sweep.py)",
       "title": "volume_report / picocount_hits are O(n^2) (currently unused)",
-      "detail": "Hose hits pair in one forward pass. A parsed study stream is skipped instead of re-read at every byte. Volume hours are grouped by day once."
+      "detail": "Hose hits pair in one forward pass. A parsed study stream is skipped instead of re-read at every byte. Volume hours are grouped by day once.",
+      "lesson": "Hose hits must pair in one forward pass and volume hours must group by day once; scripts/test_bug_sweep.py test_hit_pairing_linear fails if those scans go quadratic."
     }
   ]
 }
